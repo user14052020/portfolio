@@ -1,0 +1,76 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+.fleet/
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+
+# Frontend / Node / Next
+node_modules/
+.next/
+.next-development/
+.next-production/
+out/
+dist/
+build/
+coverage/
+.turbo/
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# Logs / local runtime artifacts
+*.log
+*.pid
+logs/
+tmp/
+temp/
+
+# Archives / backups
+*.bak
+*.tmp
+*.orig
+*.zip
+*.tar
+*.tar.gz
+
+# Media generated locally
+media/*
+!media/.gitkeep
+
+# App-specific caches and generated files
+apps/backend/.pytest_cache/
+apps/backend/.mypy_cache/
+apps/backend/__pycache__/
+apps/backend/media/*
+!apps/backend/media/.gitkeep
+
+apps/frontend/.next/
+apps/frontend/.next-development/
+apps/frontend/.next-production/
+apps/frontend/node_modules/
+
+# Local infra helpers
+.docker/

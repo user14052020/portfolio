@@ -1,0 +1,48 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import ORJSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.api.router import api_router
+from app.core.config import get_settings
+from app.integrations.elasticsearch import close_elasticsearch_client
+from app.services.search import search_service
+
+
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings.media_root.mkdir(parents=True, exist_ok=True)
+    await search_service.ensure_indices()
+    yield
+    await close_elasticsearch_client()
+
+
+app = FastAPI(
+    title=settings.project_name,
+    version="1.0.0",
+    default_response_class=ORJSONResponse,
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount(settings.media_url, StaticFiles(directory=settings.media_root), name="media")
+app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+
+@app.get("/health")
+async def healthcheck() -> dict[str, str]:
+    return {"status": "ok"}
+

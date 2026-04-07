@@ -32,7 +32,16 @@ class Settings(BaseSettings):
 
     comfyui_base_url: str = Field(..., alias="COMFYUI_BASE_URL")
     comfyui_client_id: str = Field("portfolio-client", alias="COMFYUI_CLIENT_ID")
-    comfyui_checkpoint_name: str = Field("v1-5-pruned-emaonly.safetensors", alias="COMFYUI_CHECKPOINT_NAME")
+    comfyui_diffusion_model_name: str = Field(
+        "flux1-krea-dev_fp8_scaled.safetensors", alias="COMFYUI_DIFFUSION_MODEL_NAME"
+    )
+    comfyui_text_encoder_t5_name: str = Field(
+        "t5xxl_fp8_e4m3fn.safetensors", alias="COMFYUI_TEXT_ENCODER_T5_NAME"
+    )
+    comfyui_text_encoder_clip_l_name: str = Field(
+        "clip_l.safetensors", alias="COMFYUI_TEXT_ENCODER_CLIP_L_NAME"
+    )
+    comfyui_vae_name: str = Field("ae.safetensors", alias="COMFYUI_VAE_NAME")
     comfyui_workflow_template: Path = Field(
         Path("app/integrations/workflows/fashion_flatlay.json"), alias="COMFYUI_WORKFLOW_TEMPLATE"
     )
@@ -41,7 +50,15 @@ class Settings(BaseSettings):
     vllm_api_key: str | None = Field(None, alias="VLLM_API_KEY")
     vllm_timeout_seconds: float = Field(45.0, alias="VLLM_TIMEOUT_SECONDS")
     vllm_temperature: float = Field(0.2, alias="VLLM_TEMPERATURE")
-    vllm_max_tokens: int = Field(700, alias="VLLM_MAX_TOKENS")
+    vllm_max_tokens: int = Field(420, alias="VLLM_MAX_TOKENS")
+    chat_message_cooldown_seconds: int = Field(60, alias="CHAT_MESSAGE_COOLDOWN_SECONDS")
+    generation_job_timeout_seconds: int = Field(300, alias="GENERATION_JOB_TIMEOUT_SECONDS")
+    generation_queue_refresh_cooldown_seconds: int = Field(60, alias="GENERATION_QUEUE_REFRESH_COOLDOWN_SECONDS")
+    generation_dispatch_lock_timeout_seconds: int = Field(30, alias="GENERATION_DISPATCH_LOCK_TIMEOUT_SECONDS")
+    comfyui_stalled_job_seconds: int = Field(180, alias="COMFYUI_STALLED_JOB_SECONDS")
+    comfyui_stalled_job_auto_interrupt: bool = Field(True, alias="COMFYUI_STALLED_JOB_AUTO_INTERRUPT")
+    generation_job_poll_interval_seconds: int = Field(10, alias="GENERATION_JOB_POLL_INTERVAL_SECONDS")
+    enable_generation_job_poller: bool = Field(True, alias="ENABLE_GENERATION_JOB_POLLER")
     enable_search_indexing: bool = Field(True, alias="ENABLE_SEARCH_INDEXING")
 
     @field_validator("cors_origins", mode="before")

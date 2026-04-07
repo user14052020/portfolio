@@ -22,7 +22,8 @@
 - project root: `C:\dev\portfolio`
 - ComfyUI root: `C:\dev\ComfyUI`
 - Python venv: `C:\dev\ComfyUI\venv`
-- start script: `C:\dev\Scripts\start_comfyui.bat`
+- production start script: `C:\dev\Scripts\start_comfyui.bat`
+- maintenance start script: `C:\dev\Scripts\start_comfyui_maintenance.bat`
 - logs: `C:\dev\ServiceLogs\ComfyUI\YYYY-MM-DD.log`
 
 ### Network
@@ -54,16 +55,22 @@ Backend env:
 
 - `COMFYUI_BASE_URL`
 - `COMFYUI_CLIENT_ID`
-- `COMFYUI_CHECKPOINT_NAME`
+- `COMFYUI_DIFFUSION_MODEL_NAME`
+- `COMFYUI_TEXT_ENCODER_T5_NAME`
+- `COMFYUI_TEXT_ENCODER_CLIP_L_NAME`
+- `COMFYUI_VAE_NAME`
 - `COMFYUI_WORKFLOW_TEMPLATE`
 
 Workflow template:
 
 - `apps/backend/app/integrations/workflows/fashion_flatlay.json`
 
-Current checkpoint configured for this project:
+Current model stack configured for this project:
 
-- `COMFYUI_CHECKPOINT_NAME=v1-5-pruned-emaonly.safetensors`
+- `COMFYUI_DIFFUSION_MODEL_NAME=flux1-krea-dev_fp8_scaled.safetensors`
+- `COMFYUI_TEXT_ENCODER_T5_NAME=t5xxl_fp8_e4m3fn.safetensors`
+- `COMFYUI_TEXT_ENCODER_CLIP_L_NAME=clip_l.safetensors`
+- `COMFYUI_VAE_NAME=ae.safetensors`
 
 ## Как устанавливался и где лежит после установки
 
@@ -159,12 +166,15 @@ exit /b %EXITCODE%
 
 Теперь это вынесено в env:
 
-- `COMFYUI_CHECKPOINT_NAME`
+- `COMFYUI_DIFFUSION_MODEL_NAME`
+- `COMFYUI_TEXT_ENCODER_T5_NAME`
+- `COMFYUI_TEXT_ENCODER_CLIP_L_NAME`
+- `COMFYUI_VAE_NAME`
 
 Если ошибка повторится, первым делом проверять:
 
 - существует ли checkpoint из env в установленном `ComfyUI`;
-- совпадает ли `COMFYUI_CHECKPOINT_NAME` со списком доступных моделей;
+- совпадают ли `COMFYUI_DIFFUSION_MODEL_NAME`, `COMFYUI_TEXT_ENCODER_T5_NAME`, `COMFYUI_TEXT_ENCODER_CLIP_L_NAME` и `COMFYUI_VAE_NAME` со списком доступных моделей;
 - какой точный body вернул `ComfyUI`.
 
 То есть теперь причина `400` должна быть видна существенно точнее, чем раньше.
@@ -192,3 +202,74 @@ curl.exe http://192.168.50.141:8188/
 ```bash
 docker compose exec backend curl -fsS http://192.168.50.141:8188/ > /dev/null && echo COMFYUI_OK
 ```
+
+## Current Runtime Model Stack
+
+The project is now configured for `FLUX.1 Krea dev` rather than the older `SD1.5` checkpoint flow.
+
+Current env-backed model names:
+
+- `COMFYUI_DIFFUSION_MODEL_NAME=flux1-krea-dev_fp8_scaled.safetensors`
+- `COMFYUI_TEXT_ENCODER_T5_NAME=t5xxl_fp8_e4m3fn.safetensors`
+- `COMFYUI_TEXT_ENCODER_CLIP_L_NAME=clip_l.safetensors`
+- `COMFYUI_VAE_NAME=ae.safetensors`
+
+Current workflow template:
+
+- `apps/backend/app/integrations/workflows/fashion_flatlay.json`
+
+## Generation Job Controls
+
+Backend now enforces one active generation job per chat session.
+
+Operational behavior:
+
+- a new generation is not queued if the same session already has an active job;
+- active jobs are polled by the backend automatically;
+- a stuck job is auto-stopped after `GENERATION_JOB_TIMEOUT_SECONDS`;
+- admin UI supports `cancel` and `delete`;
+- every control action is written into the job operation log.
+
+Current env knobs:
+
+- `GENERATION_JOB_TIMEOUT_SECONDS=0` disables auto-timeout; any positive number restores the limit in seconds
+- `GENERATION_JOB_POLL_INTERVAL_SECONDS=10`
+- `ENABLE_GENERATION_JOB_POLLER=true`
+- `COMFYUI_STALLED_JOB_SECONDS=180`
+- `COMFYUI_STALLED_JOB_AUTO_INTERRUPT=true`
+
+## Production Hardening
+
+For this project's API workflow, the image template uses only Comfy Core nodes:
+
+- `CLIPTextEncode`
+- `ConditioningZeroOut`
+- `DualCLIPLoader`
+- `EmptySD3LatentImage`
+- `KSampler`
+- `SaveImage`
+- `UNETLoader`
+- `VAEDecode`
+- `VAELoader`
+
+That means the production runtime does not need third-party custom nodes.
+
+The production startup script now runs ComfyUI in a hardened mode:
+
+```bat
+--listen 0.0.0.0
+--port 8188
+--disable-auto-launch
+--preview-method none
+--reserve-vram 2
+--disable-all-custom-nodes
+--verbose INFO
+```
+
+Rationale:
+
+- `--disable-all-custom-nodes` removes unrelated custom node risk from the API generation path;
+- `--preview-method none` reduces preview overhead and saves memory;
+- `--reserve-vram 2` leaves headroom for Windows and reduces pressure on a long-running host process.
+
+If custom nodes or Manager are needed for manual experiments, use the maintenance script instead of the production one.

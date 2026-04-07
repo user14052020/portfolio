@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -13,6 +14,7 @@ class StylistMessageRequest(BaseModel):
     locale: str = "en"
     message: str | None = None
     uploaded_asset_id: int | None = None
+    requested_intent: Literal["garment_matching", "style_exploration", "occasion_outfit"] | None = None
     profile_gender: str | None = None
     body_height_cm: int | None = None
     body_weight_kg: int | None = None
@@ -29,6 +31,12 @@ class ChatMessageRead(TimestampedRead):
     generation_job: GenerationJobRead | None = None
     uploaded_asset: UploadedAssetRead | None = None
     payload: dict
+
+
+class ChatHistoryPageRead(BaseModel):
+    items: list[ChatMessageRead]
+    has_more: bool
+    next_before_message_id: int | None = None
 
 
 class StylistMessageResponse(BaseModel):

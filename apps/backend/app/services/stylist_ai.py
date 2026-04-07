@@ -242,6 +242,9 @@ class StylistService:
                 auto_generate=auto_generate,
                 conversation_history=conversation_history,
                 profile_context=profile_context,
+                session_intent="general_advice",
+                style_seed=None,
+                previous_style_directions=[],
             )
             return StylistDecision(
                 reply_ru=result.reply_ru,
@@ -711,14 +714,16 @@ class StylistService:
             gender_part = " Prefer a womenswear-oriented wardrobe vocabulary."
 
         return (
-            "Premium editorial flat-lay fashion composition, garments and accessories only, no human model, "
-            "no portrait, no person wearing the look. "
+            "Luxury Pinterest-worthy glossy editorial flat lay photographed from directly overhead, garments and accessories only, "
+            "no human model, no portrait, no person wearing the look, no mannequin. "
+            "Compose one coherent outfit carefully arranged on a clean premium surface such as stone, paper, wood, or fabric backdrop. "
+            "Leave breathing room between items, keep spacing elegant, balanced, and magazine-like. "
             "If the user did not lock the wardrobe direction, default to an everyday business outfit. "
             "Direction: refined classic or business smart-casual wardrobe with tailored trousers, crisp shirting, "
             "fine-gauge knitwear, a structured blazer or clean outer layer, polished leather footwear, restrained palette, "
-            "premium fabrics, soft studio light, clean shadows, intentional styling, elevated but wearable finish. "
+            "premium fabrics, crisp fabric texture, soft luxury studio light, clean shadows, elevated but wearable finish. "
             "If the brief is more casual, translate it toward a cleaner wardrobe by replacing hoodies with pullovers "
-            "or other structured knit layers. "
+            "or other structured knit layers. Avoid clutter, duplicate items, collage layout, warped garments, or chaotic styling. "
             f"User request: {user_message}. "
             f"Stylist direction: {recommendation_en}."
             f"{asset_part}{body_part}{gender_part}"

@@ -26,6 +26,35 @@ class ChatMessagesRepository(BaseRepository[ChatMessage]):
         items.reverse()
         return items
 
+    async def list_page_by_session(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        limit: int = 5,
+        before_message_id: int | None = None,
+    ) -> tuple[list[ChatMessage], bool]:
+        statement = (
+            select(ChatMessage)
+            .options(
+                joinedload(ChatMessage.uploaded_asset),
+                joinedload(ChatMessage.generation_job).joinedload(GenerationJob.input_asset),
+            )
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+            .limit(limit + 1)
+        )
+        if before_message_id is not None:
+            statement = statement.where(ChatMessage.id < before_message_id)
+
+        result = await session.execute(statement)
+        items = list(result.scalars().all())
+        has_more = len(items) > limit
+        if has_more:
+            items = items[:limit]
+        items.reverse()
+        return items, has_more
+
     async def get_with_relations(self, session: AsyncSession, message_id: int) -> ChatMessage | None:
         result = await session.execute(
             select(ChatMessage)
@@ -43,6 +72,18 @@ class ChatMessagesRepository(BaseRepository[ChatMessage]):
             .where(
                 ChatMessage.session_id == session_id,
                 ChatMessage.role == ChatMessageRole.USER,
+            )
+            .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_latest_assistant_message(self, session: AsyncSession, session_id: str) -> ChatMessage | None:
+        result = await session.execute(
+            select(ChatMessage)
+            .where(
+                ChatMessage.session_id == session_id,
+                ChatMessage.role == ChatMessageRole.ASSISTANT,
             )
             .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
             .limit(1)

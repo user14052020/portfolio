@@ -37,6 +37,12 @@ class GenerationJobRead(TimestampedRead):
     body_weight_kg: int | None = None
     error_message: str | None = None
     provider_payload: dict
+    operation_log: list[dict]
     started_at: datetime | None = None
     completed_at: datetime | None = None
-
+    deleted_at: datetime | None = None
+    queue_position: int | None = None
+    queue_ahead: int | None = None
+    queue_total: int | None = None
+    queue_refresh_available_at: datetime | None = None
+    queue_refresh_retry_after_seconds: int | None = None

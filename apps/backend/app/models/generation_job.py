@@ -12,6 +12,7 @@ class GenerationJob(Base, TimestampedMixin):
     __table_args__ = (
         Index("ix_generation_jobs_status_created_at", "status", "created_at"),
         Index("ix_generation_jobs_session_id", "session_id"),
+        Index("ix_generation_jobs_deleted_at", "deleted_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -35,8 +36,10 @@ class GenerationJob(Base, TimestampedMixin):
     body_weight_kg: Mapped[int | None] = mapped_column(nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    operation_log: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     input_asset = relationship("UploadedAsset")
     messages = relationship("ChatMessage", back_populates="generation_job")

@@ -1,11 +1,15 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
-from app.schemas.stylist import ChatMessageRead, StylistMessageRequest, StylistMessageResponse
-from app.services.stylist_ai import stylist_service
+from app.schemas.stylist import (
+    ChatHistoryPageRead,
+    StylistMessageRequest,
+    StylistMessageResponse,
+)
+from app.services.stylist_conversational import stylist_service
 
 
 router = APIRouter(prefix="/stylist-chat", tags=["stylist-chat"])
@@ -21,9 +25,17 @@ async def send_stylist_message(
     return StylistMessageResponse.model_validate(result)
 
 
-@router.get("/history/{session_id}", response_model=list[ChatMessageRead])
+@router.get("/history/{session_id}", response_model=ChatHistoryPageRead)
 async def get_chat_history(
     session_id: str,
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> list[ChatMessageRead]:
-    return await stylist_service.get_history(session, session_id)
+    limit: int = Query(5, ge=1, le=20),
+    before_message_id: int | None = Query(None, ge=1),
+) -> ChatHistoryPageRead:
+    result = await stylist_service.get_history_page(
+        session,
+        session_id,
+        limit=limit,
+        before_message_id=before_message_id,
+    )
+    return ChatHistoryPageRead.model_validate(result)

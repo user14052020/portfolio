@@ -9,6 +9,9 @@ from app.models import (
     ProjectMedia,
     Role,
     SiteSettings,
+    StyleDirection,
+    StylistSessionState,
+    StylistStyleExposure,
     UploadedAsset,
     User,
 )
@@ -26,5 +29,7 @@ __all__ = [
     "UploadedAsset",
     "ChatMessage",
     "PageScene",
+    "StyleDirection",
+    "StylistSessionState",
+    "StylistStyleExposure",
 ]
-

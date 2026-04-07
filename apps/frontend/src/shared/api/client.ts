@@ -1,6 +1,7 @@
 import { env } from "@/shared/config/env";
 import type {
   BlogPost,
+  ChatHistoryPage,
   ContactRequest,
   GenerationJob,
   Project,
@@ -61,10 +62,14 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     }
 
     if (payload) {
-      const error = new Error(
+      const detail =
         typeof payload.detail === "string"
           ? payload.detail
-          : text || `API request failed with status ${response.status}`
+          : payload.detail && typeof payload.detail === "object" && "message" in payload.detail
+            ? String((payload.detail as { message?: unknown }).message ?? "").trim()
+            : "";
+      const error = new Error(
+        detail || text || `API request failed with status ${response.status}`
       ) as Error & { status?: number; payload?: unknown };
       error.status = response.status;
       error.payload = payload;
@@ -273,6 +278,7 @@ export async function sendStylistMessage(payload: {
   locale: string;
   message?: string;
   uploaded_asset_id?: number;
+  requested_intent?: "garment_matching" | "style_exploration" | "occasion_outfit";
   profile_gender?: string;
   body_height_cm?: number;
   body_weight_kg?: number;
@@ -285,7 +291,27 @@ export async function sendStylistMessage(payload: {
 }
 
 export async function getChatHistory(sessionId: string) {
-  return request<StylistMessageResponse["assistant_message"][]>(`/stylist-chat/history/${sessionId}`);
+  return request<ChatHistoryPage>(`/stylist-chat/history/${sessionId}`, {
+    query: {
+      limit: 5,
+      before_message_id: undefined
+    }
+  });
+}
+
+export async function getChatHistoryPage(
+  sessionId: string,
+  params?: {
+    limit?: number;
+    beforeMessageId?: number | null;
+  }
+) {
+  return request<ChatHistoryPage>(`/stylist-chat/history/${sessionId}`, {
+    query: {
+      limit: params?.limit,
+      before_message_id: params?.beforeMessageId ?? undefined
+    }
+  });
 }
 
 export async function createGenerationJob(payload: Record<string, unknown>) {
@@ -299,12 +325,32 @@ export async function getGenerationJob(publicId: string) {
   return request<GenerationJob>(`/generation-jobs/${publicId}`);
 }
 
+export async function refreshGenerationJobQueue(publicId: string) {
+  return request<GenerationJob>(`/generation-jobs/${publicId}/refresh-queue`, {
+    method: "POST"
+  });
+}
+
 export async function getGenerationJobs(token: string) {
   return request<GenerationJob[]>("/generation-jobs", { token });
 }
 
 export async function getGenerationJobsBySession(sessionId: string) {
   return request<GenerationJob[]>(`/generation-jobs/session/${sessionId}`);
+}
+
+export async function cancelGenerationJob(publicId: string, token: string) {
+  return request<GenerationJob>(`/generation-jobs/${publicId}/cancel`, {
+    method: "POST",
+    token
+  });
+}
+
+export async function deleteGenerationJob(publicId: string, token: string) {
+  return request<GenerationJob>(`/generation-jobs/${publicId}`, {
+    method: "DELETE",
+    token
+  });
 }
 
 export async function loginAdmin(email: string, password: string) {

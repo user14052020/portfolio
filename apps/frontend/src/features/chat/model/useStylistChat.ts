@@ -1,19 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { getChatHistory, getGenerationJob, sendStylistMessage, uploadAsset } from "@/shared/api/client";
+import {
+  getChatHistoryPage,
+  getGenerationJob,
+  refreshGenerationJobQueue,
+  sendStylistMessage,
+  uploadAsset
+} from "@/shared/api/client";
 import type { ChatMessage, GenerationJob, Locale, UploadedAsset } from "@/shared/api/types";
 
-const MESSAGE_COOLDOWN_MS = 60_000;
 const SESSION_STORAGE_KEY = "portfolio-chat-session";
 const CHAT_STATE_STORAGE_KEY_PREFIX = "portfolio-chat-state";
+const GENERATION_STATUS_POLL_INTERVAL_MS = 10000;
+const INITIAL_HISTORY_PAGE_SIZE = 5;
+const MESSAGE_COOLDOWN_SECONDS = 60;
 
 type PersistedChatState = {
   messages: ChatMessage[];
   uploadedAsset: UploadedAsset | null;
   activeJob: GenerationJob | null;
-  cooldownUntil: number | null;
   profileGender: string;
   bodyHeightCm: string;
   bodyWeightKg: string;
@@ -21,6 +28,7 @@ type PersistedChatState = {
 };
 
 type BackendState = "connecting" | "connected" | "error";
+type ChatAvailability = "online" | "offline";
 
 type ProfileField = "gender" | "height_cm" | "weight_kg";
 
@@ -78,7 +86,6 @@ function readPersistedChatState(sessionId: string): PersistedChatState | null {
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
       uploadedAsset: parsed.uploadedAsset ?? null,
       activeJob: parsed.activeJob ?? null,
-      cooldownUntil: typeof parsed.cooldownUntil === "number" ? parsed.cooldownUntil : null,
       profileGender: typeof parsed.profileGender === "string" ? parsed.profileGender : "",
       bodyHeightCm: typeof parsed.bodyHeightCm === "string" ? parsed.bodyHeightCm : "",
       bodyWeightKg: typeof parsed.bodyWeightKg === "string" ? parsed.bodyWeightKg : "",
@@ -101,10 +108,6 @@ function writePersistedChatState(sessionId: string, state: PersistedChatState) {
   }
 }
 
-function getLastUserMessage(messages: ChatMessage[]) {
-  return [...messages].reverse().find((message) => message.role === "user");
-}
-
 function getLastAssistantMessage(messages: ChatMessage[]) {
   return [...messages].reverse().find((message) => message.role === "assistant");
 }
@@ -113,35 +116,64 @@ function isProfileClarificationMessage(message: ChatMessage | undefined) {
   return message?.role === "assistant" && message.payload?.kind === "profile_clarification";
 }
 
-function getCooldownUntil(messages: ChatMessage[]) {
-  const lastUserMessage = getLastUserMessage(messages);
-  if (!lastUserMessage) {
-    return null;
-  }
-
-  const lastAssistantMessage = getLastAssistantMessage(messages);
-  if (
-    isProfileClarificationMessage(lastAssistantMessage) &&
-    new Date(lastAssistantMessage.created_at).getTime() >= new Date(lastUserMessage.created_at).getTime()
-  ) {
-    return null;
-  }
-
-  const createdAt = new Date(lastUserMessage.created_at).getTime();
-  if (!Number.isFinite(createdAt)) {
-    return null;
-  }
-
-  const nextAvailableAt = createdAt + MESSAGE_COOLDOWN_MS;
-  return nextAvailableAt > Date.now() ? nextAvailableAt : null;
-}
-
 function getLatestGenerationJob(messages: ChatMessage[]) {
   return (
     [...messages]
       .reverse()
       .find((message) => message.role === "assistant" && message.generation_job)?.generation_job ?? null
   );
+}
+
+function isGenerationJobActive(job: GenerationJob | null) {
+  return job?.status === "pending" || job?.status === "queued" || job?.status === "running";
+}
+
+function isGenerationJobQueued(job: GenerationJob | null) {
+  return job?.status === "pending";
+}
+
+function getLastUserMessage(messages: ChatMessage[]) {
+  return [...messages].reverse().find((message) => message.role === "user");
+}
+
+function getLastAssistantMessageForCooldown(messages: ChatMessage[]) {
+  return [...messages].reverse().find((message) => message.role === "assistant");
+}
+
+function getMessageCooldownEndsAt(messages: ChatMessage[]) {
+  const lastAssistantMessage = getLastAssistantMessageForCooldown(messages);
+  if (!lastAssistantMessage?.created_at) {
+    return null;
+  }
+
+  const lastSentAt = Date.parse(lastAssistantMessage.created_at);
+  if (Number.isNaN(lastSentAt)) {
+    return null;
+  }
+
+  return lastSentAt + MESSAGE_COOLDOWN_SECONDS * 1000;
+}
+
+function getRemainingSeconds(endsAt: number | null, now: number) {
+  if (!endsAt) {
+    return 0;
+  }
+
+  return Math.max(0, Math.ceil((endsAt - now) / 1000));
+}
+
+function getErrorPayloadDetail(error: unknown) {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const payload = (error as Error & { payload?: unknown }).payload;
+  if (!payload || typeof payload !== "object" || !("detail" in payload)) {
+    return null;
+  }
+
+  const detail = (payload as { detail?: unknown }).detail;
+  return detail && typeof detail === "object" ? (detail as Record<string, unknown>) : null;
 }
 
 function getPendingProfileFields(messages: ChatMessage[]): ProfileField[] {
@@ -174,6 +206,115 @@ function parseOptionalNumber(value: string) {
 
 function hasProfileDraft(profileGender: string, bodyHeightCm: string, bodyWeightKg: string) {
   return Boolean(profileGender || bodyHeightCm.trim() || bodyWeightKg.trim());
+}
+
+function getChatOfflineMessage(locale: Locale) {
+  return locale === "ru"
+    ? "Чат временно офлайн: языковая модель недоступна. Как только LLM снова поднимется, сообщения и команды снова станут доступны."
+    : "The chat is temporarily offline because the language model is unavailable. Messages and commands will become available again once it is back.";
+}
+
+function isServiceUnavailableError(error: unknown): error is Error & { status?: number } {
+  return false;
+}
+
+function shouldMarkChatOffline(error: unknown) {
+  if (isServiceUnavailableError(error)) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const status = typeof (error as { status?: number }).status === "number" ? (error as { status?: number }).status : undefined;
+  if (status === 502 || status === 504) {
+    return true;
+  }
+
+  return /failed to fetch|networkerror|load failed|fetch failed/i.test(error.message);
+}
+
+void getChatOfflineMessage;
+void shouldMarkChatOffline;
+
+function mergeHistoryIntoCurrent(current: ChatMessage[], history: ChatMessage[]) {
+  const historyKeys = new Set(
+    history.map(
+      (message) =>
+        `${message.role}::${message.content.trim()}::${message.uploaded_asset?.id ?? "no-asset"}::${message.generation_job?.public_id ?? "no-job"}`
+    )
+  );
+  const pendingMessages = current.filter((message) => {
+    if (message.id >= 0) {
+      return false;
+    }
+
+    const key = `${message.role}::${message.content.trim()}::${message.uploaded_asset?.id ?? "no-asset"}::${message.generation_job?.public_id ?? "no-job"}`;
+    return !historyKeys.has(key);
+  });
+  if (pendingMessages.length === 0) {
+    return history;
+  }
+
+  return [...history, ...pendingMessages];
+}
+
+function getInitialVisibleMessages(messages: ChatMessage[]) {
+  if (messages.length <= INITIAL_HISTORY_PAGE_SIZE) {
+    return messages;
+  }
+
+  const persistedMessageIds = new Set(
+    messages
+      .filter((message) => message.id >= 0)
+      .slice(-INITIAL_HISTORY_PAGE_SIZE)
+      .map((message) => message.id)
+  );
+
+  return messages.filter((message) => message.id < 0 || persistedMessageIds.has(message.id));
+}
+
+function prependHistoryPage(current: ChatMessage[], olderMessages: ChatMessage[]) {
+  if (olderMessages.length === 0) {
+    return current;
+  }
+
+  const currentIds = new Set(current.map((message) => message.id));
+  const uniqueOlderMessages = olderMessages.filter((message) => !currentIds.has(message.id));
+  if (uniqueOlderMessages.length === 0) {
+    return current;
+  }
+
+  return [...uniqueOlderMessages, ...current];
+}
+
+function mergeQueuedJobState(current: GenerationJob | null, next: GenerationJob) {
+  if (!current || current.status !== "pending" || next.status !== "pending") {
+    return next;
+  }
+
+  return {
+    ...next,
+    queue_position: next.queue_position ?? current.queue_position,
+    queue_ahead: next.queue_ahead ?? current.queue_ahead,
+    queue_total: next.queue_total ?? current.queue_total,
+    queue_refresh_available_at:
+      next.queue_refresh_available_at ?? current.queue_refresh_available_at,
+    queue_refresh_retry_after_seconds:
+      next.queue_refresh_retry_after_seconds ?? current.queue_refresh_retry_after_seconds,
+  };
+}
+
+function syncGenerationJobInMessages(current: ChatMessage[], nextJob: GenerationJob) {
+  return current.map((message) =>
+    message.generation_job?.public_id === nextJob.public_id
+      ? {
+          ...message,
+          generation_job: mergeQueuedJobState(message.generation_job, nextJob),
+        }
+      : message
+  );
 }
 
 function buildProfileSummary(
@@ -226,9 +367,15 @@ function buildDraftMessage(
 export function useStylistChat(locale: Locale) {
   const [bootstrap] = useState(() => {
     const nextSessionId = createSessionId();
+    const persistedState = readPersistedChatState(nextSessionId);
     return {
       sessionId: nextSessionId,
-      persistedState: readPersistedChatState(nextSessionId)
+      persistedState: persistedState
+        ? {
+            ...persistedState,
+            messages: getInitialVisibleMessages(persistedState.messages),
+          }
+        : null
     };
   });
   const sessionId = bootstrap.sessionId;
@@ -246,62 +393,83 @@ export function useStylistChat(locale: Locale) {
   const [activeJob, setActiveJob] = useState<GenerationJob | null>(
     () => persistedState?.activeJob ?? getLatestGenerationJob(persistedState?.messages ?? [])
   );
-  const [isHistoryLoading, setIsHistoryLoading] = useState(() => !persistedState);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(messages.length === 0);
+  const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [nextHistoryCursor, setNextHistoryCursor] = useState<number | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [backendState, setBackendState] = useState<BackendState>(() => (persistedState ? "connected" : "connecting"));
+  const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
+  const [backendState, setBackendState] = useState<BackendState>("connected");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [cooldownUntil, setCooldownUntil] = useState<number | null>(
-    () => persistedState?.cooldownUntil ?? getCooldownUntil(persistedState?.messages ?? [])
-  );
-  const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0);
   const [isGenerationPreparing, setIsGenerationPreparing] = useState(false);
   const [pendingProfileFields, setPendingProfileFields] = useState<ProfileField[]>(
     () => getPendingProfileFields(persistedState?.messages ?? [])
   );
+  const [clockTick, setClockTick] = useState(() => Date.now());
+  const messagesRef = useRef(messages);
+  const chatAvailability: ChatAvailability = "online";
+  const messageCooldownEndsAt = getMessageCooldownEndsAt(messages);
+  const messageCooldownRemainingSeconds = getRemainingSeconds(messageCooldownEndsAt, clockTick);
+  const queueRefreshAvailableAt = activeJob?.queue_refresh_available_at
+    ? Date.parse(activeJob.queue_refresh_available_at)
+    : null;
+  const queueRefreshRemainingSeconds = getRemainingSeconds(queueRefreshAvailableAt, clockTick);
+  const hasActiveGenerationJob = isGenerationJobActive(activeJob);
+  const isGenerationQueued = isGenerationJobQueued(activeJob);
+  const isEditorLocked = isSending || isUploading || isGenerationPreparing;
+  const isSendLocked = isEditorLocked || messageCooldownRemainingSeconds > 0;
+  const isGenerationActionLocked = isSendLocked || hasActiveGenerationJob || isRefreshingQueue;
+  const isQueueRefreshLocked =
+    !isGenerationQueued || isRefreshingQueue || queueRefreshRemainingSeconds > 0;
 
-  const syncHistory = useCallback((history: ChatMessage[]) => {
-    setMessages(history);
-    setCooldownUntil(getCooldownUntil(history));
-    setActiveJob(getLatestGenerationJob(history));
-    setPendingProfileFields(getPendingProfileFields(history));
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setClockTick(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
     let isMounted = true;
-    setBackendState("connecting");
-    getChatHistory(sessionId)
-      .then((history) => {
+    void getChatHistoryPage(sessionId, { limit: INITIAL_HISTORY_PAGE_SIZE })
+      .then((historyPage) => {
         if (!isMounted) {
           return;
         }
-        syncHistory(history);
+        const mergedHistory = mergeHistoryIntoCurrent(messagesRef.current, historyPage.items);
+        setMessages(mergedHistory);
+        setActiveJob((current) => getLatestGenerationJob(mergedHistory) ?? current);
+        setPendingProfileFields(getPendingProfileFields(mergedHistory));
+        setHasMoreHistory(historyPage.has_more);
+        setNextHistoryCursor(historyPage.next_before_message_id ?? null);
         setBackendState("connected");
         setErrorMessage(null);
         setIsHistoryLoading(false);
       })
       .catch(() => {
-        if (isMounted) {
-          setBackendState("error");
-          setErrorMessage(
-            locale === "ru"
-              ? "Нет ответа от backend. Проверьте API и логи контейнера backend."
-              : "The backend is not responding. Check the API and backend container logs."
-          );
-          setIsHistoryLoading(false);
+        if (!isMounted) {
+          return;
         }
+        setIsHistoryLoading(false);
       });
     return () => {
       isMounted = false;
     };
-  }, [locale, sessionId, syncHistory]);
+  }, [sessionId]);
 
   useEffect(() => {
     writePersistedChatState(sessionId, {
       messages,
       uploadedAsset,
       activeJob,
-      cooldownUntil,
       profileGender,
       bodyHeightCm,
       bodyWeightKg,
@@ -312,7 +480,6 @@ export function useStylistChat(locale: Locale) {
     messages,
     uploadedAsset,
     activeJob,
-    cooldownUntil,
     profileGender,
     bodyHeightCm,
     bodyWeightKg,
@@ -320,40 +487,31 @@ export function useStylistChat(locale: Locale) {
   ]);
 
   useEffect(() => {
-    if (!cooldownUntil) {
-      setCooldownRemainingMs(0);
+    if (
+      !activeJob ||
+      activeJob.status === "completed" ||
+      activeJob.status === "failed" ||
+      activeJob.status === "cancelled"
+    ) {
       return;
     }
+    let isCancelled = false;
 
-    const updateCooldown = () => {
-      const remaining = Math.max(0, cooldownUntil - Date.now());
-      setCooldownRemainingMs(remaining);
-      if (remaining === 0) {
-        setCooldownUntil(null);
-      }
-    };
-
-    updateCooldown();
-    const timer = window.setInterval(updateCooldown, 250);
-    return () => window.clearInterval(timer);
-  }, [cooldownUntil]);
-
-  useEffect(() => {
-    if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") {
-      return;
-    }
-    const timer = window.setInterval(async () => {
+    const syncActiveJob = async () => {
       try {
         const nextJob = await getGenerationJob(activeJob.public_id);
+        if (isCancelled) {
+          return;
+        }
+        const mergedJob = mergeQueuedJobState(activeJob, nextJob);
         setBackendState("connected");
         setErrorMessage(null);
-        setActiveJob(nextJob);
-        setMessages((current) =>
-          current.map((message) =>
-            message.generation_job?.public_id === nextJob.public_id ? { ...message, generation_job: nextJob } : message
-          )
-        );
+        setActiveJob(mergedJob);
+        setMessages((current) => syncGenerationJobInMessages(current, mergedJob));
       } catch {
+        if (isCancelled) {
+          return;
+        }
         setBackendState("error");
         setErrorMessage(
           locale === "ru"
@@ -361,11 +519,51 @@ export function useStylistChat(locale: Locale) {
             : "Could not refresh the generation status. Check the backend and ComfyUI."
         );
       }
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [activeJob, locale]);
+    };
+
+    void syncActiveJob();
+    const timer = window.setInterval(() => {
+      void syncActiveJob();
+    }, GENERATION_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeJob?.public_id, activeJob?.status, locale]);
+
+  const loadOlderHistory = async () => {
+    if (isLoadingOlderHistory || !hasMoreHistory || !nextHistoryCursor) {
+      return;
+    }
+
+    setIsLoadingOlderHistory(true);
+    try {
+      const historyPage = await getChatHistoryPage(sessionId, {
+        limit: INITIAL_HISTORY_PAGE_SIZE,
+        beforeMessageId: nextHistoryCursor,
+      });
+      setMessages((current) => prependHistoryPage(current, historyPage.items));
+      setHasMoreHistory(historyPage.has_more);
+      setNextHistoryCursor(historyPage.next_before_message_id ?? null);
+      setBackendState("connected");
+      setErrorMessage(null);
+    } catch {
+      setBackendState("error");
+      setErrorMessage(
+        locale === "ru"
+          ? "Не удалось загрузить более ранние сообщения."
+          : "Could not load older messages."
+      );
+    } finally {
+      setIsLoadingOlderHistory(false);
+    }
+  };
 
   const handleUpload = async (file: File) => {
+    if (isGenerationActionLocked) {
+      return;
+    }
     setIsUploading(true);
     try {
       const asset = await uploadAsset(file, undefined, "generation_input");
@@ -386,7 +584,7 @@ export function useStylistChat(locale: Locale) {
 
   const handleSend = async () => {
     const profileDraftExists = hasProfileDraft(profileGender, bodyHeightCm, bodyWeightKg);
-    if ((!input.trim() && !uploadedAsset && !profileDraftExists) || cooldownRemainingMs > 0) {
+    if ((!input.trim() && !uploadedAsset && !profileDraftExists) || isSendLocked) {
       return;
     }
 
@@ -397,8 +595,9 @@ export function useStylistChat(locale: Locale) {
     const draftBodyWeightKg = bodyWeightKg;
     const draftAutoGenerate = autoGenerate;
     const draftProfileSummary = buildProfileSummary(locale, draftProfileGender, draftBodyHeightCm, draftBodyWeightKg);
-    const previousCooldownUntil = cooldownUntil;
+    const requestedIntent = draftUploadedAsset ? "garment_matching" : undefined;
     const previousActiveJob = activeJob;
+    const hasQueuedOrRunningGeneration = isGenerationJobActive(previousActiveJob);
     const optimisticMessageId = -Math.floor(Date.now() + Math.random() * 1000);
     const optimisticUserMessage: ChatMessage = {
       id: optimisticMessageId,
@@ -421,12 +620,10 @@ export function useStylistChat(locale: Locale) {
     };
 
     setMessages((current) => [...current, optimisticUserMessage]);
-    setCooldownUntil(Date.now() + MESSAGE_COOLDOWN_MS);
-    setCooldownRemainingMs(MESSAGE_COOLDOWN_MS);
     setInput("");
     setUploadedAsset(null);
-    setActiveJob(null);
-    setIsGenerationPreparing(draftAutoGenerate);
+    setActiveJob(previousActiveJob);
+    setIsGenerationPreparing(draftAutoGenerate && !hasQueuedOrRunningGeneration);
     setIsSending(true);
     setErrorMessage(null);
     setBackendState("connecting");
@@ -437,10 +634,11 @@ export function useStylistChat(locale: Locale) {
         locale,
         message: draftInput.trim() || (!draftUploadedAsset && draftProfileSummary ? draftProfileSummary : undefined),
         uploaded_asset_id: draftUploadedAsset?.id,
+        requested_intent: requestedIntent,
         profile_gender: draftProfileGender || undefined,
         body_height_cm: parseOptionalNumber(draftBodyHeightCm),
         body_weight_kg: parseOptionalNumber(draftBodyWeightKg),
-        auto_generate: draftAutoGenerate
+        auto_generate: draftAutoGenerate && !hasQueuedOrRunningGeneration
       });
       const assistantMessage: ChatMessage = {
         ...response.assistant_message,
@@ -450,12 +648,8 @@ export function useStylistChat(locale: Locale) {
       setBackendState("connected");
       setMessages((current) => [...current, assistantMessage]);
       setPendingProfileFields((assistantMessage.payload?.missing_profile_fields as ProfileField[] | undefined) ?? []);
-      setActiveJob(response.generation_job ?? null);
+      setActiveJob(response.generation_job ?? previousActiveJob);
       setIsGenerationPreparing(false);
-      if (assistantMessage.payload?.kind === "profile_clarification") {
-        setCooldownUntil(null);
-        setCooldownRemainingMs(0);
-      }
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== optimisticMessageId));
       setInput(draftInput);
@@ -463,20 +657,6 @@ export function useStylistChat(locale: Locale) {
       setActiveJob(previousActiveJob);
       setIsGenerationPreparing(false);
       setBackendState("error");
-
-      const payload =
-        error && typeof error === "object" && "payload" in error
-          ? (error as { payload?: { detail?: { retry_after_seconds?: number } } }).payload
-          : undefined;
-      const retryAfterSeconds = payload?.detail?.retry_after_seconds;
-      if (typeof retryAfterSeconds === "number" && retryAfterSeconds > 0) {
-        setCooldownUntil(Date.now() + retryAfterSeconds * 1000);
-        setCooldownRemainingMs(retryAfterSeconds * 1000);
-      } else {
-        setCooldownUntil(previousCooldownUntil);
-        setCooldownRemainingMs(previousCooldownUntil ? Math.max(0, previousCooldownUntil - Date.now()) : 0);
-      }
-
       const errorMessageText =
         error instanceof Error && error.message
           ? error.message
@@ -486,6 +666,47 @@ export function useStylistChat(locale: Locale) {
       setErrorMessage(errorMessageText);
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleRefreshQueuePosition = async () => {
+    if (!activeJob || activeJob.status !== "pending" || isQueueRefreshLocked) {
+      return;
+    }
+
+    setIsRefreshingQueue(true);
+    try {
+      const nextJob = await refreshGenerationJobQueue(activeJob.public_id);
+      const mergedJob = mergeQueuedJobState(activeJob, nextJob);
+      setBackendState("connected");
+      setErrorMessage(null);
+      setActiveJob(mergedJob);
+      setMessages((current) => syncGenerationJobInMessages(current, mergedJob));
+    } catch (error) {
+      setBackendState("error");
+      const detail = getErrorPayloadDetail(error);
+      if (detail?.next_available_at && typeof detail.next_available_at === "string") {
+        const retryAfterSeconds =
+          typeof detail.retry_after_seconds === "number" ? detail.retry_after_seconds : null;
+        setActiveJob((current) =>
+          current
+            ? {
+                ...current,
+                queue_refresh_available_at: detail.next_available_at as string,
+                queue_refresh_retry_after_seconds: retryAfterSeconds,
+              }
+            : current
+        );
+      }
+      setErrorMessage(
+        error instanceof Error && error.message
+          ? error.message
+          : locale === "ru"
+            ? "Не удалось обновить позицию в очереди."
+            : "Could not refresh the queue position."
+      );
+    } finally {
+      setIsRefreshingQueue(false);
     }
   };
 
@@ -505,15 +726,28 @@ export function useStylistChat(locale: Locale) {
     uploadedAsset,
     activeJob,
     isHistoryLoading,
+    isLoadingOlderHistory,
+    hasMoreHistory,
     isSending,
     isUploading,
     isGenerationPreparing,
+    isInputLocked: isSendLocked,
+    isSendLocked,
+    isEditorLocked,
+    isGenerationActionLocked,
+    isGenerationQueued,
+    hasActiveGenerationJob,
+    messageCooldownRemainingSeconds,
+    queueRefreshRemainingSeconds,
+    isRefreshingQueue,
+    isChatOffline: false,
+    chatAvailability,
     backendState,
     errorMessage,
     pendingProfileFields,
-    cooldownRemainingMs,
-    messageCooldownMs: MESSAGE_COOLDOWN_MS,
+    loadOlderHistory,
     handleUpload,
+    handleRefreshQueuePosition,
     handleSend
   };
 }

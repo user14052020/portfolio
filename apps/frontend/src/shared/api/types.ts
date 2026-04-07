@@ -2,7 +2,14 @@ export type Locale = "ru" | "en";
 
 export type MediaType = "image" | "video" | "model3d";
 export type BlogPostType = "article" | "video";
-export type GenerationStatus = "pending" | "queued" | "running" | "completed" | "failed";
+export type GenerationStatus = "pending" | "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface GenerationJobOperation {
+  timestamp: string;
+  action: string;
+  actor: string;
+  details: Record<string, unknown>;
+}
 
 export interface Role {
   id: number;
@@ -146,8 +153,15 @@ export interface GenerationJob {
   body_weight_kg?: number | null;
   error_message?: string | null;
   provider_payload: Record<string, unknown>;
+  operation_log: GenerationJobOperation[];
   started_at?: string | null;
   completed_at?: string | null;
+  deleted_at?: string | null;
+  queue_position?: number | null;
+  queue_ahead?: number | null;
+  queue_total?: number | null;
+  queue_refresh_available_at?: string | null;
+  queue_refresh_retry_after_seconds?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -164,6 +178,12 @@ export interface ChatMessage {
   payload: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export interface ChatHistoryPage {
+  items: ChatMessage[];
+  has_more: boolean;
+  next_before_message_id?: number | null;
 }
 
 export interface ContactRequest {

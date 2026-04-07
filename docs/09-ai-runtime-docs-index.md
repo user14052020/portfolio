@@ -1,5 +1,7 @@
 # 09. AI Runtime Docs Index
 
+See also: [10-models-in-use.md](./10-models-in-use.md)
+
 Этот файл служит точкой входа в runtime-документацию по AI-сервисам проекта.
 
 ## Файлы

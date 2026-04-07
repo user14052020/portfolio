@@ -6,6 +6,9 @@ from app.models.page_scene import PageScene
 from app.models.project import Project, ProjectMedia
 from app.models.role import Role
 from app.models.site_settings import SiteSettings
+from app.models.style_direction import StyleDirection
+from app.models.stylist_session_state import StylistSessionState
+from app.models.stylist_style_exposure import StylistStyleExposure
 from app.models.uploaded_asset import UploadedAsset
 from app.models.user import User
 
@@ -22,5 +25,7 @@ __all__ = [
     "UploadedAsset",
     "ChatMessage",
     "PageScene",
+    "StyleDirection",
+    "StylistSessionState",
+    "StylistStyleExposure",
 ]
-

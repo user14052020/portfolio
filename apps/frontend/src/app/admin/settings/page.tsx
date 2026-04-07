@@ -1,5 +1,5 @@
 import { ContactRequestsTable } from "@/widgets/admin/ui/ContactRequestsTable";
-import { GenerationJobsTable } from "@/widgets/admin/ui/GenerationJobsTable";
+import { GenerationJobsControlPanel } from "@/widgets/admin/ui/GenerationJobsControlPanel";
 import { SettingsManager } from "@/widgets/admin/ui/SettingsManager";
 
 export default function AdminSettingsPage() {
@@ -7,8 +7,7 @@ export default function AdminSettingsPage() {
     <div className="space-y-6">
       <SettingsManager />
       <ContactRequestsTable />
-      <GenerationJobsTable />
+      <GenerationJobsControlPanel />
     </div>
   );
 }
-

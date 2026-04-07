@@ -15,6 +15,7 @@ from app.db.session import SessionLocal
 from app.integrations.elasticsearch import close_elasticsearch_client
 from app.models import BlogCategory, BlogPost, PageScene, Project, ProjectMedia, Role, SiteSettings, User
 from app.models.enums import BlogPostType, MediaType, RoleCode
+from app.services.style_catalog import seed_style_catalog
 from app.services.search import search_service
 from app.utils.slug import build_slug
 
@@ -243,6 +244,7 @@ async def main() -> None:
             projects = await seed_projects(session)
             posts = await seed_blog(session)
             await seed_scenes(session)
+            await seed_style_catalog(session)
             await session.commit()
 
             await search_service.ensure_indices()

@@ -11,6 +11,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.integrations.elasticsearch import close_elasticsearch_client
 from app.services.search import search_service
+from app.services.style_ingestion_admin import style_ingestion_admin_service
 from app.tasks.generation_polling import run_generation_job_poller
 
 
@@ -34,6 +35,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await poller_task
         except asyncio.CancelledError:
             pass
+    style_ingestion_admin_service.shutdown()
     await close_elasticsearch_client()
 
 

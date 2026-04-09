@@ -145,6 +145,7 @@ class _StyleHTMLParser(HTMLParser):
                     target_title=target_title,
                     target_url=target_url,
                     link_type=link_type,
+                    section_title=self._current_section_title,
                 )
             )
             self._link_href = None
@@ -212,16 +213,25 @@ class DefaultStyleNormalizer(StyleNormalizer):
         parser = _StyleHTMLParser(base_url=page.source_url, allowed_domains=source.allowed_domains)
         parser.feed(page.raw_html)
         raw_text, sections, links, images = parser.finalize()
-        source_hash = _hash_text(f"{page.source_url}\n{raw_text}\n{page.raw_html}")
+        fingerprint_source = page.raw_wikitext or page.raw_html
+        content_fingerprint = _hash_text(fingerprint_source) if fingerprint_source else None
+        source_hash = _hash_text(
+            f"{page.source_url}\n{page.page_id or ''}\n{page.revision_id or ''}\n{raw_text}\n{fingerprint_source}"
+        )
         return NormalizedStyleDocument(
             source_name=page.source_name,
             source_site=page.source_site,
             source_title=page.source_title,
             source_url=page.source_url,
             fetched_at=page.fetched_at,
+            fetch_mode=page.fetch_mode,
+            page_id=page.page_id,
+            revision_id=page.revision_id,
             raw_html=page.raw_html,
+            raw_wikitext=page.raw_wikitext,
             raw_text=raw_text,
             source_hash=source_hash,
+            content_fingerprint=content_fingerprint,
             sections=sections,
             links=links,
             images=images,

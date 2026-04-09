@@ -12,6 +12,7 @@ from app.ingestion.styles.contracts import (
 from app.ingestion.styles.runner import StyleIngestionRunner
 from app.ingestion.styles.style_db_writer import build_style_persistence_payload
 from app.ingestion.styles.style_enricher import DefaultStyleEnricher
+from app.ingestion.styles.style_fetchers import MediaWikiApiFetcher, PoliteHTTPTransport
 from app.ingestion.styles.style_normalizer import DefaultStyleNormalizer
 from app.ingestion.styles.style_scraper import HTTPStyleScraper
 from app.ingestion.styles.style_source_registry import AestheticsWikiSourceRegistry
@@ -24,8 +25,10 @@ __all__ = [
     "DiscoveredStyleCandidate",
     "EnrichedStyleDocument",
     "HTTPStyleScraper",
+    "MediaWikiApiFetcher",
     "NormalizedSection",
     "NormalizedStyleDocument",
+    "PoliteHTTPTransport",
     "ScrapedStylePage",
     "StyleIngestionCounters",
     "StyleIngestionRunner",

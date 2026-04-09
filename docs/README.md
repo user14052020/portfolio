@@ -31,6 +31,11 @@
 4. [04-application-vllm-integration.md](./04-application-vllm-integration.md)
 5. [05-parser-mvp-preparation.md](./05-parser-mvp-preparation.md)
 
+## Актуальные parser docs
+
+1. [upd/style_ingestion_operations.md](./upd/style_ingestion_operations.md)
+2. [upd/paserApi.md](./upd/paserApi.md)
+
 ## Порядок выполнения
 
 1. Зафиксировать архитектуру и границы сервисов.

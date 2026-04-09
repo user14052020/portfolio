@@ -75,6 +75,10 @@ docker compose exec backend alembic upgrade head
 docker compose exec backend python scripts/seed.py
 ```
 
+`seed.py` поднимает только стартовые данные приложения и администратора.
+Он не наполняет style-каталог parser-а, не импортирует legacy `txt`-списки стилей и не связан с style ingestion.
+Style ingestion живёт отдельно и для `aesthetics_wiki` теперь запускается только по API-first пути.
+
 Run the commands above one by one. If you want the terminal back immediately, use detached mode:
 
 ```bash
@@ -87,6 +91,31 @@ docker compose up --build -d
 - Backend API docs: `http://localhost:8000/docs`
 
 PostgreSQL, Redis and Elasticsearch are internal-only in the default Compose setup. The backend reaches them over the Docker network via `postgres:5432`, `redis:6379` and `elasticsearch:9200`, so they do not consume host ports unless you explicitly publish them.
+
+## Style ingestion
+
+Основной путь для parser-а сейчас такой:
+
+1. Поставить style pages в API job queue:
+
+```bash
+docker compose exec backend sh -lc "cd /app && ./scripts/run_style_ingestion_entrypoint.sh --mode enqueue-jobs --limit 50"
+```
+
+2. Обработать очередь штатным worker-ом:
+
+```bash
+docker compose exec backend sh -lc "cd /app && ./scripts/run_style_ingestion_entrypoint.sh --mode run-worker --worker-max-jobs 50 --worker-stop-when-idle"
+```
+
+Что важно:
+
+- `enqueue-jobs` делает discovery через `MediaWiki Action API`
+- detail fetch тоже идёт через `MediaWiki Action API`
+- если у страницы уже сохранена та же `revision_id`, новый detail fetch не ставится
+- retryable fetch-ошибки worker сам requeue-ит с backoff
+
+Полный операционный runbook лежит в [docs/upd/style_ingestion_operations.md](./docs/upd/style_ingestion_operations.md).
 
 ## Running locally without Docker
 

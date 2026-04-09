@@ -4,6 +4,8 @@ import type {
   ChatHistoryPage,
   ContactRequest,
   GenerationJob,
+  ParserAdminOverview,
+  ParserAdminStartPayload,
   Project,
   SiteSettings,
   StylistMessageResponse,
@@ -349,6 +351,25 @@ export async function cancelGenerationJob(publicId: string, token: string) {
 export async function deleteGenerationJob(publicId: string, token: string) {
   return request<GenerationJob>(`/generation-jobs/${publicId}`, {
     method: "DELETE",
+    token
+  });
+}
+
+export async function getStyleIngestionAdminOverview(token: string) {
+  return request<ParserAdminOverview>("/style-ingestion-admin/overview", { token });
+}
+
+export async function startStyleIngestionWorker(payload: ParserAdminStartPayload, token: string) {
+  return request<ParserAdminOverview>("/style-ingestion-admin/start", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function stopStyleIngestionWorker(token: string) {
+  return request<ParserAdminOverview>("/style-ingestion-admin/stop", {
+    method: "POST",
     token
   });
 }

@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
+
+
+StyleDiscoveryFetchMode = Literal["mediawiki_action_api"]
+StyleDetailFetchMode = Literal["mediawiki_action_api"]
 
 
 @dataclass(frozen=True)
@@ -10,6 +14,10 @@ class SourceCrawlPolicy:
     robots_txt_url: str | None = None
     min_delay_seconds: float = 2.0
     max_delay_seconds: float = 4.0
+    jitter_ratio: float = 0.3
+    empty_body_cooldown_min_seconds: float = 900.0
+    empty_body_cooldown_max_seconds: float = 1800.0
+    blocked_after_consecutive_empty: int = 3
     max_retries: int = 3
     retry_backoff_seconds: float = 5.0
     max_concurrency: int = 1
@@ -20,10 +28,14 @@ class StyleSourceRegistryEntry:
     source_name: str
     source_site: str
     index_url: str
+    discovery_page_titles: tuple[str, ...]
     allowed_domains: tuple[str, ...]
     parser_version: str
     normalizer_version: str
     crawl_policy: SourceCrawlPolicy
+    discovery_fetch_mode: StyleDiscoveryFetchMode = "mediawiki_action_api"
+    detail_fetch_mode: StyleDetailFetchMode = "mediawiki_action_api"
+    api_endpoint_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +47,15 @@ class DiscoveredStyleCandidate:
 
 
 @dataclass(frozen=True)
+class CandidateRemoteState:
+    source_name: str
+    source_title: str
+    source_url: str
+    remote_page_id: int | None = None
+    remote_revision_id: int | None = None
+
+
+@dataclass(frozen=True)
 class ScrapedStylePage:
     source_name: str
     source_site: str
@@ -42,6 +63,10 @@ class ScrapedStylePage:
     source_url: str
     fetched_at: datetime
     raw_html: str
+    fetch_mode: StyleDetailFetchMode = "mediawiki_action_api"
+    page_id: int | None = None
+    revision_id: int | None = None
+    raw_wikitext: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +84,7 @@ class NormalizedLink:
     target_title: str | None
     target_url: str
     link_type: str
+    section_title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -77,9 +103,14 @@ class NormalizedStyleDocument:
     source_title: str
     source_url: str
     fetched_at: datetime
+    fetch_mode: StyleDetailFetchMode
+    page_id: int | None
+    revision_id: int | None
     raw_html: str
+    raw_wikitext: str | None
     raw_text: str
     source_hash: str
+    content_fingerprint: str | None
     sections: tuple[NormalizedSection, ...]
     links: tuple[NormalizedLink, ...]
     images: tuple[NormalizedImage, ...]
@@ -170,6 +201,7 @@ class CandidateBatchSelection:
     discovered_count: int
     selected_count: int
     candidates: tuple[DiscoveredStyleCandidate, ...]
+    discovery_payload: object | None = None
 
 
 @dataclass(frozen=True)
@@ -268,6 +300,56 @@ class BatchIngestionReport:
 
 
 @dataclass(frozen=True)
+class QueuedJobBatchReport:
+    source_name: str
+    discovered_count: int | None
+    selected_count: int | None
+    enqueued_count: int
+    reused_count: int
+    queued_job_id: int | None = None
+    queued_job_type: str | None = None
+
+
+@dataclass(frozen=True)
+class ProcessedIngestJobResult:
+    job_id: int
+    job_type: str
+    status: str
+    source_name: str
+    source_title: str | None = None
+    source_url: str | None = None
+    source_page_id: int | None = None
+    source_page_version_id: int | None = None
+    style_id: int | None = None
+    style_slug: str | None = None
+    detail_job_id: int | None = None
+    normalize_job_id: int | None = None
+    error_class: str | None = None
+    error_message: str | None = None
+    cooldown_until: datetime | None = None
+    discovered_count: int | None = None
+    selected_count: int | None = None
+    enqueued_count: int | None = None
+    reused_count: int | None = None
+
+
+@dataclass(frozen=True)
+class IngestWorkerRunReport:
+    source_name: str
+    processed_jobs: int
+    succeeded_jobs: int
+    requeued_jobs: int
+    cooldown_deferred_jobs: int
+    soft_failed_jobs: int
+    hard_failed_jobs: int
+    idle_polls: int
+    stopped_reason: str
+    last_job_id: int | None = None
+    last_job_type: str | None = None
+    last_status: str | None = None
+
+
+@dataclass(frozen=True)
 class MatchBatchReport:
     source_name: str
     discovered_count: int
@@ -300,7 +382,7 @@ class StyleSourceRegistry(Protocol):
         self,
         *,
         source: StyleSourceRegistryEntry,
-        index_html: str,
+        discovery_payload: object,
     ) -> tuple[DiscoveredStyleCandidate, ...]:
         ...
 
@@ -314,7 +396,14 @@ class StyleSourceRegistry(Protocol):
 
 
 class StyleScraper(Protocol):
-    async def fetch_index_html(self, source: StyleSourceRegistryEntry) -> str:
+    async def fetch_discovery_payload(self, source: StyleSourceRegistryEntry) -> object:
+        ...
+
+    async def fetch_candidate_remote_states(
+        self,
+        source: StyleSourceRegistryEntry,
+        candidates: tuple[DiscoveredStyleCandidate, ...],
+    ) -> tuple[CandidateRemoteState, ...]:
         ...
 
     async def fetch_style_page(

@@ -83,9 +83,15 @@ def _source_snapshot(source: StyleSource | None) -> dict[str, Any] | None:
         "fetched_at": source.fetched_at,
         "last_seen_at": source.last_seen_at,
         "source_hash": source.source_hash,
+        "fetch_mode": source.fetch_mode,
+        "remote_page_id": source.remote_page_id,
+        "remote_revision_id": source.remote_revision_id,
+        "content_fingerprint": source.content_fingerprint,
         "raw_html": source.raw_html,
+        "raw_wikitext": source.raw_wikitext,
         "raw_text": source.raw_text,
         "raw_sections_json": source.raw_sections_json,
+        "raw_links_json": source.raw_links_json,
         "parser_version": source.parser_version,
         "normalizer_version": source.normalizer_version,
     }
@@ -785,7 +791,12 @@ def build_style_persistence_payload(document: ValidatedStyleDocument) -> StylePe
         "fetched_at": normalized.fetched_at,
         "last_seen_at": normalized.fetched_at,
         "source_hash": normalized.source_hash,
+        "fetch_mode": normalized.fetch_mode,
+        "remote_page_id": normalized.page_id,
+        "remote_revision_id": normalized.revision_id,
+        "content_fingerprint": normalized.content_fingerprint,
         "raw_html": normalized.raw_html,
+        "raw_wikitext": normalized.raw_wikitext,
         "raw_text": normalized.raw_text,
         "raw_sections_json": [
             {
@@ -796,6 +807,16 @@ def build_style_persistence_payload(document: ValidatedStyleDocument) -> StylePe
                 "section_hash": section.section_hash,
             }
             for section in normalized.sections
+        ],
+        "raw_links_json": [
+            {
+                "anchor_text": link.anchor_text,
+                "target_title": link.target_title,
+                "target_url": link.target_url,
+                "link_type": link.link_type,
+                "section_title": link.section_title,
+            }
+            for link in normalized.links
         ],
         "parser_version": normalized.parser_version,
         "normalizer_version": normalized.normalizer_version,

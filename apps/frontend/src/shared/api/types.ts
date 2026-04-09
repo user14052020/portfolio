@@ -198,6 +198,75 @@ export interface ContactRequest {
   updated_at: string;
 }
 
+export interface ParserAdminProcess {
+  state: "idle" | "running" | "stopping" | string;
+  pid?: number | null;
+  started_at?: string | null;
+  stop_requested_at?: string | null;
+  last_exit_code?: number | null;
+  last_error?: string | null;
+  command?: string | null;
+  log_path: string;
+  pid_file_path: string;
+}
+
+export interface ParserAdminCommands {
+  enqueue_command: string;
+  worker_command: string;
+  combined_command: string;
+  stop_command: string;
+}
+
+export interface ParserAdminStats {
+  styles_total: number;
+  source_pages_total: number;
+  source_page_versions_total: number;
+  style_profiles_total: number;
+  style_traits_total: number;
+  taxonomy_links_total: number;
+  relations_total: number;
+  jobs_total: number;
+  jobs_queued: number;
+  jobs_running: number;
+  jobs_succeeded: number;
+  jobs_soft_failed: number;
+  jobs_hard_failed: number;
+  jobs_cooldown_deferred: number;
+  runs_total: number;
+  runs_completed: number;
+  runs_failed: number;
+  runs_completed_with_failures: number;
+  runs_aborted: number;
+}
+
+export interface ParserAdminRecentRun {
+  run_id: number;
+  source_name: string;
+  source_url?: string | null;
+  run_status: string;
+  styles_seen: number;
+  styles_created: number;
+  styles_updated: number;
+  styles_failed: number;
+  started_at: string;
+  finished_at?: string | null;
+}
+
+export interface ParserAdminOverview {
+  process: ParserAdminProcess;
+  commands: ParserAdminCommands;
+  stats: ParserAdminStats;
+  recent_runs: ParserAdminRecentRun[];
+  log_tail: string[];
+}
+
+export interface ParserAdminStartPayload {
+  source_name: string;
+  limit: number;
+  worker_max_jobs: number;
+  title_contains?: string | null;
+}
+
 export interface TokenPair {
   access_token: string;
   refresh_token: string;

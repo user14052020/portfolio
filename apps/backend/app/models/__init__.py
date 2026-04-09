@@ -7,6 +7,8 @@ from app.models.project import Project, ProjectMedia
 from app.models.role import Role
 from app.models.site_settings import SiteSettings
 from app.models.style_ingest_change import StyleIngestChange
+from app.models.style_ingest_attempt import StyleIngestAttempt
+from app.models.style_ingest_job import StyleIngestJob
 from app.models.style_ingest_run import StyleIngestRun
 from app.models.style import Style
 from app.models.style_alias import StyleAlias
@@ -18,8 +20,12 @@ from app.models.style_profile import StyleProfile
 from app.models.style_relation import StyleRelation
 from app.models.style_source import StyleSource
 from app.models.style_source_evidence import StyleSourceEvidence
+from app.models.style_source_fetch_state import StyleSourceFetchState
+from app.models.style_source_fetch_log import StyleSourceFetchLog
 from app.models.style_source_image import StyleSourceImage
 from app.models.style_source_link import StyleSourceLink
+from app.models.style_source_page import StyleSourcePage
+from app.models.style_source_page_version import StyleSourcePageVersion
 from app.models.style_source_section import StyleSourceSection
 from app.models.style_taxonomy_link import StyleTaxonomyLink
 from app.models.style_taxonomy_node import StyleTaxonomyNode
@@ -38,7 +44,9 @@ __all__ = [
     "BlogPost",
     "ContactRequest",
     "SiteSettings",
+    "StyleIngestAttempt",
     "StyleIngestRun",
+    "StyleIngestJob",
     "StyleIngestChange",
     "GenerationJob",
     "UploadedAsset",
@@ -53,6 +61,10 @@ __all__ = [
     "StyleProfile",
     "StyleRelation",
     "StyleSource",
+    "StyleSourceFetchState",
+    "StyleSourceFetchLog",
+    "StyleSourcePage",
+    "StyleSourcePageVersion",
     "StyleSourceEvidence",
     "StyleSourceSection",
     "StyleSourceLink",

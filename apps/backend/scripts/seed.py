@@ -1,3 +1,13 @@
+"""Application bootstrap seed.
+
+This script creates only baseline application data such as roles, admin user,
+site settings, demo projects, demo blog content and scenes.
+
+It does not populate the style catalog, does not import legacy TXT style lists
+and does not run parser ingestion. Style knowledge is loaded only through the
+API/job-driven style ingestion pipeline.
+"""
+
 import asyncio
 import sys
 from datetime import UTC, datetime

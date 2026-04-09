@@ -15,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 from app.db.session import SessionLocal
 from app.ingestion.styles.batch_runner import DEFAULT_BATCH_LIMIT, StyleBatchIngestionRunner
 from app.ingestion.styles.contracts import CandidateBatchSelection, DiscoveredStyleCandidate, StyleSourceRegistryEntry
+from app.ingestion.styles.job_pipeline import StyleIngestJobPipeline
 from app.ingestion.styles.runner import StyleIngestionRunner
 from app.ingestion.styles.style_db_writer import SQLAlchemyStyleDBWriter
 from app.ingestion.styles.style_enricher import DefaultStyleEnricher
@@ -39,7 +40,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run style ingestion against a trusted source.")
     parser.add_argument(
         "--mode",
-        choices=("single", "discover", "batch", "match", "review-list", "review-resolve", "merge", "run-list", "run-abort"),
+        choices=(
+            "single",
+            "discover",
+            "batch",
+            "enqueue-jobs",
+            "process-next-job",
+            "run-worker",
+            "match",
+            "review-list",
+            "review-resolve",
+            "merge",
+            "run-list",
+            "run-abort",
+        ),
         default="single",
     )
     parser.add_argument("--source-name", default="aesthetics_wiki", help="Registered ingestion source name.")
@@ -76,6 +90,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume-run-id", type=int, help="Existing style_ingest_runs.id for batch resume.")
     parser.add_argument("--run-limit", type=int, default=20, help="Maximum number of ingest runs to show in run-list mode.")
     parser.add_argument("--run-id", type=int, help="Target style_ingest_runs.id for operator actions.")
+    parser.add_argument("--worker-max-jobs", type=int, help="Maximum number of queued jobs to process in run-worker mode.")
+    parser.add_argument(
+        "--worker-idle-seconds",
+        type=float,
+        default=5.0,
+        help="Sleep interval between idle polls in run-worker mode.",
+    )
+    parser.add_argument(
+        "--worker-stop-when-idle",
+        action="store_true",
+        help="Stop run-worker when no queued jobs are currently available.",
+    )
     return parser
 
 
@@ -84,11 +110,22 @@ def validate_args(args: argparse.Namespace) -> None:
         if not args.style_title or not args.style_url:
             raise ValueError("single mode requires both --style-title and --style-url")
 
-    if args.mode in {"discover", "batch", "match"}:
+    if args.mode in {"discover", "batch", "enqueue-jobs", "match"}:
         if args.limit <= 0:
             raise ValueError("--limit must be greater than 0")
         if args.offset < 0:
             raise ValueError("--offset must be greater than or equal to 0")
+
+    if args.mode == "process-next-job" and args.dry_run:
+        raise ValueError("process-next-job does not support --dry-run")
+
+    if args.mode == "run-worker":
+        if args.dry_run:
+            raise ValueError("run-worker does not support --dry-run")
+        if args.worker_max_jobs is not None and args.worker_max_jobs <= 0:
+            raise ValueError("--worker-max-jobs must be greater than 0")
+        if args.worker_idle_seconds <= 0:
+            raise ValueError("--worker-idle-seconds must be greater than 0")
 
     if args.mode == "review-list" and args.review_limit <= 0:
         raise ValueError("--review-limit must be greater than 0")
@@ -215,7 +252,7 @@ async def finalize_ingest_run(
 
 def build_single_runner(*, timeout_seconds: float, writer: SQLAlchemyStyleDBWriter | None = None) -> StyleIngestionRunner:
     return StyleIngestionRunner(
-        scraper=HTTPStyleScraper(timeout_seconds=timeout_seconds),
+        scraper=HTTPStyleScraper(timeout_seconds=timeout_seconds, session_factory=SessionLocal),
         normalizer=DefaultStyleNormalizer(),
         enricher=DefaultStyleEnricher(),
         validator=DefaultStyleValidator(),
@@ -224,7 +261,7 @@ def build_single_runner(*, timeout_seconds: float, writer: SQLAlchemyStyleDBWrit
 
 
 def build_batch_runner(*, timeout_seconds: float) -> StyleBatchIngestionRunner:
-    scraper = HTTPStyleScraper(timeout_seconds=timeout_seconds)
+    scraper = HTTPStyleScraper(timeout_seconds=timeout_seconds, session_factory=SessionLocal)
     return StyleBatchIngestionRunner(
         registry=AestheticsWikiSourceRegistry(),
         scraper=scraper,
@@ -514,6 +551,119 @@ async def run_discover_mode(args: argparse.Namespace) -> int:
                     }
                     for item in selection.candidates
                 ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+async def run_enqueue_jobs_mode(args: argparse.Namespace) -> int:
+    pipeline = StyleIngestJobPipeline(timeout_seconds=args.timeout_seconds)
+    report = await pipeline.enqueue_discovery_job(
+        source_name=args.source_name,
+        title_contains=args.title_contains,
+        offset=args.offset,
+        limit=args.limit,
+    )
+    print(
+        json.dumps(
+            {
+                "mode": "enqueue-jobs",
+                "source_name": report.source_name,
+                "discovered_count": report.discovered_count,
+                "selected_count": report.selected_count,
+                "enqueued_count": report.enqueued_count,
+                "reused_count": report.reused_count,
+                "queued_job_id": report.queued_job_id,
+                "queued_job_type": report.queued_job_type,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+async def run_process_next_job_mode(args: argparse.Namespace) -> int:
+    pipeline = StyleIngestJobPipeline(timeout_seconds=args.timeout_seconds)
+    stopped_reason, result = await pipeline.process_next_job_with_lease(source_name=args.source_name)
+    if result is None:
+        print(
+            json.dumps(
+                {
+                    "mode": "process-next-job",
+                    "source_name": args.source_name,
+                    "claimed": False,
+                    "stopped_reason": stopped_reason,
+                    "job": None,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    print(
+        json.dumps(
+            {
+                "mode": "process-next-job",
+                "source_name": result.source_name,
+                "claimed": result.job_id > 0,
+                "stopped_reason": stopped_reason,
+                "job": {
+                    "job_id": result.job_id,
+                    "job_type": result.job_type,
+                    "status": result.status,
+                    "source_title": result.source_title,
+                    "source_url": result.source_url,
+                    "source_page_id": result.source_page_id,
+                    "source_page_version_id": result.source_page_version_id,
+                    "style_id": result.style_id,
+                    "style_slug": result.style_slug,
+                    "detail_job_id": result.detail_job_id,
+                    "normalize_job_id": result.normalize_job_id,
+                    "error_class": result.error_class,
+                    "error_message": result.error_message,
+                    "cooldown_until": result.cooldown_until.isoformat() if result.cooldown_until else None,
+                    "discovered_count": result.discovered_count,
+                    "selected_count": result.selected_count,
+                    "enqueued_count": result.enqueued_count,
+                    "reused_count": result.reused_count,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+async def run_worker_mode(args: argparse.Namespace) -> int:
+    pipeline = StyleIngestJobPipeline(timeout_seconds=args.timeout_seconds)
+    report = await pipeline.run_worker(
+        source_name=args.source_name,
+        idle_sleep_seconds=args.worker_idle_seconds,
+        max_jobs=args.worker_max_jobs,
+        stop_when_idle=args.worker_stop_when_idle,
+    )
+    print(
+        json.dumps(
+            {
+                "mode": "run-worker",
+                "source_name": report.source_name,
+                "processed_jobs": report.processed_jobs,
+                "succeeded_jobs": report.succeeded_jobs,
+                "requeued_jobs": report.requeued_jobs,
+                "cooldown_deferred_jobs": report.cooldown_deferred_jobs,
+                "soft_failed_jobs": report.soft_failed_jobs,
+                "hard_failed_jobs": report.hard_failed_jobs,
+                "idle_polls": report.idle_polls,
+                "stopped_reason": report.stopped_reason,
+                "last_job_id": report.last_job_id,
+                "last_job_type": report.last_job_type,
+                "last_status": report.last_status,
             },
             ensure_ascii=False,
             indent=2,
@@ -998,6 +1148,12 @@ async def run_ingestion(args: argparse.Namespace) -> int:
         return await run_discover_mode(args)
     if args.mode == "batch":
         return await run_batch_mode(args)
+    if args.mode == "enqueue-jobs":
+        return await run_enqueue_jobs_mode(args)
+    if args.mode == "process-next-job":
+        return await run_process_next_job_mode(args)
+    if args.mode == "run-worker":
+        return await run_worker_mode(args)
     if args.mode == "match":
         return await run_match_mode(args)
     if args.mode == "review-list":

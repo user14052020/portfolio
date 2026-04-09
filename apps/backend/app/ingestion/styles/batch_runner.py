@@ -53,7 +53,13 @@ class StyleBatchIngestionRunner:
         safe_limit = self._validate_limit(limit)
         safe_offset = max(offset, 0)
         source = self.registry.get_source(source_name)
-        discovered = await self._discover_candidates(source=source)
+        discovery_payload = await self.scraper.fetch_discovery_payload(source)
+        discovered = self.registry.discover_style_candidates(source=source, discovery_payload=discovery_payload)
+        if not discovered:
+            raise RuntimeError(
+                f"Trusted source index returned zero style candidates for source {source.source_name!r}. "
+                "Batch discovery cannot continue without a valid source index."
+            )
         filtered = self._filter_candidates(
             discovered,
             title_contains=title_contains,
@@ -65,20 +71,7 @@ class StyleBatchIngestionRunner:
             discovered_count=len(discovered),
             selected_count=len(filtered),
             candidates=filtered,
-        )
-
-    async def _discover_candidates(
-        self,
-        *,
-        source: StyleSourceRegistryEntry,
-    ) -> tuple[DiscoveredStyleCandidate, ...]:
-        index_html = await self.scraper.fetch_index_html(source)
-        discovered = self.registry.discover_style_candidates(source=source, index_html=index_html)
-        if discovered:
-            return discovered
-        raise RuntimeError(
-            f"Trusted source index returned zero style candidates for source {source.source_name!r}. "
-            "Batch discovery cannot continue without a valid source index."
+            discovery_payload=discovery_payload,
         )
 
     async def run_batch(

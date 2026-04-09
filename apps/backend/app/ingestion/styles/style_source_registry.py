@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import re
-from html.parser import HTMLParser
-from urllib.parse import quote, unquote, urljoin, urlparse
+from urllib.parse import quote, urlparse
 
 from app.ingestion.styles.contracts import (
     DiscoveredStyleCandidate,
@@ -36,10 +35,14 @@ DEFAULT_CRAWL_POLICY = SourceCrawlPolicy(
     user_agent="PortfolioStyleIngestionBot/1.0 (+contact: internal-admin)",
     respect_robots_txt=True,
     robots_txt_url="https://aesthetics.fandom.com/robots.txt",
-    min_delay_seconds=2.5,
-    max_delay_seconds=5.0,
+    min_delay_seconds=20.0,
+    max_delay_seconds=40.0,
+    jitter_ratio=0.3,
+    empty_body_cooldown_min_seconds=900.0,
+    empty_body_cooldown_max_seconds=1800.0,
+    blocked_after_consecutive_empty=3,
     max_retries=3,
-    retry_backoff_seconds=8.0,
+    retry_backoff_seconds=30.0,
     max_concurrency=1,
 )
 
@@ -50,83 +53,16 @@ def _clean_text(value: str | None) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def _decode_wiki_title(url: str) -> str:
-    parsed = urlparse(url)
-    path = parsed.path or ""
-    if "/wiki/" not in path:
-        return ""
-    slug = path.split("/wiki/", 1)[1]
-    slug = unquote(slug).replace("_", " ")
-    return _clean_text(slug)
-
-
-def _is_candidate_path(url: str, *, source: StyleSourceRegistryEntry) -> bool:
-    parsed = urlparse(url)
-    if parsed.netloc and not any(parsed.netloc.endswith(domain) for domain in source.allowed_domains):
-        return False
-    if "/wiki/" not in parsed.path:
-        return False
-    title = _decode_wiki_title(url)
-    lowered = title.lower()
-    if not title or lowered in KNOWN_NON_STYLE_TITLES:
+def _is_candidate_title(title: str) -> bool:
+    cleaned = _clean_text(title)
+    lowered = cleaned.lower()
+    if not cleaned or lowered in KNOWN_NON_STYLE_TITLES:
         return False
     if any(lowered.startswith(prefix) for prefix in KNOWN_NON_STYLE_PREFIXES):
         return False
-    if ":" in title:
+    if ":" in cleaned:
         return False
     return True
-
-
-class _AestheticsWikiIndexParser(HTMLParser):
-    def __init__(self, *, source: StyleSourceRegistryEntry) -> None:
-        super().__init__(convert_charrefs=True)
-        self.source = source
-        self._current_href: str | None = None
-        self._anchor_parts: list[str] = []
-        self._candidates: dict[str, DiscoveredStyleCandidate] = {}
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag != "a":
-            return
-        attrs_map = dict(attrs)
-        href = attrs_map.get("href")
-        if not href:
-            return
-        absolute_url = urljoin(self.source.index_url, href)
-        if not _is_candidate_path(absolute_url, source=self.source):
-            return
-        self._current_href = absolute_url
-        self._anchor_parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._current_href is None:
-            return
-        cleaned = _clean_text(data)
-        if cleaned:
-            self._anchor_parts.append(cleaned)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag != "a" or self._current_href is None:
-            return
-        source_title = _clean_text(" ".join(self._anchor_parts)) or _decode_wiki_title(self._current_href)
-        if source_title:
-            candidate = DiscoveredStyleCandidate(
-                source_name=self.source.source_name,
-                source_site=self.source.source_site,
-                source_title=source_title,
-                source_url=self._current_href,
-            )
-            self._candidates[candidate.source_url] = candidate
-        self._current_href = None
-        self._anchor_parts = []
-
-    def finalize(self) -> tuple[DiscoveredStyleCandidate, ...]:
-        return tuple(
-            sorted(
-                self._candidates.values(),
-                key=lambda item: (item.source_title.casefold(), item.source_url),
-            )
-        )
 
 
 class AestheticsWikiSourceRegistry(StyleSourceRegistry):
@@ -136,10 +72,21 @@ class AestheticsWikiSourceRegistry(StyleSourceRegistry):
                 source_name="aesthetics_wiki",
                 source_site="aesthetics.fandom.com",
                 index_url="https://aesthetics.fandom.com/wiki/List_of_Aesthetics",
+                discovery_page_titles=(
+                    "List of Aesthetics",
+                    "Category:Aesthetics by Family",
+                    "Category:Aesthetics by Type",
+                    "Category:Aesthetics by Color",
+                    "Category:Aesthetics by Decade",
+                    "Category:Aesthetics by Origin",
+                ),
                 allowed_domains=("aesthetics.fandom.com",),
                 parser_version="0.2.0",
                 normalizer_version="0.2.0",
                 crawl_policy=DEFAULT_CRAWL_POLICY,
+                discovery_fetch_mode="mediawiki_action_api",
+                detail_fetch_mode="mediawiki_action_api",
+                api_endpoint_url="https://aesthetics.fandom.com/api.php",
             ),
         )
 
@@ -157,11 +104,72 @@ class AestheticsWikiSourceRegistry(StyleSourceRegistry):
         self,
         *,
         source: StyleSourceRegistryEntry,
-        index_html: str,
+        discovery_payload: object,
     ) -> tuple[DiscoveredStyleCandidate, ...]:
-        parser = _AestheticsWikiIndexParser(source=source)
-        parser.feed(index_html)
-        return parser.finalize()
+        if source.discovery_fetch_mode == "mediawiki_action_api":
+            return self._discover_from_mediawiki_parse_links(source=source, discovery_payload=discovery_payload)
+
+        raise NotImplementedError(
+            f"Discovery fetch mode {source.discovery_fetch_mode!r} is not implemented for source "
+            f"{source.source_name!r}"
+        )
+
+    def _discover_from_mediawiki_parse_links(
+        self,
+        *,
+        source: StyleSourceRegistryEntry,
+        discovery_payload: object,
+    ) -> tuple[DiscoveredStyleCandidate, ...]:
+        if not isinstance(discovery_payload, dict):
+            raise ValueError(
+                f"MediaWiki discovery payload for source {source.source_name!r} must be dict, "
+                f"got {type(discovery_payload).__name__}"
+            )
+
+        pages = discovery_payload.get("pages")
+        if not isinstance(pages, list) or not pages:
+            raise ValueError(
+                f"MediaWiki discovery payload for source {source.source_name!r} does not contain pages array"
+            )
+
+        candidates: dict[str, DiscoveredStyleCandidate] = {}
+        for parse_node in pages:
+            if not isinstance(parse_node, dict):
+                continue
+
+            links = parse_node.get("links")
+            if not isinstance(links, list):
+                continue
+
+            for item in links:
+                if not isinstance(item, dict):
+                    continue
+
+                namespace = item.get("ns")
+                if namespace != 0:
+                    continue
+
+                source_title = item.get("title") or item.get("*")
+                if not isinstance(source_title, str):
+                    continue
+                source_title = _clean_text(source_title)
+                if not _is_candidate_title(source_title):
+                    continue
+
+                candidate = DiscoveredStyleCandidate(
+                    source_name=source.source_name,
+                    source_site=source.source_site,
+                    source_title=source_title,
+                    source_url=self.build_candidate_url(source=source, source_title=source_title),
+                )
+                candidates[candidate.source_url] = candidate
+
+        return tuple(
+            sorted(
+                candidates.values(),
+                key=lambda item: (item.source_title.casefold(), item.source_url),
+            )
+        )
 
     def build_candidate_url(
         self,

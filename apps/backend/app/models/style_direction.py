@@ -14,7 +14,7 @@ class StyleDirection(Base, TimestampedMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     slug: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     source_title: Mapped[str] = mapped_column(Text)
-    source_group: Mapped[str] = mapped_column(String(32), default="styles-1", nullable=False)
+    source_group: Mapped[str] = mapped_column(String(32), default="legacy_manual", nullable=False)
     title_en: Mapped[str] = mapped_column(String(255), nullable=False)
     title_ru: Mapped[str] = mapped_column(String(255), nullable=False)
     descriptor_en: Mapped[str] = mapped_column(String(255), nullable=False)

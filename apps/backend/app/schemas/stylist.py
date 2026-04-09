@@ -42,8 +42,6 @@ class ChatHistoryPageRead(BaseModel):
 class StylistMessageResponse(BaseModel):
     session_id: str
     recommendation_text: str
-    recommendation_text_ru: str
-    recommendation_text_en: str
     prompt: str
     assistant_message: ChatMessageRead
     generation_job: GenerationJobRead | None = None

@@ -207,8 +207,6 @@ export interface TokenPair {
 export interface StylistMessageResponse {
   session_id: string;
   recommendation_text: string;
-  recommendation_text_ru: string;
-  recommendation_text_en: string;
   prompt: string;
   assistant_message: ChatMessage;
   generation_job?: GenerationJob | null;

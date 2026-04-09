@@ -115,8 +115,7 @@ OCCASION_SLOT_FIELDS = (
 
 @dataclass
 class StylistDecision:
-    reply_ru: str
-    reply_en: str
+    reply_text: str
     image_brief_en: str
     generation_prompt_en: str
     route: StylistRoute
@@ -281,8 +280,8 @@ class StylistService:
                     GenerationJobCreate(
                         session_id=payload.session_id,
                         input_text=user_message_text,
-                        recommendation_ru=decision.reply_ru,
-                        recommendation_en=decision.reply_en,
+                        recommendation_ru=decision.reply_text,
+                        recommendation_en=decision.reply_text,
                         prompt=decision.generation_prompt_en,
                         input_asset_id=asset.id if asset else None,
                         body_height_cm=resolved_height_cm,
@@ -290,7 +289,7 @@ class StylistService:
                     ),
                 )
 
-        response_text = decision.reply_ru if locale == "ru" else decision.reply_en
+        response_text = decision.reply_text
         defer_reply_until_image_ready = (
             generation_job is not None
             and session_intent == "style_exploration"
@@ -346,8 +345,6 @@ class StylistService:
         return {
             "session_id": payload.session_id,
             "recommendation_text": response_text,
-            "recommendation_text_ru": decision.reply_ru,
-            "recommendation_text_en": decision.reply_en,
             "prompt": decision.generation_prompt_en,
             "assistant_message": assistant_message,
             "generation_job": generation_job,
@@ -535,10 +532,9 @@ class StylistService:
                 previous_style_directions=previous_style_directions,
                 occasion_context=occasion_context,
             )
-            image_brief_en = result.image_brief_en.strip() or result.reply_en
+            image_brief_en = result.image_brief_en.strip()
             return StylistDecision(
-                reply_ru=result.reply_ru,
-                reply_en=result.reply_en,
+                reply_text=result.reply_text,
                 image_brief_en=image_brief_en,
                 generation_prompt_en=self._build_generation_prompt(
                     user_message=user_message,
@@ -686,8 +682,7 @@ class StylistService:
 
         requested_route: StylistRoute = "text_and_generation" if auto_generate else "text_only"
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=reply_ru if locale == "ru" else reply_en,
             image_brief_en=image_brief_en,
             generation_prompt_en=self._build_generation_prompt(
                 user_message=user_message,
@@ -758,8 +753,7 @@ class StylistService:
         ) + context_suffix
         primary_reply = reply_ru if locale == "ru" else reply_en
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=primary_reply,
             image_brief_en="",
             generation_prompt_en="",
             route="text_only",
@@ -799,8 +793,7 @@ class StylistService:
             )
 
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=reply_ru if locale == "ru" else reply_en,
             image_brief_en=fallback_decision.image_brief_en,
             generation_prompt_en=fallback_decision.generation_prompt_en,
             route="text_only",
@@ -860,8 +853,7 @@ class StylistService:
         )
         primary_reply = reply_ru if locale == "ru" else reply_en
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=primary_reply,
             image_brief_en="",
             generation_prompt_en="",
             route="text_only",
@@ -919,8 +911,7 @@ class StylistService:
 
         primary_reply = reply_ru if locale == "ru" else reply_en
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=primary_reply,
             image_brief_en="",
             generation_prompt_en="",
             route="text_only",
@@ -1158,8 +1149,9 @@ class StylistService:
             return None
         return {
             "slug": style_direction.slug,
-            "ru": style_direction.title_ru,
+            "ru": style_direction.title_en,
             "en": style_direction.title_en,
+            "title": style_direction.title_en,
             "descriptor": style_direction.descriptor_en,
         }
 
@@ -1208,7 +1200,7 @@ class StylistService:
             if style is None or style.slug == exclude_slug or style.slug in seen_slugs:
                 continue
             seen_slugs.add(style.slug)
-            directions.append({"slug": style.slug, "ru": style.title_ru, "en": style.title_en})
+            directions.append({"slug": style.slug, "ru": style.title_en, "en": style.title_en, "title": style.title_en})
         return directions
 
     def _build_next_session_state_payload(
@@ -1596,7 +1588,7 @@ class StylistService:
         style_part = ""
         if style_seed is not None:
             style_part = (
-                f" Style: {style_seed['en']}; {style_seed['descriptor']}. "
+                f" Style: {style_seed['title']}; {style_seed['descriptor']}. "
             )
         elif session_intent == "general_advice":
             style_part = " Follow the user's mood and context. "
@@ -1663,8 +1655,7 @@ class StylistService:
         )
         primary_reply = reply_ru if locale == "ru" else reply_en
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=primary_reply,
             image_brief_en="",
             generation_prompt_en="",
             route="text_only",
@@ -1725,8 +1716,7 @@ class StylistService:
         ) + context_suffix
         primary_reply = reply_ru if locale == "ru" else reply_en
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=primary_reply,
             image_brief_en="",
             generation_prompt_en="",
             route="text_only",
@@ -1767,8 +1757,7 @@ class StylistService:
             )
 
         return StylistDecision(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=reply_ru if locale == "ru" else reply_en,
             image_brief_en=fallback_decision.image_brief_en,
             generation_prompt_en=fallback_decision.generation_prompt_en,
             route="text_only",

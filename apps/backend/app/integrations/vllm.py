@@ -37,8 +37,7 @@ class VLLMContextLimitError(VLLMResponseError):
 
 @dataclass
 class StylistLLMResult:
-    reply_ru: str
-    reply_en: str
+    reply_text: str
     image_brief_en: str
     route: StylistRoute
     model: str
@@ -147,25 +146,23 @@ class VLLMClient:
         content = self._extract_content(data)
         parsed = self._parse_json_object(content)
 
-        reply_ru = str(parsed.get("reply_ru", "")).strip()
-        reply_en = str(parsed.get("reply_en", "")).strip()
-        image_brief_en = str(parsed.get("image_brief_en", "")).strip() or reply_en
+        reply_text = str(parsed.get("reply_text", "")).strip()
+        image_brief_en = str(parsed.get("image_brief_en", "")).strip()
         route = str(parsed.get("route", "text_only")).strip().lower()
 
-        if not reply_ru or not reply_en:
+        if not reply_text:
             raise VLLMResponseError("vLLM response missed required fields")
-        self._validate_language_fields(
-            locale=locale,
-            reply_ru=reply_ru,
-            reply_en=reply_en,
-            image_brief_en=image_brief_en,
-        )
         if route not in ALLOWED_ROUTES:
             route = "text_only"
+        self._validate_language_fields(
+            locale=locale,
+            reply_text=reply_text,
+            image_brief_en=image_brief_en,
+            route=route,
+        )
 
         return StylistLLMResult(
-            reply_ru=reply_ru,
-            reply_en=reply_en,
+            reply_text=reply_text,
             image_brief_en=image_brief_en,
             route=route,
             model=self.model,
@@ -506,20 +503,24 @@ class VLLMClient:
         self,
         *,
         locale: str,
-        reply_ru: str,
-        reply_en: str,
+        reply_text: str,
         image_brief_en: str,
+        route: StylistRoute,
     ) -> None:
-        if not self._looks_russian(reply_ru):
-            raise VLLMResponseError("reply_ru is not valid Russian text")
-        if not self._looks_english(reply_en):
-            raise VLLMResponseError("reply_en is not valid English text")
-        if not self._looks_english(image_brief_en):
-            raise VLLMResponseError("image_brief_en is not valid English text")
+        if locale == "ru":
+            if not self._looks_russian(reply_text):
+                raise VLLMResponseError("reply_text is not valid Russian text")
+        else:
+            if not self._looks_english(reply_text):
+                raise VLLMResponseError("reply_text is not valid English text")
 
-        primary_text = reply_ru if locale == "ru" else reply_en
-        if self._contains_cjk(primary_text):
-            raise VLLMResponseError("primary reply contains CJK characters")
+        if self._contains_cjk(reply_text):
+            raise VLLMResponseError("reply_text contains CJK characters")
+
+        if route != "text_only" and not image_brief_en:
+            raise VLLMResponseError("image_brief_en is required for generation routes")
+        if image_brief_en and not self._looks_english(image_brief_en):
+            raise VLLMResponseError("image_brief_en is not valid English text")
 
     def _looks_russian(self, text: str) -> bool:
         return self._has_expected_script(text=text, expected="cyrillic")

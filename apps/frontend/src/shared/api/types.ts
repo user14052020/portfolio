@@ -1,4 +1,144 @@
 export type Locale = "ru" | "en";
+export type ChatMode =
+  | "general_advice"
+  | "garment_matching"
+  | "style_exploration"
+  | "occasion_outfit";
+export type FlowState =
+  | "idle"
+  | "awaiting_user_message"
+  | "awaiting_anchor_garment"
+  | "awaiting_occasion_details"
+  | "awaiting_clarification"
+  | "ready_for_decision"
+  | "ready_for_generation"
+  | "generation_queued"
+  | "generation_in_progress"
+  | "completed"
+  | "recoverable_error";
+export type ClarificationKind =
+  | "anchor_garment_description"
+  | "anchor_garment_missing_attributes"
+  | "occasion_event_type"
+  | "occasion_dress_code"
+  | "occasion_desired_impression"
+  | "occasion_missing_multiple_slots"
+  | "style_preference"
+  | "general_followup";
+export type DecisionType =
+  | "text_only"
+  | "clarification_required"
+  | "text_and_generate"
+  | "generation_only"
+  | "error_recoverable"
+  | "error_hard";
+
+export interface CommandContext {
+  command_name?: string | null;
+  command_step?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface AnchorGarment {
+  raw_user_text?: string | null;
+  garment_type?: string | null;
+  color?: string | null;
+  secondary_colors: string[];
+  material?: string | null;
+  fit?: string | null;
+  silhouette?: string | null;
+  seasonality?: string | null;
+  formality?: string | null;
+  gender_context?: string | null;
+  confidence: number;
+  is_sufficient_for_generation: boolean;
+}
+
+export interface OccasionContext {
+  event_type?: string | null;
+  location?: string | null;
+  time_of_day?: string | null;
+  season?: string | null;
+  dress_code?: string | null;
+  weather_context?: string | null;
+  desired_impression?: string | null;
+  constraints: string[];
+  is_sufficient_for_generation: boolean;
+}
+
+export interface StyleDirection {
+  style_id?: string | null;
+  style_name?: string | null;
+  palette: string[];
+  silhouette?: string | null;
+  hero_garments: string[];
+  footwear: string[];
+  accessories: string[];
+  materials: string[];
+  styling_mood?: string | null;
+  composition_type?: string | null;
+  background_family?: string | null;
+  created_at: string;
+}
+
+export interface ConversationMemoryItem {
+  role: "user" | "assistant" | "system";
+  content: string;
+  created_at: string;
+}
+
+export interface GenerationIntent {
+  mode: ChatMode;
+  trigger: string;
+  reason: string;
+  must_generate: boolean;
+  job_priority: string;
+  source_message_id?: number | null;
+}
+
+export interface GenerationPayload {
+  prompt: string;
+  image_brief_en: string;
+  recommendation_text: string;
+  input_asset_id?: number | null;
+  generation_intent?: GenerationIntent | null;
+}
+
+export interface DecisionResult {
+  decision_type: DecisionType;
+  active_mode: ChatMode;
+  flow_state: FlowState;
+  text_reply?: string | null;
+  generation_payload?: GenerationPayload | null;
+  job_id?: string | null;
+  context_patch: Record<string, unknown>;
+  error_code?: string | null;
+}
+
+export interface ChatModeContext {
+  version: number;
+  active_mode: ChatMode;
+  requested_intent?: ChatMode | null;
+  flow_state: FlowState;
+  pending_clarification?: string | null;
+  clarification_kind?: ClarificationKind | null;
+  clarification_attempts: number;
+  should_auto_generate: boolean;
+  anchor_garment?: AnchorGarment | null;
+  occasion_context?: OccasionContext | null;
+  style_history: StyleDirection[];
+  last_generation_prompt?: string | null;
+  last_generated_outfit_summary?: string | null;
+  conversation_memory: ConversationMemoryItem[];
+  command_context?: CommandContext | null;
+  current_style_id?: string | null;
+  current_style_name?: string | null;
+  current_job_id?: string | null;
+  last_decision_type?: string | null;
+  generation_intent?: GenerationIntent | null;
+  updated_at: string;
+  updated_by_message_id?: number | null;
+}
 
 export type MediaType = "image" | "video" | "model3d";
 export type BlogPostType = "article" | "video";
@@ -280,4 +420,6 @@ export interface StylistMessageResponse {
   assistant_message: ChatMessage;
   generation_job?: GenerationJob | null;
   timestamp: string;
+  decision: DecisionResult;
+  session_context: ChatModeContext;
 }

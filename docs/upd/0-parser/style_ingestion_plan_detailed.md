@@ -1,6 +1,6 @@
 [Как пользоваться в style_ingestion_operations.md](./style_ingestion_operations.md) 
 
-Судя по доступному мне репо, у тебя парсер уже задуман как отдельный ingestion pipeline, а не как часть чата: в docs есть отдельный parser contour, каталоги raw/normalized/logs, проверка robots.txt, cron-обновления и принцип “сначала собрать и нормализовать каталог, потом уже использовать его в чате”.  ￼
+Парсер уже задуман как отдельный ingestion pipeline, а не как часть чата: в docs есть отдельный parser contour, каталоги raw/normalized/logs, проверка robots.txt, cron-обновления и принцип “сначала собрать и нормализовать каталог, потом уже использовать его в чате”.  ￼
 
 Для именно этого донора я бы не делал ставку на HTML-скрапинг обычных страниц. Aesthetics Wiki — это wiki со структурированными осями навигации (By Category, By Family, By Color, By Decade, By Country) и большой A–Z-страницей, а MediaWiki для таких сайтов предоставляет api.php, включая получение wikitext, parsed HTML и других метаданных через Action API. Это куда более устойчивый путь, чем тащить куки браузера и биться с edge-защитой HTML-страниц.  ￼
 

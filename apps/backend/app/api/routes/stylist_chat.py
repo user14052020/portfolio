@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
+from app.domain.chat_context import ChatModeContext
 from app.schemas.stylist import (
     ChatHistoryPageRead,
     StylistMessageRequest,
@@ -23,6 +24,15 @@ async def send_stylist_message(
     result = await stylist_service.process_message(session, payload)
     await session.commit()
     return StylistMessageResponse.model_validate(result)
+
+
+@router.get("/context/{session_id}", response_model=ChatModeContext)
+async def get_chat_context(
+    session_id: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ChatModeContext:
+    context = await stylist_service.get_context(session, session_id)
+    return ChatModeContext.model_validate(context)
 
 
 @router.get("/history/{session_id}", response_model=ChatHistoryPageRead)

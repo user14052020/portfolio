@@ -1,123 +1,155 @@
-# Portfolio AI Stylist Monorepo
 
-Production-oriented starter monorepo for a bilingual `ru/en` portfolio website with:
+# Portfolio — сайт-портфолио
 
-- FastAPI backend with async SQLAlchemy, Alembic, PostgreSQL, Redis, Elasticsearch, JWT auth and RBAC.
-- Next.js frontend with Mantine, Tailwind CSS, FSD-oriented structure, instant locale switch and admin UI.
-- AI stylist chat flow with upload support and generation jobs routed to local-network ComfyUI.
-- Docker Compose infrastructure for local development.
+Мой персональный сайт-портфолио, в котором собраны демо-проекты, блог и административная панель.  
+Проект построен как fullstack-монорепозиторий: **Next.js frontend + FastAPI backend**.
 
-## Repository layout
+Ключевая демонстрационная функция — **AI-стилист**: пользователь может общаться с ботом как со стилистом, отправлять текст и изображения, получать советы по сочетанию одежды и генерировать **flat lay** референс-изображения образов.
+
+[Учебник по программированию на базе этого проекта](./docs/academy/README.md)
+
+---
+
+## Что умеет проект
+
+- показывать мои проекты в виде визуальных карточек;
+- вести блог с постами;
+- поддерживать двуязычный интерфейс;
+- иметь административную панель для управления контентом;
+- обрабатывать загрузку файлов;
+- хранить и искать данные по проектам, постам и заявкам;
+- запускать AI-сценарии стилиста с генерацией изображений.
+
+---
+
+## AI-стилист
+
+Один из главных модулей проекта — чат-бот стилиста.
+
+### Что он делает
+
+- принимает **текст** и **изображения** от пользователя;
+- подсказывает, **с чем носить вещь**;
+- предлагает **образ на мероприятие**;
+- показывает **случайный стиль**;
+- генерирует **flat lay** референс-изображение образа.
+
+### Как устроен
+
+В локальной конфигурации AI-стилист работает через связку:
+
+- **vLLM** — текстовая reasoning / chat часть;
+- **ComfyUI** — генерация flat lay изображений;
+- **FastAPI backend** — orchestration, API, jobs, сохранение состояния;
+- **Next.js frontend** — UI чата и отображение результата.
+
+### База стилей
+
+База стилей наполняется отдельным **парсером**, который собирает данные из API сайтов-доноров, нормализует их и сохраняет в БД.  
+Это нужно для того, чтобы бот:
+
+- лучше различал стили;
+- давал более осмысленные советы;
+- генерировал более разнообразные образы;
+- в будущем опирался не только на LLM, но и на собственную knowledge base.
+
+---
+
+## Технологический стек
+
+### Backend
+- FastAPI
+- async SQLAlchemy
+- Alembic
+- PostgreSQL
+- Redis
+- Elasticsearch
+- JWT auth
+- RBAC
+
+### Frontend
+- Next.js 14
+- React 18
+- Mantine
+- Tailwind CSS
+- TypeScript
+- FSD-oriented structure
+
+### AI / Infra
+- vLLM
+- ComfyUI
+- Docker Compose
+
+---
+
+## Структура репозитория
 
 ```text
 .
 ├── apps
 │   ├── backend
 │   └── frontend
+├── docs
 ├── media
 ├── .env.example
-├── .gitignore
 ├── docker-compose.yml
 └── README.md
 ```
 
-## Main capabilities
+---
 
-- Bilingual portfolio pages with runtime locale switching.
-- Portfolio projects rendered as creative app-window cards.
-- Blog with text/video post support, search and filtering.
-- Contact modal and request management.
-- Protected admin area for projects, posts, settings, contacts and generation jobs.
-- 3D scene placeholders wired for React Three Fiber on each page.
-- Generation provider abstraction with ComfyUI implementation and polling-based status tracking.
+## Быстрый старт через Docker
 
-## Prerequisites
-
-- Docker + Docker Compose
-- Node.js 20+ for local frontend development without Docker
-- Python 3.12+ for local backend development without Docker
-- A local-network machine running ComfyUI HTTP API
-
-## Environment
-
-1. Copy the example file:
+### 1. Скопировать переменные окружения
 
 ```bash
 cp .env.example .env
 ```
 
-2. Update at least:
-
-- `SECRET_KEY`
-- `INITIAL_ADMIN_EMAIL`
-- `INITIAL_ADMIN_PASSWORD`
-- `COMFYUI_BASE_URL`
-- `INTERNAL_API_URL` if frontend runs in Docker and server-side Next.js requests should target the backend service name
-- `DATABASE_URL`, `SYNC_DATABASE_URL`, `REDIS_URL`, `ELASTICSEARCH_URL` only if you intentionally change Docker service names or move these dependencies outside Compose
-
-## Running with Docker
-
-1. Build and start services:
-
-```bash
-docker compose up --build
-```
-
-2. Apply migrations:
-
-```bash
-docker compose exec backend alembic upgrade head
-```
-
-3. Seed initial data:
-
-```bash
-docker compose exec backend python scripts/seed.py
-```
-
-`seed.py` поднимает только стартовые данные приложения и администратора.
-Он не наполняет style-каталог parser-а, не импортирует legacy `txt`-списки стилей и не связан с style ingestion.
-Style ingestion живёт отдельно и для `aesthetics_wiki` теперь запускается только по API-first пути.
-
-Run the commands above one by one. If you want the terminal back immediately, use detached mode:
+### 2. Запустить проект
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Open:
+### 3. Применить миграции
+
+```bash
+docker compose exec backend alembic upgrade head
+```
+
+### 4. Выполнить сидирование
+
+```bash
+docker compose exec backend python scripts/seed.py
+```
+
+### 5. Открыть проект
 
 - Frontend: `http://localhost:3000`
-- Backend API docs: `http://localhost:8000/docs`
+- Backend docs: `http://localhost:8000/docs`
 
-PostgreSQL, Redis and Elasticsearch are internal-only in the default Compose setup. The backend reaches them over the Docker network via `postgres:5432`, `redis:6379` and `elasticsearch:9200`, so they do not consume host ports unless you explicitly publish them.
+---
 
-## Style ingestion
+## Что важно настроить в `.env`
 
-Основной путь для parser-а сейчас такой:
+Минимум проверь эти поля:
 
-1. Поставить style pages в API job queue:
+- `SECRET_KEY`
+- `INITIAL_ADMIN_EMAIL`
+- `INITIAL_ADMIN_PASSWORD`
+- `COMFYUI_BASE_URL`
+- `NEXT_PUBLIC_API_URL`
+- `NEXT_PUBLIC_MEDIA_URL`
+- `NEXT_PUBLIC_SITE_URL`
 
-```bash
-docker compose exec backend sh -lc "cd /app && ./scripts/run_style_ingestion_entrypoint.sh --mode enqueue-jobs --limit 50"
-```
+Если backend и frontend запускаются в Docker, также проверь:
 
-2. Обработать очередь штатным worker-ом:
+- `INTERNAL_API_URL`
 
-```bash
-docker compose exec backend sh -lc "cd /app && ./scripts/run_style_ingestion_entrypoint.sh --mode run-worker --worker-max-jobs 50 --worker-stop-when-idle"
-```
+---
 
-Что важно:
-
-- `enqueue-jobs` делает discovery через `MediaWiki Action API`
-- detail fetch тоже идёт через `MediaWiki Action API`
-- если у страницы уже сохранена та же `revision_id`, новый detail fetch не ставится
-- retryable fetch-ошибки worker сам requeue-ит с backoff
-
-Полный операционный runbook лежит в [docs/upd/style_ingestion_operations.md](./docs/upd/style_ingestion_operations.md).
-
-## Running locally without Docker
+## Локальный запуск без Docker
 
 ### Backend
 
@@ -139,47 +171,89 @@ cd apps/frontend
 npm install
 npm run dev
 ```
+---
 
-## Default admin credentials
+## Установка vLLM и ComfyUI
 
-The seed script creates the admin defined in `.env`:
+[Инструкция по установке vLLM и ComfyUI](./docs/how-install-vllm-comfyui/README.md)
+
+---
+
+## Запуск vLLM
+
+Ниже пример локального запуска vLLM для AI-стилиста.  
+Подставь свою модель, порт и лимит VRAM при необходимости.
+
+```bash
+python -m vllm.entrypoints.openai.api_server   --model Qwen/Qwen2.5-3B-Instruct   --host 0.0.0.0   --port 8001   --max-model-len 4096   --gpu-memory-utilization 0.6
+```
+
+Если ты запускаешь vLLM в отдельной Linux/WSL-среде, backend должен видеть этот endpoint по сети.
+
+---
+
+## Запуск ComfyUI
+
+Пример обычного серверного запуска ComfyUI:
+
+```bash
+python main.py   --listen 0.0.0.0   --port 8188   --disable-auto-launch   --preview-method none
+```
+
+Backend использует workflow для fashion flat lay и отправляет generation jobs в ComfyUI по HTTP API.
+
+---
+
+## Связка backend ↔ vLLM ↔ ComfyUI
+
+Типовая локальная схема:
+
+- **frontend** → общается только с backend;
+- **backend** → общается с vLLM;
+- **backend** → отправляет generation jobs в ComfyUI;
+- **ComfyUI** → возвращает статус и результат генерации.
+
+Это упрощает архитектуру и не раскрывает AI-сервисы напрямую в UI.
+
+---
+
+## Админ-панель
+
+После сидирования создаётся администратор из `.env`:
 
 - Email: `INITIAL_ADMIN_EMAIL`
 - Password: `INITIAL_ADMIN_PASSWORD`
 
-## ComfyUI integration
+Через admin UI можно управлять:
+- проектами,
+- постами,
+- настройками,
+- заявками,
+- generation jobs.
 
-The backend uses a provider abstraction. Today it ships with:
+---
 
-- `ComfyUIClient` for queueing prompt payloads and polling generation status.
-- `GenerationService` for provider orchestration, persistence and result hydration.
-- `StylistService` mock recommendation layer that can later be replaced by an LLM or rules engine.
+## Поиск и медиа
 
-Set `COMFYUI_BASE_URL` to the machine on your local network running ComfyUI. The sample workflow template is stored in `apps/backend/app/integrations/workflows/fashion_flatlay.json`.
+### Поиск
+Используется Elasticsearch.  
+Если поисковый движок временно недоступен, list endpoints продолжают работать через БД.
 
-## Search
+### Медиа
+Файлы хранятся локально в `./media`, backend раздаёт их через `/media`.  
+Эта часть изолирована и может быть заменена позже на S3-совместимое хранилище.
 
-Elasticsearch is used through a thin abstraction. If Elasticsearch is temporarily unavailable, list endpoints still fall back to database queries. Search indexing is best-effort and non-blocking by design.
+---
 
-## Media storage
+## Что проект демонстрирует
 
-- Uploaded files are stored locally in `./media`
-- Backend serves them via `/media`
-- The storage adapter is intentionally isolated so it can be swapped for S3-compatible storage later
+Этот репозиторий показывает мой подход к разработке:
 
-## What is included
+- fullstack-архитектура;
+- модульная организация кода;
+- работа с асинхронным backend;
+- AI-интеграции;
+- генерация изображений;
+- подготовка проекта к дальнейшему масштабированию.
 
-- Base Dockerfiles and Compose stack
-- Alembic setup and initial migration
-- Seed script with starter content
-- REST API for auth, projects, blog posts, uploads, contact requests, settings, stylist chat and generation jobs
-- Modern frontend scaffold with reusable windowed UI, chat section and admin workspace
 
-## What to harden before production
-
-- Replace local media storage with S3-compatible storage and CDN.
-- Move JWT handling to secure HTTP-only cookies.
-- Add background worker queue for generation polling and indexing.
-- Add real LLM-powered stylist recommendations.
-- Add server-side admin route protection and audit logging.
-- Add observability, rate limiting, backups and CI/CD pipelines.

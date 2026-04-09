@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 class ParserAdminStartRequest(BaseModel):
     source_name: str = "aesthetics_wiki"
-    limit: int = Field(default=50, ge=1, le=500)
-    worker_max_jobs: int = Field(default=50, ge=1, le=1000)
+    limit: int = Field(default=20, ge=1, le=500)
+    worker_max_jobs: int = Field(default=55, ge=1, le=1000)
     title_contains: str | None = None
 
 

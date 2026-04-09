@@ -60,6 +60,11 @@ PROFILE_FIELDS = (
     "styling_advice_json",
     "image_prompt_notes_json",
 )
+WEAK_RELATION_TYPES = {
+    "adjacent_to",
+    "shares_palette_with",
+    "shares_silhouette_with",
+}
 
 
 def _json_default(value: Any) -> str:
@@ -463,7 +468,12 @@ class SQLAlchemyStyleDBWriter:
     ) -> None:
         evidence_cache: dict[tuple[str, str], int] = {}
         for record in records:
-            target_style = await self._get_or_create_relation_target_style(record["target_style_slug"])
+            target_style = await self._resolve_relation_target_style(
+                record["target_style_slug"],
+                relation_type=record["relation_type"],
+            )
+            if target_style is None:
+                continue
             if target_style.id == style_id:
                 continue
             evidence_id = await self._ensure_evidence(
@@ -487,6 +497,19 @@ class SQLAlchemyStyleDBWriter:
                 )
             )
         await self.session.flush()
+
+    async def _resolve_relation_target_style(
+        self,
+        slug: str,
+        *,
+        relation_type: str,
+    ) -> Style | None:
+        style = await self._get_style_by_slug(slug)
+        if style is not None:
+            return style
+        if relation_type in WEAK_RELATION_TYPES:
+            return None
+        return await self._get_or_create_relation_target_style(slug)
 
     async def _get_or_create_taxonomy_node(
         self,

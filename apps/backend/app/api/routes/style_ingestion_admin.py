@@ -36,12 +36,25 @@ async def _count_rows(session: AsyncSession, model: type[object]) -> int:
     return int((await session.scalar(select(func.count()).select_from(model))) or 0)
 
 
+async def _count_loaded_styles(session: AsyncSession) -> int:
+    return int(
+        (
+            await session.scalar(
+                select(func.count())
+                .select_from(Style)
+                .where(Style.source_primary_id.is_not(None))
+            )
+        )
+        or 0
+    )
+
+
 async def _build_overview(
     session: AsyncSession,
     *,
     source_name: str = "aesthetics_wiki",
-    limit: int = 50,
-    worker_max_jobs: int = 50,
+    limit: int = 20,
+    worker_max_jobs: int = 55,
     title_contains: str | None = None,
 ) -> ParserAdminOverviewRead:
     process = style_ingestion_admin_service.snapshot()
@@ -84,7 +97,7 @@ async def _build_overview(
         ),
         commands=ParserAdminCommandsRead(**commands),
         stats=ParserAdminStatsRead(
-            styles_total=await _count_rows(session, Style),
+            styles_total=await _count_loaded_styles(session),
             source_pages_total=await _count_rows(session, StyleSourcePage),
             source_page_versions_total=await _count_rows(session, StyleSourcePageVersion),
             style_profiles_total=await _count_rows(session, StyleProfile),

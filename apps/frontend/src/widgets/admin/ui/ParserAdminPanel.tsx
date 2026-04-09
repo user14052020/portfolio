@@ -13,8 +13,8 @@ import type { ParserAdminOverview } from "@/shared/api/types";
 import { WindowFrame } from "@/shared/ui/WindowFrame";
 
 const DEFAULT_SOURCE_NAME = "aesthetics_wiki";
-const DEFAULT_LIMIT = 50;
-const DEFAULT_WORKER_MAX_JOBS = 50;
+const DEFAULT_LIMIT = 20;
+const DEFAULT_WORKER_MAX_JOBS = 55;
 const DEFAULT_PID_FILE_PATH = "/app/media/style_ingestion_admin/style_ingestion_worker.pid";
 
 function formatDateTime(value?: string | null) {

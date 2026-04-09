@@ -52,7 +52,7 @@ VISUAL_CONTEXT_TERMS = (
     "garment",
     "outfit",
 )
-PALETTE_RELATION_TERMS = ("color", "colour", "palette", "tone", "tones", "hue", "hues")
+PALETTE_RELATION_TERMS = ("color", "colour", "palette", "hue", "hues")
 SILHOUETTE_RELATION_TERMS = ("silhouette", "shape", "cut", "fit", "tailoring", "tailored")
 NEGATIVE_TERMS = (
     "avoid",
@@ -102,6 +102,27 @@ NON_STYLE_LINK_TITLES = {
     "history",
     "color",
     "colour",
+    "format and content",
+    "aesthetics wiki:what pages are allowed/removed",
+}
+RELATION_NAVIGATION_MARKERS = (
+    "article guide",
+    "music genres",
+    "what pages are allowed",
+    "examples of",
+    "example of",
+    "timeline",
+    "preceded by",
+    "succeeded by",
+)
+MAX_RELATION_SEEDS_PER_STYLE = 8
+MAX_RELATION_SEEDS_BY_TYPE: dict[str, int] = {
+    "adjacent_to": 4,
+    "shares_palette_with": 2,
+    "shares_silhouette_with": 2,
+}
+MAX_RELATION_SEEDS_PER_REASON_BY_TYPE: dict[str, int] = {
+    "fusion_candidate": 2,
 }
 RELATION_PHRASE_RULES: tuple[tuple[tuple[str, ...], str, float], ...] = (
     (("inspired by", "influence from", "influenced by", "based on", "derived from"), "inspired_by", 0.92),
@@ -167,6 +188,17 @@ def _split_sentences(value: str) -> tuple[str, ...]:
     if not cleaned:
         return ()
     return tuple(sentence.strip() for sentence in SENTENCE_SPLIT_RE.split(cleaned) if sentence.strip())
+
+
+def _contains_keyword(text: str | None, keyword: str) -> bool:
+    cleaned = _clean_text(text)
+    if not cleaned:
+        return False
+    return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", cleaned, flags=re.IGNORECASE) is not None
+
+
+def _contains_any_keyword(text: str | None, keywords: tuple[str, ...]) -> bool:
+    return any(_contains_keyword(text, keyword) for keyword in keywords)
 
 
 def _first_non_empty_section(sections: tuple[NormalizedSection, ...]) -> str | None:
@@ -551,7 +583,7 @@ class StyleFeatureExtractor:
         relation_seeds: list[StyleRelationSeed] = []
 
         for link in links:
-            if link.link_type not in {"wiki_internal", "see_also"}:
+            if link.link_type not in {"wiki_internal", "see_also", "family_hint"}:
                 continue
 
             target_title = _clean_text(link.target_title or link.anchor_text)
@@ -564,11 +596,32 @@ class StyleFeatureExtractor:
             if self._looks_like_taxonomy_only_title(target_title):
                 continue
 
-            sentence, section_title = self._find_context_for_phrase(sections, phrase=target_title)
-            relation_type, score = self._classify_relation(sentence=sentence, section_title=section_title)
+            sentence, section_title = self._find_context_for_link(
+                sections,
+                phrase=target_title,
+                preferred_section_title=link.section_title,
+            )
+            relation_type, score = self._classify_relation(
+                sentence=sentence,
+                section_title=section_title,
+                source_title=source_title,
+                target_title=target_title,
+            )
             if link.link_type == "see_also":
                 relation_type = "adjacent_to"
                 score = max(score, 0.78)
+            elif link.link_type == "family_hint":
+                relation_type = "same_family"
+                score = max(score, 0.8)
+
+            if not self._is_relation_seed_actionable(
+                link=link,
+                relation_type=relation_type,
+                score=score,
+                sentence=sentence,
+                section_title=section_title,
+            ):
+                continue
             relation_seeds.append(
                 StyleRelationSeed(
                     target_style_slug=slugify(target_title),
@@ -586,7 +639,30 @@ class StyleFeatureExtractor:
             existing = deduped.get(key)
             if existing is None or seed.score > existing.score:
                 deduped[key] = seed
-        return tuple(deduped.values())
+        return self._cap_relation_seeds(tuple(deduped.values()))
+
+    def _find_context_for_link(
+        self,
+        sections: tuple[NormalizedSection, ...],
+        *,
+        phrase: str,
+        preferred_section_title: str | None,
+    ) -> tuple[str | None, str | None]:
+        preferred_title = _clean_text(preferred_section_title)
+        lowered_preferred_title = preferred_title.casefold()
+        if preferred_title:
+            for section in sections:
+                section_title = _clean_text(section.section_title)
+                if section_title.casefold() != lowered_preferred_title:
+                    continue
+                for sentence in _split_sentences(section.section_text):
+                    if phrase.casefold() in sentence.casefold():
+                        return sentence, section_title or None
+                fallback_sentences = _split_sentences(section.section_text)
+                if fallback_sentences:
+                    return fallback_sentences[0], section_title or None
+                return None, section_title or None
+        return self._find_context_for_phrase(sections, phrase=phrase)
 
     def _find_context_for_phrase(
         self,
@@ -606,29 +682,106 @@ class StyleFeatureExtractor:
         *,
         sentence: str | None,
         section_title: str | None,
+        source_title: str,
+        target_title: str,
     ) -> tuple[str, float]:
-        lowered_sentence = _clean_text(sentence).casefold()
+        lowered_sentence = self._normalize_relation_context(
+            sentence,
+            source_title=source_title,
+            target_title=target_title,
+        ).casefold()
         lowered_section_title = _clean_text(section_title).casefold()
 
-        if any(term in lowered_section_title for term in COLOR_SECTION_TERMS) or any(
-            term in lowered_sentence for term in PALETTE_RELATION_TERMS
-        ):
+        for phrases, relation_type, score in RELATION_PHRASE_RULES:
+            if _contains_any_keyword(lowered_sentence, phrases):
+                return relation_type, score
+
+        if _contains_any_keyword(lowered_sentence, PALETTE_RELATION_TERMS):
             return "shares_palette_with", 0.83
 
-        if any(term in lowered_section_title for term in SILHOUETTE_RELATION_TERMS) or any(
-            term in lowered_sentence for term in SILHOUETTE_RELATION_TERMS
-        ):
+        if _contains_any_keyword(lowered_sentence, SILHOUETTE_RELATION_TERMS):
             return "shares_silhouette_with", 0.82
-
-        for phrases, relation_type, score in RELATION_PHRASE_RULES:
-            if any(phrase in lowered_sentence for phrase in phrases):
-                return relation_type, score
 
         if any(term in lowered_section_title for term in FAMILY_SECTION_TERMS):
             return "same_family", 0.78
         if any(term in lowered_section_title for term in RELATED_SECTION_TERMS):
             return "adjacent_to", 0.7
         return "adjacent_to", 0.58
+
+    def _normalize_relation_context(
+        self,
+        sentence: str | None,
+        *,
+        source_title: str,
+        target_title: str,
+    ) -> str:
+        normalized = _clean_text(sentence)
+        for title in (source_title, target_title):
+            cleaned_title = _clean_text(title)
+            if not cleaned_title:
+                continue
+            normalized = re.sub(re.escape(cleaned_title), " ", normalized, flags=re.IGNORECASE)
+        return _clean_text(normalized)
+
+    def _is_relation_seed_actionable(
+        self,
+        *,
+        link: NormalizedLink,
+        relation_type: str,
+        score: float,
+        sentence: str | None,
+        section_title: str | None,
+    ) -> bool:
+        lowered_section_title = _clean_text(section_title or link.section_title).casefold()
+        has_context_sentence = bool(_clean_text(sentence))
+
+        if self._looks_like_navigation_relation_context(sentence):
+            return False
+
+        if relation_type in {"inspired_by", "subcategory_of", "historically_related", "contrast_pair", "fusion_candidate"}:
+            return has_context_sentence
+        if relation_type == "same_family":
+            return link.link_type == "family_hint" or any(term in lowered_section_title for term in FAMILY_SECTION_TERMS)
+        if relation_type in {"shares_palette_with", "shares_silhouette_with"}:
+            return has_context_sentence and score >= 0.8
+        if relation_type == "adjacent_to":
+            if link.link_type == "see_also":
+                return has_context_sentence
+            return has_context_sentence and any(term in lowered_section_title for term in RELATED_SECTION_TERMS)
+        return score >= 0.72 and has_context_sentence
+
+    def _looks_like_navigation_relation_context(self, text: str | None) -> bool:
+        lowered = _clean_text(text).casefold()
+        if not lowered:
+            return False
+        if any(marker in lowered for marker in RELATION_NAVIGATION_MARKERS):
+            return True
+        if lowered.count("•") >= 2 or lowered.count(",") >= 4:
+            return True
+        return len(lowered.split()) >= 14 and not any(marker in lowered for marker in ".!?;:")
+
+    def _cap_relation_seeds(self, seeds: tuple[StyleRelationSeed, ...]) -> tuple[StyleRelationSeed, ...]:
+        ordered = sorted(seeds, key=lambda item: (item.score, item.relation_type != "adjacent_to"), reverse=True)
+        counts_by_type: dict[str, int] = {}
+        counts_by_reason_and_type: dict[tuple[str, str], int] = {}
+        capped: list[StyleRelationSeed] = []
+        for seed in ordered:
+            relation_limit = MAX_RELATION_SEEDS_BY_TYPE.get(seed.relation_type)
+            if relation_limit is not None and counts_by_type.get(seed.relation_type, 0) >= relation_limit:
+                continue
+            reason_limit = MAX_RELATION_SEEDS_PER_REASON_BY_TYPE.get(seed.relation_type)
+            normalized_reason = _clean_text(seed.reason or seed.evidence_text).casefold()
+            if reason_limit is not None and normalized_reason:
+                reason_key = (seed.relation_type, normalized_reason)
+                if counts_by_reason_and_type.get(reason_key, 0) >= reason_limit:
+                    continue
+            capped.append(seed)
+            counts_by_type[seed.relation_type] = counts_by_type.get(seed.relation_type, 0) + 1
+            if reason_limit is not None and normalized_reason:
+                counts_by_reason_and_type[reason_key] = counts_by_reason_and_type.get(reason_key, 0) + 1
+            if len(capped) >= MAX_RELATION_SEEDS_PER_STYLE:
+                break
+        return tuple(capped)
 
     def _match_vocabulary_values(
         self,
@@ -646,6 +799,10 @@ class StyleFeatureExtractor:
     def _is_non_style_link_title(self, title: str) -> bool:
         lowered = title.casefold()
         if any(lowered.startswith(prefix) for prefix in NON_STYLE_LINK_PREFIXES):
+            return True
+        if ":" in lowered:
+            return True
+        if re.search(r"\(\d{4}\)", title):
             return True
         return lowered in NON_STYLE_LINK_TITLES
 

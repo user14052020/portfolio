@@ -4,6 +4,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.domain.chat_modes import ChatMode, ClarificationKind, FlowState
+from app.domain.garment_matching.entities.anchor_garment import AnchorGarment
+from app.domain.occasion_outfit.entities.occasion_context import OccasionContext
 
 
 CURRENT_CHAT_CONTEXT_VERSION = 1
@@ -21,53 +23,6 @@ class CommandContext(BaseModel):
     command_name: str | None = None
     command_step: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class AnchorGarment(BaseModel):
-    raw_user_text: str | None = None
-    garment_type: str | None = None
-    color: str | None = None
-    secondary_colors: list[str] = Field(default_factory=list)
-    material: str | None = None
-    fit: str | None = None
-    silhouette: str | None = None
-    seasonality: str | None = None
-    formality: str | None = None
-    gender_context: str | None = None
-    confidence: float = 0.0
-    is_sufficient_for_generation: bool = False
-
-    def missing_attributes(self) -> list[str]:
-        missing: list[str] = []
-        if not self.garment_type:
-            missing.append("garment_type")
-        if not (self.color or self.material or self.fit):
-            missing.append("anchor_attributes")
-        return missing
-
-
-class OccasionContext(BaseModel):
-    event_type: str | None = None
-    location: str | None = None
-    time_of_day: str | None = None
-    season: str | None = None
-    dress_code: str | None = None
-    weather_context: str | None = None
-    desired_impression: str | None = None
-    constraints: list[str] = Field(default_factory=list)
-    is_sufficient_for_generation: bool = False
-
-    def missing_core_slots(self) -> list[str]:
-        missing: list[str] = []
-        if not self.event_type:
-            missing.append("event_type")
-        if not self.time_of_day:
-            missing.append("time_of_day")
-        if not self.season:
-            missing.append("season")
-        if not (self.dress_code or self.desired_impression):
-            missing.append("dress_code_or_desired_impression")
-        return missing
 
 
 class StyleDirection(BaseModel):

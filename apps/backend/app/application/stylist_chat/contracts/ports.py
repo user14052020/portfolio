@@ -2,6 +2,12 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from app.domain.chat_context import ChatModeContext, GenerationIntent, StyleDirectionContext
+from app.domain.garment_matching.entities.anchor_garment import AnchorGarment
+from app.domain.garment_matching.entities.garment_matching_outfit_brief import GarmentMatchingOutfitBrief
+from app.domain.garment_matching.policies.garment_completeness_policy import GarmentCompletenessAssessment
+from app.domain.occasion_outfit.entities.occasion_context import OccasionContext
+from app.domain.occasion_outfit.entities.occasion_outfit_brief import OccasionOutfitBrief
+from app.domain.occasion_outfit.policies.occasion_completeness_policy import OccasionCompletenessAssessment
 from app.services.chat_mode_resolver import ModeResolution
 
 
@@ -122,8 +128,91 @@ class PromptBuilder(Protocol):
         ...
 
 
+class GarmentExtractor(Protocol):
+    async def extract(
+        self,
+        user_text: str,
+        asset_id: str | None = None,
+        existing_anchor: AnchorGarment | None = None,
+    ) -> AnchorGarment:
+        ...
+
+
+class GarmentCompletenessEvaluator(Protocol):
+    def evaluate(self, garment: AnchorGarment) -> GarmentCompletenessAssessment:
+        ...
+
+
+class OccasionContextExtractor(Protocol):
+    async def extract(
+        self,
+        *,
+        locale: str,
+        user_message: str,
+        context: ChatModeContext,
+        existing_context: OccasionContext | None,
+        asset_metadata: dict[str, Any] | None = None,
+        fallback_history: list[dict[str, str]] | None = None,
+    ) -> OccasionContext:
+        ...
+
+
+class OccasionCompletenessEvaluator(Protocol):
+    def evaluate(self, context: OccasionContext) -> OccasionCompletenessAssessment:
+        ...
+
+
+class OccasionClarificationSelector(Protocol):
+    def build(
+        self,
+        *,
+        locale: str,
+        context: OccasionContext,
+        assessment: OccasionCompletenessAssessment,
+    ) -> tuple[Any, str]:
+        ...
+
+
 class KnowledgeProvider(Protocol):
     async def fetch(self, *, query: dict[str, Any]) -> KnowledgeResult:
+        ...
+
+
+class GarmentKnowledgeProvider(Protocol):
+    async def fetch_for_anchor_garment(
+        self,
+        garment: AnchorGarment,
+        context: dict[str, Any] | None = None,
+    ) -> KnowledgeResult:
+        ...
+
+
+class OccasionKnowledgeProvider(Protocol):
+    async def fetch_for_occasion(
+        self,
+        context: OccasionContext,
+        profile_context: dict[str, Any] | None = None,
+    ) -> KnowledgeResult:
+        ...
+
+
+class OutfitBriefBuilder(Protocol):
+    async def build(
+        self,
+        garment: AnchorGarment,
+        context: dict[str, Any],
+        knowledge_result: KnowledgeResult,
+    ) -> GarmentMatchingOutfitBrief:
+        ...
+
+
+class OccasionOutfitBriefBuilder(Protocol):
+    async def build(
+        self,
+        occasion_context: OccasionContext,
+        context: dict[str, Any],
+        knowledge_result: KnowledgeResult,
+    ) -> OccasionOutfitBrief:
         ...
 
 

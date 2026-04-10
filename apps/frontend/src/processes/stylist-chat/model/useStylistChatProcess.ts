@@ -13,10 +13,14 @@ import {
   getQuickActionDefinitions,
   runQuickActionCommand,
 } from "@/features/run-chat-command/model/runChatCommand";
+import { runGarmentMatchingCommand } from "@/features/run-garment-matching-command/model/runGarmentMatchingCommand";
+import { runOccasionCommand } from "@/features/run-occasion-command/model/runOccasionCommand";
 import {
   buildFreeformMessagePayload,
   sendFreeformMessage,
 } from "@/features/send-chat-message/model/sendChatMessage";
+import { sendGarmentFollowup } from "@/features/send-garment-followup/model/sendGarmentFollowup";
+import { sendOccasionFollowup } from "@/features/send-occasion-followup/model/sendOccasionFollowup";
 import { retryGeneration } from "@/features/retry-generation/model/retryGeneration";
 import { chatGateway } from "@/shared/api/gateways/chatGateway";
 import { generationGateway } from "@/shared/api/gateways/generationGateway";
@@ -302,15 +306,33 @@ export function useStylistChatProcess(locale: Locale) {
     setErrorMessage(null);
 
     try {
-      const response = await runQuickActionCommand(
-        buildQuickActionCommandPayload({
+      const clientMessageId = createClientMessageId();
+      let response;
+      if (action.id === "garment_matching") {
+        response = await runGarmentMatchingCommand({
           sessionId,
           locale,
-          action,
           assetId: uploadedAsset?.id ?? null,
-          clientMessageId: createClientMessageId(),
-        })
-      );
+          clientMessageId,
+        });
+      } else if (action.id === "occasion_outfit") {
+        response = await runOccasionCommand({
+          sessionId,
+          locale,
+          assetId: uploadedAsset?.id ?? null,
+          clientMessageId,
+        });
+      } else {
+        response = await runQuickActionCommand(
+          buildQuickActionCommandPayload({
+            sessionId,
+            locale,
+            action,
+            assetId: uploadedAsset?.id ?? null,
+            clientMessageId,
+          })
+        );
+      }
 
       setUploadedAsset(null);
       handleServerResponse({ response, previousActiveJob });
@@ -353,24 +375,44 @@ export function useStylistChatProcess(locale: Locale) {
     setErrorMessage(null);
 
     try {
-      const response =
-        composerSource === "followup"
-          ? await submitFollowupClarification({
-              sessionId,
-              locale,
-              message: draftInput.trim() || null,
-              assetId: draftUploadedAsset?.id ?? null,
-              clientMessageId,
-            })
-          : await sendFreeformMessage(
-              buildFreeformMessagePayload({
-                sessionId,
-                locale,
-                message: draftInput.trim() || null,
-                assetId: draftUploadedAsset?.id ?? null,
-                clientMessageId,
-              })
-            );
+      let response;
+      if (composerSource === "followup") {
+        if (scenarioContext.activeMode === "garment_matching") {
+          response = await sendGarmentFollowup({
+            sessionId,
+            locale,
+            message: draftInput.trim() || null,
+            assetId: draftUploadedAsset?.id ?? null,
+            clientMessageId,
+          });
+        } else if (scenarioContext.activeMode === "occasion_outfit") {
+          response = await sendOccasionFollowup({
+            sessionId,
+            locale,
+            message: draftInput.trim() || null,
+            assetId: draftUploadedAsset?.id ?? null,
+            clientMessageId,
+          });
+        } else {
+          response = await submitFollowupClarification({
+            sessionId,
+            locale,
+            message: draftInput.trim() || null,
+            assetId: draftUploadedAsset?.id ?? null,
+            clientMessageId,
+          });
+        }
+      } else {
+        response = await sendFreeformMessage(
+          buildFreeformMessagePayload({
+            sessionId,
+            locale,
+            message: draftInput.trim() || null,
+            assetId: draftUploadedAsset?.id ?? null,
+            clientMessageId,
+          })
+        );
+      }
 
       handleServerResponse({ response, previousActiveJob });
     } catch (error) {

@@ -10,8 +10,12 @@ import { useStylistChatProcess } from "@/processes/stylist-chat/model/useStylist
 import type { SiteSettings } from "@/shared/api/types";
 import { useI18n } from "@/shared/i18n/I18nProvider";
 import { ChatThread } from "@/widgets/chat-thread/ui/ChatThread";
-import { GenerationStatusPanel } from "@/widgets/generation-status/ui/GenerationStatusPanel";
-import { QuickActionsPanel } from "@/widgets/quick-actions/ui/QuickActionsPanel";
+import { GarmentGenerationStatus } from "@/widgets/garment-generation-status/ui/GarmentGenerationStatus";
+import { GarmentMatchingEntry } from "@/widgets/garment-matching-entry/ui/GarmentMatchingEntry";
+import { GarmentMatchingFollowup } from "@/widgets/garment-matching-followup/ui/GarmentMatchingFollowup";
+import { OccasionEntry } from "@/widgets/occasion-entry/ui/OccasionEntry";
+import { OccasionFollowup } from "@/widgets/occasion-followup/ui/OccasionFollowup";
+import { OccasionGenerationStatus } from "@/widgets/occasion-generation-status/ui/OccasionGenerationStatus";
 
 const RU_ASSISTANT_FALLBACK = "Валентин";
 const RU_ONLINE = "онлайн";
@@ -75,6 +79,9 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
   const scenarioLabel =
     chat.scenarioContext.commandName ??
     (chat.scenarioContext.activeMode === "general_advice" ? null : chat.scenarioContext.activeMode);
+  const isOccasionScenario =
+    chat.scenarioContext.activeMode === "occasion_outfit" ||
+    chat.scenarioContext.commandName === "occasion_outfit";
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -158,23 +165,54 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
         </div>
 
         <div className="border-t border-slate-200 px-4 py-4">
-          <GenerationStatusPanel
-            job={chat.activeJob}
-            locale={locale}
-            isRefreshing={chat.isRefreshingQueue}
-            queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
-            onRefresh={() => void chat.refreshGenerationStatus()}
-          />
+          {isOccasionScenario ? (
+            <OccasionGenerationStatus
+              job={chat.activeJob}
+              locale={locale}
+              isRefreshing={chat.isRefreshingQueue}
+              queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
+              onRefresh={() => void chat.refreshGenerationStatus()}
+            />
+          ) : (
+            <GarmentGenerationStatus
+              job={chat.activeJob}
+              locale={locale}
+              isRefreshing={chat.isRefreshingQueue}
+              queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
+              onRefresh={() => void chat.refreshGenerationStatus()}
+            />
+          )}
 
           <div className="mb-3 space-y-3">
-            <QuickActionsPanel
-              locale={locale}
-              disabled={chat.isGenerationActionLocked}
-              activeCommandName={chat.scenarioContext.commandName}
-              onAction={(actionId) => void chat.runQuickAction(actionId)}
-            />
+            {isOccasionScenario ? (
+              <OccasionEntry
+                locale={locale}
+                disabled={chat.isGenerationActionLocked}
+                activeCommandName={chat.scenarioContext.commandName}
+                onAction={(actionId) => void chat.runQuickAction(actionId)}
+              />
+            ) : (
+              <GarmentMatchingEntry
+                locale={locale}
+                disabled={chat.isGenerationActionLocked}
+                activeCommandName={chat.scenarioContext.commandName}
+                onAction={(actionId) => void chat.runQuickAction(actionId)}
+              />
+            )}
 
-            {scenarioLabel || chat.scenarioContext.pendingClarification ? (
+            {chat.scenarioContext.pendingClarificationText &&
+            chat.scenarioContext.activeMode === "garment_matching" ? (
+              <GarmentMatchingFollowup
+                locale={locale}
+                pendingClarificationText={chat.scenarioContext.pendingClarificationText}
+              />
+            ) : chat.scenarioContext.pendingClarificationText &&
+              chat.scenarioContext.activeMode === "occasion_outfit" ? (
+              <OccasionFollowup
+                locale={locale}
+                pendingClarificationText={chat.scenarioContext.pendingClarificationText}
+              />
+            ) : scenarioLabel || chat.scenarioContext.pendingClarification ? (
               <div className="border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 {scenarioLabel ? (
                   <p className="font-medium">

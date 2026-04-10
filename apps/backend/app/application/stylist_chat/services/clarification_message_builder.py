@@ -38,7 +38,7 @@ class ClarificationMessageBuilder:
         missing = occasion_context.missing_core_slots()
         if not missing:
             return None, None
-        if missing[0] == "event_type":
+        if "event_type" in missing:
             return (
                 ClarificationKind.OCCASION_EVENT_TYPE,
                 (
@@ -47,7 +47,25 @@ class ClarificationMessageBuilder:
                     else "What kind of event is it: a wedding, date, dinner, theater night, party, or something else?"
                 ),
             )
-        if missing == ["dress_code_or_desired_impression"]:
+        if "time_of_day" in missing:
+            return (
+                ClarificationKind.OCCASION_TIME_OF_DAY,
+                (
+                    "В какое время суток это событие: утром, днём или вечером?"
+                    if locale == "ru"
+                    else "What time of day is the event: morning, daytime, or evening?"
+                ),
+            )
+        if "season" in missing:
+            return (
+                ClarificationKind.OCCASION_SEASON,
+                (
+                    "Какой сейчас сезон для этого события: весна, лето, осень или зима?"
+                    if locale == "ru"
+                    else "What season is it for this event: spring, summer, autumn, or winter?"
+                ),
+            )
+        if "dress_code" in missing and "desired_impression" in missing:
             return (
                 ClarificationKind.OCCASION_DRESS_CODE,
                 (

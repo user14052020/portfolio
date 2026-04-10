@@ -3,6 +3,7 @@ from typing import Any
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import (
     FallbackReasonerStrategy,
+    KnowledgeResult,
     KnowledgeProvider,
     LLMReasoner,
     LLMReasonerContextLimitError,
@@ -50,13 +51,18 @@ class BaseChatModeHandler:
         anti_repeat_constraints: dict[str, list[str]] | None,
         knowledge_mode: str,
         style_history_used: bool,
+        structured_outfit_brief: dict[str, Any] | None = None,
+        knowledge_result_override: KnowledgeResult | None = None,
     ) -> DecisionResult:
-        knowledge_query = self.reasoning_context_builder.build_knowledge_query(
-            command=command,
-            context=context,
-            mode=knowledge_mode,
-        )
-        knowledge_result = await self.knowledge_provider.fetch(query=knowledge_query)
+        if knowledge_result_override is None:
+            knowledge_query = self.reasoning_context_builder.build_knowledge_query(
+                command=command,
+                context=context,
+                mode=knowledge_mode,
+            )
+            knowledge_result = await self.knowledge_provider.fetch(query=knowledge_query)
+        else:
+            knowledge_result = knowledge_result_override
         reasoning_input = self.reasoning_context_builder.build(
             command=command,
             context=context,
@@ -66,6 +72,7 @@ class BaseChatModeHandler:
             occasion_context=occasion_context,
             knowledge_result=knowledge_result,
             anti_repeat_constraints=anti_repeat_constraints,
+            structured_outfit_brief=structured_outfit_brief,
         )
 
         fallback_used = False
@@ -84,6 +91,9 @@ class BaseChatModeHandler:
                 reasoning_mode="context_limit",
                 knowledge_items_count=len(knowledge_result.items),
                 style_history_used=style_history_used,
+                knowledge_provider_used=knowledge_result.source,
+                anchor_garment_confidence=context.anchor_garment.confidence if context.anchor_garment else 0.0,
+                anchor_garment_completeness=context.anchor_garment.completeness_score if context.anchor_garment else 0.0,
             )
             return decision
         except LLMReasonerError:
@@ -101,6 +111,7 @@ class BaseChatModeHandler:
             must_generate=must_generate,
             style_seed=style_seed,
             occasion_context=occasion_context,
+            structured_outfit_brief=structured_outfit_brief,
         )
         self._apply_telemetry(
             decision=decision,
@@ -109,6 +120,9 @@ class BaseChatModeHandler:
             reasoning_mode=reasoning_output.reasoning_mode,
             knowledge_items_count=len(knowledge_result.items),
             style_history_used=style_history_used,
+            knowledge_provider_used=knowledge_result.source,
+            anchor_garment_confidence=context.anchor_garment.confidence if context.anchor_garment else 0.0,
+            anchor_garment_completeness=context.anchor_garment.completeness_score if context.anchor_garment else 0.0,
         )
         return decision
 
@@ -132,6 +146,9 @@ class BaseChatModeHandler:
         reasoning_mode: str,
         knowledge_items_count: int,
         style_history_used: bool,
+        knowledge_provider_used: str,
+        anchor_garment_confidence: float,
+        anchor_garment_completeness: float,
     ) -> None:
         decision.telemetry.update(
             {
@@ -140,5 +157,8 @@ class BaseChatModeHandler:
                 "reasoning_mode": reasoning_mode,
                 "knowledge_items_count": knowledge_items_count,
                 "style_history_used": style_history_used,
+                "knowledge_provider_used": knowledge_provider_used,
+                "anchor_garment_confidence": anchor_garment_confidence,
+                "anchor_garment_completeness": anchor_garment_completeness,
             }
         )

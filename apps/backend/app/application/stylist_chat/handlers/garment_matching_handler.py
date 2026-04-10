@@ -1,18 +1,14 @@
 from typing import Any
 
 from app.application.stylist_chat.contracts.command import ChatCommand
+from app.application.stylist_chat.contracts.ports import GenerationJobScheduler
 from app.application.stylist_chat.results.decision_result import DecisionResult
-from app.application.stylist_chat.services.clarification_message_builder import ClarificationMessageBuilder
-from app.application.stylist_chat.services.constants import (
-    COLOR_KEYWORDS,
-    FIT_KEYWORDS,
-    GARMENT_KEYWORDS,
-    MATERIAL_KEYWORDS,
-    SEASON_KEYWORDS,
-)
-from app.domain.chat_context import AnchorGarment, ChatModeContext
+from app.application.stylist_chat.use_cases.build_garment_outfit_brief import BuildGarmentOutfitBriefUseCase
+from app.application.stylist_chat.use_cases.continue_garment_matching import ContinueGarmentMatchingUseCase
+from app.application.stylist_chat.use_cases.start_garment_matching import StartGarmentMatchingUseCase
+from app.domain.chat_context import ChatModeContext
 from app.domain.chat_modes import FlowState
-from app.domain.state_machine.garment_matching_machine import GarmentMatchingStateMachine
+from app.models.enums import GenerationStatus
 
 from .base import BaseChatModeHandler
 
@@ -21,11 +17,17 @@ class GarmentMatchingHandler(BaseChatModeHandler):
     def __init__(
         self,
         *,
-        clarification_builder: ClarificationMessageBuilder,
+        start_use_case: StartGarmentMatchingUseCase,
+        continue_use_case: ContinueGarmentMatchingUseCase,
+        build_outfit_brief_use_case: BuildGarmentOutfitBriefUseCase,
+        generation_scheduler: GenerationJobScheduler,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.clarification_builder = clarification_builder
+        self.start_use_case = start_use_case
+        self.continue_use_case = continue_use_case
+        self.build_outfit_brief_use_case = build_outfit_brief_use_case
+        self.generation_scheduler = generation_scheduler
 
     async def handle(
         self,
@@ -33,46 +35,43 @@ class GarmentMatchingHandler(BaseChatModeHandler):
         command: ChatCommand,
         context: ChatModeContext,
     ) -> DecisionResult:
-        entry_prompt = self.clarification_builder.garment_entry_prompt(command.locale)
+        entry_prompt = context.pending_clarification or ""
         if command.command_step == "start":
-            GarmentMatchingStateMachine.enter(context, prompt_text=entry_prompt)
+            entry_prompt = self.start_use_case.execute(context=context, locale=command.locale)
             return self.generation_request_builder.build_clarification_decision(
                 context=context,
                 text=entry_prompt,
             )
         if context.flow_state in {FlowState.IDLE, FlowState.COMPLETED, FlowState.RECOVERABLE_ERROR}:
-            GarmentMatchingStateMachine.enter(context, prompt_text=entry_prompt)
+            entry_prompt = self.start_use_case.execute(context=context, locale=command.locale)
 
-        anchor = self.extract_anchor_garment(
-            user_message=command.normalized_message(),
-            asset_name=self.asset_name(command),
-            profile_context=command.profile_context,
-        )
-        if not anchor.raw_user_text and self.asset_name(command) is None:
-            decision = self.generation_request_builder.build_clarification_decision(
-                context=context,
-                text=entry_prompt,
-            )
-            return decision
-
-        clarification_text = None
-        if not anchor.is_sufficient_for_generation:
-            clarification_text = self.clarification_builder.garment_clarification_prompt(command.locale, anchor)
-        GarmentMatchingStateMachine.consume_anchor_garment(
-            context,
-            anchor_garment=anchor,
-            clarification_text=clarification_text,
-        )
-        if context.flow_state == FlowState.AWAITING_CLARIFICATION:
+        continuation = await self.continue_use_case.execute(command=command, context=context)
+        if context.flow_state == FlowState.AWAITING_ANCHOR_GARMENT_CLARIFICATION:
             decision = self.generation_request_builder.build_clarification_decision(
                 context=context,
                 text=context.pending_clarification or entry_prompt,
             )
+            decision.telemetry.update(
+                {
+                    "anchor_garment_confidence": continuation.anchor_garment.confidence,
+                    "anchor_garment_completeness": continuation.anchor_garment.completeness_score,
+                    "knowledge_provider_used": "clarification_policy",
+                }
+            )
             return decision
 
-        GarmentMatchingStateMachine.mark_ready_for_generation(context)
+        build_result = await self.build_outfit_brief_use_case.execute(
+            command=command,
+            context=context,
+            garment=continuation.anchor_garment,
+        )
+        context.flow_state = FlowState.READY_FOR_GENERATION
         decision = await self.run_reasoning(
-            command=command.model_copy(update={"message": anchor.raw_user_text or command.message}),
+            command=command.model_copy(
+                update={
+                    "message": continuation.anchor_garment.raw_user_text or command.message,
+                }
+            ),
             context=context,
             must_generate=True,
             style_seed=None,
@@ -81,84 +80,70 @@ class GarmentMatchingHandler(BaseChatModeHandler):
             anti_repeat_constraints=None,
             knowledge_mode="garment_matching",
             style_history_used=False,
+            structured_outfit_brief=build_result.compiled_brief,
+            knowledge_result_override=build_result.knowledge_result,
         )
         context.last_generated_outfit_summary = decision.text_reply
         if decision.generation_payload is not None:
             context.last_generation_prompt = decision.generation_payload.prompt
+            generation_intent = self.generation_request_builder.build_generation_intent(
+                mode=context.active_mode,
+                trigger="garment_matching",
+                reason="anchor_garment_is_sufficient_for_generation",
+                must_generate=True,
+                source_message_id=command.user_message_id,
+            )
+            context.generation_intent = generation_intent
+            decision.generation_payload.generation_intent = generation_intent
+            schedule_request = self.generation_request_builder.build_schedule_request(
+                command=command,
+                context=context,
+                decision=decision,
+            )
+            if schedule_request is not None:
+                if context.last_generation_request_key == schedule_request.idempotency_key and context.current_job_id:
+                    decision.job_id = context.current_job_id
+                    context.flow_state = self._flow_state_from_generation_status(GenerationStatus.PENDING.value)
+                else:
+                    schedule_result = await self.generation_scheduler.enqueue(schedule_request)
+                    if schedule_result.blocked_by_active_job:
+                        original_telemetry = dict(decision.telemetry)
+                        context.current_job_id = schedule_result.job_id
+                        context.flow_state = self._flow_state_from_generation_status(schedule_result.status)
+                        decision = self.generation_request_builder.build_active_job_notice(
+                            context=context,
+                            locale=command.locale,
+                        )
+                        decision.telemetry.update(original_telemetry)
+                    elif self._flow_state_from_generation_status(schedule_result.status) == FlowState.RECOVERABLE_ERROR:
+                        original_telemetry = dict(decision.telemetry)
+                        decision = self.generation_request_builder.build_recoverable_error(
+                            context=context,
+                            locale=command.locale,
+                            error_code="generation_enqueue_failed",
+                        )
+                        context.current_job_id = None
+                        context.flow_state = FlowState.RECOVERABLE_ERROR
+                        decision.telemetry.update(original_telemetry)
+                    else:
+                        context.current_job_id = schedule_result.job_id
+                        context.last_generation_request_key = schedule_request.idempotency_key
+                        context.flow_state = self._flow_state_from_generation_status(schedule_result.status)
+                        decision.job_id = schedule_result.job_id
+        decision.telemetry.update(
+            {
+                "anchor_garment_confidence": continuation.anchor_garment.confidence,
+                "anchor_garment_completeness": continuation.anchor_garment.completeness_score,
+                "knowledge_provider_used": build_result.knowledge_result.source,
+            }
+        )
         return decision
 
-    def extract_anchor_garment(
-        self,
-        *,
-        user_message: str,
-        asset_name: str | None,
-        profile_context: dict[str, str | int | None],
-    ) -> AnchorGarment:
-        raw_text = user_message.strip()
-        if not raw_text and asset_name:
-            raw_text = asset_name
-        lowered = raw_text.lower()
-
-        garment_type = self.first_keyword_match(lowered, GARMENT_KEYWORDS)
-        colors = self.all_keyword_matches(lowered, COLOR_KEYWORDS)
-        material = self.first_keyword_match(lowered, MATERIAL_KEYWORDS)
-        fit = self.first_keyword_match(lowered, FIT_KEYWORDS)
-        seasonality = self.first_keyword_match(lowered, SEASON_KEYWORDS)
-
-        confidence = 0.1
-        confidence += 0.35 if garment_type else 0.0
-        confidence += 0.15 if colors else 0.0
-        confidence += 0.15 if material else 0.0
-        confidence += 0.15 if fit else 0.0
-        confidence += 0.2 if asset_name else 0.0
-        return AnchorGarment(
-            raw_user_text=raw_text or None,
-            garment_type=garment_type,
-            color=colors[0] if colors else None,
-            secondary_colors=colors[1:] if len(colors) > 1 else [],
-            material=material,
-            fit=fit,
-            silhouette=fit,
-            seasonality=seasonality,
-            formality=self.infer_formality(lowered),
-            gender_context=self.optional_text(profile_context.get("gender")),
-            confidence=min(confidence, 0.95),
-            is_sufficient_for_generation=bool(asset_name or (garment_type and (colors or material or fit))),
-        )
-
-    def infer_formality(self, lowered_text: str) -> str | None:
-        if "formal" in lowered_text or "класс" in lowered_text or "вечер" in lowered_text:
-            return "formal"
-        if "smart casual" in lowered_text or "смарт" in lowered_text:
-            return "smart-casual"
-        if "casual" in lowered_text or "кэжуал" in lowered_text:
-            return "casual"
-        return None
-
-    def first_keyword_match(self, lowered_text: str, mapping: dict[str, tuple[str, ...]]) -> str | None:
-        for canonical, hints in mapping.items():
-            if any(hint in lowered_text for hint in hints):
-                return canonical
-        return None
-
-    def all_keyword_matches(self, lowered_text: str, mapping: dict[str, tuple[str, ...]]) -> list[str]:
-        matches: list[str] = []
-        for canonical, hints in mapping.items():
-            if any(hint in lowered_text for hint in hints):
-                matches.append(canonical)
-        return matches
-
-    def optional_text(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            value = str(value)
-        cleaned = value.strip()
-        return cleaned or None
-
-    def asset_name(self, command: ChatCommand) -> str | None:
-        raw_value = command.asset_metadata.get("original_filename")
-        if not isinstance(raw_value, str):
-            return None
-        cleaned = raw_value.strip()
-        return cleaned or None
+    def _flow_state_from_generation_status(self, status: str) -> FlowState:
+        if status == GenerationStatus.PENDING.value:
+            return FlowState.GENERATION_QUEUED
+        if status in {GenerationStatus.QUEUED.value, GenerationStatus.RUNNING.value}:
+            return FlowState.GENERATION_IN_PROGRESS
+        if status == GenerationStatus.COMPLETED.value:
+            return FlowState.COMPLETED
+        return FlowState.RECOVERABLE_ERROR

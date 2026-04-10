@@ -112,3 +112,36 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.prompt, "prompt::indigo denim shirt outfit flat lay")
         self.assertEqual(request.input_asset_id, 99)
         self.assertEqual(request.idempotency_key, "garment-1:garment_matching:cmd:cmd-12")
+
+    async def test_build_from_reasoning_passes_structured_garment_brief_to_prompt_builder(self) -> None:
+        builder = GenerationRequestBuilder(prompt_builder=FakePromptBuilder())
+        context = ChatModeContext(active_mode=ChatMode.GARMENT_MATCHING, should_auto_generate=True)
+
+        decision = await builder.build_from_reasoning(
+            command=ChatCommand(
+                session_id="garment-brief-1",
+                locale="en",
+                message="black leather jacket",
+                user_message_id=21,
+            ),
+            context=context,
+            reasoning_output=ReasoningOutput(
+                reply_text="I built a confident outfit around the jacket.",
+                image_brief_en="black leather jacket outfit flat lay",
+                route="text_and_generation",
+                provider="fake-vllm",
+            ),
+            asset_id=None,
+            must_generate=True,
+            style_seed=None,
+            occasion_context=None,
+            structured_outfit_brief={
+                "brief_type": "garment_matching",
+                "anchor_summary": "black leather jacket",
+                "styling_goal": "Build a clean outfit around the jacket.",
+            },
+        )
+
+        self.assertEqual(decision.decision_type, DecisionType.TEXT_AND_GENERATE)
+        assert decision.generation_payload is not None
+        self.assertEqual(decision.generation_payload.prompt, "prompt::black leather jacket outfit flat lay")

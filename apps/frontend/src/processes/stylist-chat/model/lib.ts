@@ -229,11 +229,11 @@ export function buildOptimisticDraftMessage(
 
   if (uploadedAsset) {
     return locale === "ru"
-      ? `Фото вещи: ${uploadedAsset.original_filename}`
+      ? `Р¤РѕС‚Рѕ РІРµС‰Рё: ${uploadedAsset.original_filename}`
       : `Item photo: ${uploadedAsset.original_filename}`;
   }
 
-  return locale === "ru" ? "Нужно уточнение по образу" : "Need outfit guidance";
+  return locale === "ru" ? "РќСѓР¶РЅРѕ СѓС‚РѕС‡РЅРµРЅРёРµ РїРѕ РѕР±СЂР°Р·Сѓ" : "Need outfit guidance";
 }
 
 export function createOptimisticUserMessage({
@@ -277,30 +277,30 @@ export function getScenarioPlaceholder(
 ) {
   if (context.pendingClarification) {
     return locale === "ru"
-      ? "Ответьте на уточнение стилиста..."
+      ? "РћС‚РІРµС‚СЊС‚Рµ РЅР° СѓС‚РѕС‡РЅРµРЅРёРµ СЃС‚РёР»РёСЃС‚Р°..."
       : "Answer the stylist follow-up...";
-  }
-
-  if (context.activeMode === "garment_matching") {
-    return locale === "ru"
-      ? "Опишите вещь или прикрепите фото..."
-      : "Describe the garment or attach a photo...";
   }
 
   if (context.activeMode === "occasion_outfit") {
     return locale === "ru"
-      ? "Опишите событие, время и желаемое впечатление..."
-      : "Describe the occasion, timing, and desired impression...";
+      ? "РќР°РїСЂРёРјРµСЂ: РІРµС‡РµСЂРЅСЏСЏ РІС‹СЃС‚Р°РІРєР° СЃРѕРІСЂРµРјРµРЅРЅРѕРіРѕ РёСЃРєСѓСЃСЃС‚РІР° РѕСЃРµРЅСЊСЋ, С…РѕС‡Сѓ РІС‹РіР»СЏРґРµС‚СЊ РёРЅС‚РµР»Р»РµРєС‚СѓР°Р»СЊРЅРѕ Рё РЅРµРјРЅРѕРіРѕ СЃРјРµР»Рѕ"
+      : "For example: an evening contemporary art exhibition in autumn, I want to look thoughtful and a little bold";
+  }
+
+  if (context.activeMode === "garment_matching") {
+    return locale === "ru"
+      ? "РќР°РїСЂРёРјРµСЂ: С‚С‘РјРЅРѕ-СЃРёРЅСЏСЏ РґР¶РёРЅСЃРѕРІР°СЏ СЂСѓР±Р°С€РєР° oversize"
+      : "For example: a dark indigo oversized denim shirt";
   }
 
   if (context.activeMode === "style_exploration") {
     return locale === "ru"
-      ? "Уточните, что хотите попробовать в новом стиле..."
+      ? "РЈС‚РѕС‡РЅРёС‚Рµ, С‡С‚Рѕ С…РѕС‚РёС‚Рµ РїРѕРїСЂРѕР±РѕРІР°С‚СЊ РІ РЅРѕРІРѕРј СЃС‚РёР»Рµ..."
       : "Add any hint for the next style direction...";
   }
 
   return locale === "ru"
-    ? "Опишите вещь, событие или желаемый стиль..."
+    ? "РћРїРёС€РёС‚Рµ РІРµС‰СЊ, СЃРѕР±С‹С‚РёРµ РёР»Рё Р¶РµР»Р°РµРјС‹Р№ СЃС‚РёР»СЊ..."
     : "Describe the garment, occasion, or style direction...";
 }
 

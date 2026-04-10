@@ -17,6 +17,7 @@ class ReasoningContextBuilder:
         occasion_context: OccasionContext | None,
         knowledge_result: KnowledgeResult,
         anti_repeat_constraints: dict[str, list[str]] | None,
+        structured_outfit_brief: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         profile_context = command.profile_context
         return {
@@ -37,6 +38,8 @@ class ReasoningContextBuilder:
             "previous_style_directions": previous_style_directions,
             "occasion_context": occasion_context.model_dump(exclude_none=True) if occasion_context is not None else None,
             "anchor_garment": context.anchor_garment.model_dump(exclude_none=True) if context.anchor_garment else None,
+            "structured_outfit_brief": structured_outfit_brief,
+            "garment_outfit_brief": structured_outfit_brief,
             "knowledge_items": [item.text for item in knowledge_result.items],
             "knowledge_query": knowledge_result.query,
             "anti_repeat_constraints": anti_repeat_constraints or {},

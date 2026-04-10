@@ -28,7 +28,7 @@ class GarmentMatchingStateMachine:
             context.clarification_kind = None
             return context
 
-        context.flow_state = FlowState.AWAITING_CLARIFICATION
+        context.flow_state = FlowState.AWAITING_ANCHOR_GARMENT_CLARIFICATION
         context.pending_clarification = clarification_text
         context.clarification_kind = ClarificationKind.ANCHOR_GARMENT_MISSING_ATTRIBUTES
         context.clarification_attempts += 1
@@ -49,4 +49,3 @@ class GarmentMatchingStateMachine:
     def complete(context: ChatModeContext) -> ChatModeContext:
         context.flow_state = FlowState.COMPLETED
         return context
-

@@ -30,7 +30,7 @@ class StateMachineTests(unittest.TestCase):
             clarification_text="Need color or material",
         )
 
-        self.assertEqual(context.flow_state, FlowState.AWAITING_CLARIFICATION)
+        self.assertEqual(context.flow_state, FlowState.AWAITING_ANCHOR_GARMENT_CLARIFICATION)
         self.assertEqual(context.pending_clarification, "Need color or material")
         self.assertEqual(context.clarification_kind, ClarificationKind.ANCHOR_GARMENT_MISSING_ATTRIBUTES)
         self.assertEqual(context.clarification_attempts, 1)
@@ -44,7 +44,7 @@ class StateMachineTests(unittest.TestCase):
             anchor_garment=AnchorGarment(
                 raw_user_text="indigo denim shirt",
                 garment_type="shirt",
-                color="indigo",
+                color_primary="indigo",
                 material="denim",
                 is_sufficient_for_generation=True,
             ),
@@ -72,12 +72,12 @@ class StateMachineTests(unittest.TestCase):
         OccasionOutfitStateMachine.consume_occasion_context(
             context,
             occasion_context=OccasionContext(event_type="wedding"),
-            clarification_kind=ClarificationKind.OCCASION_MISSING_MULTIPLE_SLOTS,
-            clarification_text="Need time and season",
+            clarification_kind=ClarificationKind.OCCASION_TIME_OF_DAY,
+            clarification_text="Need time of day",
         )
 
-        self.assertEqual(context.flow_state, FlowState.AWAITING_CLARIFICATION)
-        self.assertEqual(context.pending_clarification, "Need time and season")
+        self.assertEqual(context.flow_state, FlowState.AWAITING_OCCASION_CLARIFICATION)
+        self.assertEqual(context.pending_clarification, "Need time of day")
         self.assertEqual(context.clarification_attempts, 1)
 
     def test_occasion_outfit_consume_complete_context_moves_ready(self) -> None:

@@ -35,7 +35,7 @@ COLOR_KEYWORDS: dict[str, tuple[str, ...]] = {
     "black": ("black", "черн"),
     "white": ("white", "бел"),
     "grey": ("grey", "gray", "сер"),
-    "navy": ("navy", "темно-син", "тёмно-син"),
+    "navy": ("navy", "indigo", "темно-син", "тёмно-син"),
     "blue": ("blue", "син"),
     "beige": ("beige", "беж"),
     "brown": ("brown", "корич"),

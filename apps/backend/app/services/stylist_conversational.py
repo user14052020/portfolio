@@ -267,7 +267,7 @@ class StylistService:
 
         if context.active_mode == ChatMode.GARMENT_MATCHING and context.flow_state in {
             FlowState.AWAITING_ANCHOR_GARMENT,
-            FlowState.AWAITING_CLARIFICATION,
+            FlowState.AWAITING_ANCHOR_GARMENT_CLARIFICATION,
             FlowState.READY_FOR_DECISION,
             FlowState.READY_FOR_GENERATION,
             FlowState.GENERATION_QUEUED,

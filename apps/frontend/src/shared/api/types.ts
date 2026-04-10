@@ -8,7 +8,9 @@ export type FlowState =
   | "idle"
   | "awaiting_user_message"
   | "awaiting_anchor_garment"
+  | "awaiting_anchor_garment_clarification"
   | "awaiting_occasion_details"
+  | "awaiting_occasion_clarification"
   | "awaiting_clarification"
   | "ready_for_decision"
   | "ready_for_generation"
@@ -20,6 +22,8 @@ export type ClarificationKind =
   | "anchor_garment_description"
   | "anchor_garment_missing_attributes"
   | "occasion_event_type"
+  | "occasion_time_of_day"
+  | "occasion_season"
   | "occasion_dress_code"
   | "occasion_desired_impression"
   | "occasion_missing_multiple_slots"
@@ -42,19 +46,27 @@ export interface CommandContext {
 export interface AnchorGarment {
   raw_user_text?: string | null;
   garment_type?: string | null;
-  color?: string | null;
-  secondary_colors: string[];
+  category?: string | null;
+  color_primary?: string | null;
+  color_secondary: string[];
   material?: string | null;
   fit?: string | null;
   silhouette?: string | null;
-  seasonality?: string | null;
+  pattern?: string | null;
+  seasonality: string[];
   formality?: string | null;
   gender_context?: string | null;
+  style_hints: string[];
+  asset_id?: string | null;
   confidence: number;
+  completeness_score: number;
   is_sufficient_for_generation: boolean;
+  color?: string | null;
+  secondary_colors: string[];
 }
 
 export interface OccasionContext {
+  raw_user_texts: string[];
   event_type?: string | null;
   location?: string | null;
   time_of_day?: string | null;
@@ -63,6 +75,11 @@ export interface OccasionContext {
   weather_context?: string | null;
   desired_impression?: string | null;
   constraints: string[];
+  color_preferences: string[];
+  garment_preferences: string[];
+  comfort_requirements: string[];
+  confidence: number;
+  completeness_score: number;
   is_sufficient_for_generation: boolean;
 }
 

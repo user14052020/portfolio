@@ -64,7 +64,7 @@ class StylistChatOrchestrator:
             context=context,
             decision=decision,
         )
-        if decision.requires_generation() and generation_request is not None:
+        if decision.requires_generation() and generation_request is not None and decision.job_id is None:
             generation_intent = self._prepare_generation_intent(command=command, context=context, decision=decision)
             generation_request.generation_intent = generation_intent
             if context.last_generation_request_key == generation_request.idempotency_key and context.current_job_id:
@@ -84,6 +84,16 @@ class StylistChatOrchestrator:
                         context=context,
                         locale=command.locale,
                     )
+                    decision.telemetry.update(original_telemetry)
+                elif self._flow_state_from_generation_status(schedule_result.status) == FlowState.RECOVERABLE_ERROR:
+                    original_telemetry = dict(decision.telemetry)
+                    decision = self.generation_request_builder.build_recoverable_error(
+                        context=context,
+                        locale=command.locale,
+                        error_code="generation_enqueue_failed",
+                    )
+                    context.current_job_id = None
+                    context.flow_state = FlowState.RECOVERABLE_ERROR
                     decision.telemetry.update(original_telemetry)
                 else:
                     context.current_job_id = schedule_result.job_id
@@ -116,11 +126,18 @@ class StylistChatOrchestrator:
                 "command_id": command.command_id,
                 "correlation_id": command.correlation_id,
                 "requested_intent": command.requested_intent.value if command.requested_intent else None,
+                "active_mode": context.active_mode.value,
                 "resolved_mode": context.active_mode.value,
                 "flow_state_before": flow_state_before.value,
                 "flow_state_after": context.flow_state.value,
                 "decision_type": decision.decision_type.value,
                 "clarification_kind": context.clarification_kind.value if context.clarification_kind else None,
+                "anchor_garment_confidence": decision.telemetry.get("anchor_garment_confidence"),
+                "anchor_garment_completeness": decision.telemetry.get("anchor_garment_completeness"),
+                "filled_slots": decision.telemetry.get("filled_slots"),
+                "missing_slots": decision.telemetry.get("missing_slots"),
+                "occasion_completeness": decision.telemetry.get("occasion_completeness"),
+                "knowledge_provider_used": decision.telemetry.get("knowledge_provider_used"),
                 "provider": decision.telemetry.get("provider"),
                 "knowledge_used": decision.telemetry.get("knowledge_items_count", 0),
                 "generation_job_id": decision.job_id,

@@ -7,7 +7,11 @@ import {
   getQuickActionDefinitions,
 } from "@/features/run-chat-command/model/runChatCommand";
 import { buildFollowupMessagePayload } from "@/features/send-chat-message/model/sendChatMessage";
-import { shouldRenderPendingGeneration } from "@/processes/stylist-chat/model/lib";
+import {
+  createDefaultScenarioContext,
+  getScenarioPlaceholder,
+  shouldRenderPendingGeneration,
+} from "@/processes/stylist-chat/model/lib";
 import type { StylistMessageResponse } from "@/shared/api/types";
 
 test("quick action builds a typed garment_matching command payload", () => {
@@ -52,6 +56,43 @@ test("garment command does not require asset to enter the mode", () => {
 
   assert.equal(payload.assetId, null);
   assert.equal(payload.requestedIntent, "garment_matching");
+});
+
+test("quick action builds a typed occasion_outfit command payload", () => {
+  const action = getQuickActionDefinitions("en").find((item) => item.id === "occasion_outfit");
+  assert.ok(action);
+
+  const payload = buildQuickActionCommandPayload({
+    sessionId: "session-occ-1",
+    locale: "en",
+    action,
+  });
+
+  assert.equal(payload.requestedIntent, "occasion_outfit");
+  assert.equal(payload.commandName, "occasion_outfit");
+  assert.equal(payload.commandStep, "start");
+  assert.equal(payload.message, null);
+});
+
+test("garment flow placeholder shows an example-style hint after stage 4", () => {
+  const context = createDefaultScenarioContext();
+  context.activeMode = "garment_matching";
+
+  const placeholder = getScenarioPlaceholder(context, "ru");
+
+  assert.equal(placeholder, "Например: тёмно-синяя джинсовая рубашка oversize");
+});
+
+test("occasion flow placeholder shows an event-specific example after stage 5", () => {
+  const context = createDefaultScenarioContext();
+  context.activeMode = "occasion_outfit";
+
+  const placeholder = getScenarioPlaceholder(context, "en");
+
+  assert.equal(
+    placeholder,
+    "For example: an evening contemporary art exhibition in autumn, I want to look thoughtful and a little bold"
+  );
 });
 
 test("text_and_generate response adapts to text plus pending image lifecycle", () => {

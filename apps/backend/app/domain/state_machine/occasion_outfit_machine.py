@@ -29,7 +29,7 @@ class OccasionOutfitStateMachine:
             context.clarification_kind = None
             return context
 
-        context.flow_state = FlowState.AWAITING_CLARIFICATION
+        context.flow_state = FlowState.AWAITING_OCCASION_CLARIFICATION
         context.pending_clarification = clarification_text
         context.clarification_kind = clarification_kind
         context.clarification_attempts += 1
@@ -50,4 +50,3 @@ class OccasionOutfitStateMachine:
     def complete(context: ChatModeContext) -> ChatModeContext:
         context.flow_state = FlowState.COMPLETED
         return context
-

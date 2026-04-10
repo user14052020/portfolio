@@ -116,6 +116,7 @@ class ChatModeContext(BaseModel):
     current_style_id: str | None = None
     current_style_name: str | None = None
     current_job_id: str | None = None
+    last_generation_request_key: str | None = None
     last_decision_type: str | None = None
     generation_intent: GenerationIntent | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

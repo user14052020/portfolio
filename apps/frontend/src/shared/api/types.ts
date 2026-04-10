@@ -112,6 +112,7 @@ export interface DecisionResult {
   generation_payload?: GenerationPayload | null;
   job_id?: string | null;
   context_patch: Record<string, unknown>;
+  telemetry: Record<string, unknown>;
   error_code?: string | null;
 }
 
@@ -134,6 +135,7 @@ export interface ChatModeContext {
   current_style_id?: string | null;
   current_style_name?: string | null;
   current_job_id?: string | null;
+  last_generation_request_key?: string | null;
   last_decision_type?: string | null;
   generation_intent?: GenerationIntent | null;
   updated_at: string;

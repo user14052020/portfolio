@@ -175,7 +175,7 @@ npm run dev
 
 ## Установка vLLM и ComfyUI
 
-[Инструкция по установке vLLM и ComfyUI](./docs/how-install-vllm-comfyui/README.md)
+[Инструкция по установке vLLM и ComfyUI](./docs/vllm-comfyui/how-install-vllm-comfyui/README.md)
 
 ---
 

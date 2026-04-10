@@ -8,12 +8,16 @@ export type MessageSource = "chat_input" | "followup" | "system_retry";
 export interface CommandMetadata {
   source: CommandSource;
   clientMessageId?: string;
+  commandId?: string;
+  correlationId?: string;
   uiLocale?: Locale;
 }
 
 export interface MessageMetadata {
   source: MessageSource;
   clientMessageId?: string;
+  commandId?: string;
+  correlationId?: string;
 }
 
 export interface ChatCommandPayload {
@@ -24,6 +28,9 @@ export interface ChatCommandPayload {
   commandStep: CommandStep;
   message: string | null;
   assetId: string | null;
+  clientMessageId?: string;
+  commandId?: string;
+  correlationId?: string;
   metadata?: CommandMetadata;
 }
 
@@ -33,5 +40,8 @@ export interface ChatMessagePayload {
   message: string | null;
   assetId?: string | null;
   requestedIntent?: ChatMode | null;
+  clientMessageId?: string;
+  commandId?: string;
+  correlationId?: string;
   metadata?: MessageMetadata;
 }

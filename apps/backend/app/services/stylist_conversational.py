@@ -5,21 +5,19 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.stylist_chat.contracts.command import ChatCommand
 from app.domain.chat_context import ChatModeContext
 from app.domain.chat_modes import ChatMode, FlowState
-from app.domain.decision_result import DecisionResult, DecisionType
 from app.models import UploadedAsset
 from app.models.chat_message import ChatMessage
-from app.models.enums import ChatMessageRole, GenerationStatus
+from app.models.enums import ChatMessageRole
 from app.repositories.chat_messages import chat_messages_repository
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.repositories.uploads import uploads_repository
-from app.schemas.generation_job import GenerationJobCreate
 from app.schemas.stylist import StylistMessageRequest
 from app.services.chat_context_store import chat_context_store
-from app.services.chat_mode_resolver import chat_mode_resolver
 from app.services.generation import generation_service
-from app.services.stylist_orchestrator import stylist_orchestrator
+from app.services.stylist_orchestrator import build_stylist_chat_orchestrator
 
 
 class StylistService:
@@ -28,6 +26,13 @@ class StylistService:
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
         context = await self._sync_context_generation_state(session, context)
         requested_intent = self._coerce_requested_intent(payload.requested_intent)
+        resolved_client_message_id = payload.client_message_id
+        if resolved_client_message_id is None:
+            raw_value = payload.metadata.get("clientMessageId") or payload.metadata.get("client_message_id")
+            if isinstance(raw_value, str):
+                resolved_client_message_id = raw_value.strip() or None
+        resolved_command_id = payload.command_id or resolved_client_message_id
+        resolved_correlation_id = payload.correlation_id or resolved_command_id
 
         recent_messages_before = await chat_messages_repository.list_by_session(session, payload.session_id, limit=20)
         asset = await self._resolve_context_asset(
@@ -53,6 +58,9 @@ class StylistService:
                     "requested_intent": requested_intent.value if requested_intent else None,
                     "command_name": payload.command_name,
                     "command_step": payload.command_step,
+                    "client_message_id": resolved_client_message_id,
+                    "command_id": resolved_command_id,
+                    "correlation_id": resolved_correlation_id,
                     "metadata": payload.metadata,
                     "profile_gender": self._normalize_gender(payload.profile_gender),
                     "body_height_cm": payload.body_height_cm,
@@ -69,54 +77,31 @@ class StylistService:
             explicit_height_cm=payload.body_height_cm,
             explicit_weight_kg=payload.body_weight_kg,
         )
-        resolution = chat_mode_resolver.resolve(
-            context=context,
+        command = ChatCommand(
+            session_id=payload.session_id,
+            locale=locale,
+            message=user_message_text,
             requested_intent=requested_intent,
             command_name=payload.command_name,
             command_step=payload.command_step,
+            asset_id=payload.asset_id or payload.uploaded_asset_id,
             metadata=payload.metadata,
-        )
-        context, decision = await stylist_orchestrator.plan_turn(
-            session=session,
-            session_id=payload.session_id,
-            locale=locale,
-            context=context,
-            resolution=resolution,
-            user_message=user_message_text,
+            client_message_id=resolved_client_message_id,
+            command_id=resolved_command_id,
+            correlation_id=resolved_correlation_id,
             user_message_id=user_message.id,
-            asset=asset,
-            recent_messages=recent_messages,
             profile_context=profile_context,
+            asset_metadata=self._serialize_asset_metadata(asset),
+            fallback_history=self._serialize_message_history(recent_messages),
         )
-
-        if decision.decision_type == DecisionType.ERROR_RECOVERABLE:
-            context.flow_state = FlowState.RECOVERABLE_ERROR
-
-        session_state_record = await chat_context_store.save(
-            session,
-            session_id=payload.session_id,
-            context=context,
-            record=session_state_record,
-        )
-
+        orchestrator = build_stylist_chat_orchestrator(session)
+        decision = await orchestrator.handle(command=command)
+        session_state_record, context = await chat_context_store.load(session, payload.session_id)
         generation_job = None
-        if decision.requires_generation():
-            generation_job, decision = await self._materialize_generation_job(
-                session=session,
-                locale=locale,
-                session_id=payload.session_id,
-                context=context,
-                decision=decision,
-                input_text=user_message_text,
-                input_asset=asset,
-                profile_context=profile_context,
-            )
-            session_state_record = await chat_context_store.save(
-                session,
-                session_id=payload.session_id,
-                context=context,
-                record=session_state_record,
-            )
+        if decision.job_id:
+            generation_job = await generation_jobs_repository.get_by_public_id(session, decision.job_id)
+            if generation_job is not None:
+                generation_job = await generation_service.enrich_job_runtime(session, generation_job)
 
         assistant_text = decision.text_reply or self._fallback_empty_reply(locale)
         assistant_payload = {
@@ -127,9 +112,13 @@ class StylistService:
             "prompt": decision.generation_payload.prompt if decision.generation_payload else "",
             "image_brief_en": decision.generation_payload.image_brief_en if decision.generation_payload else "",
             "context_patch": decision.context_patch,
+            "telemetry": decision.telemetry,
             "kind": decision.decision_type.value,
             "command_name": payload.command_name,
             "command_step": payload.command_step,
+            "client_message_id": resolved_client_message_id,
+            "command_id": resolved_command_id,
+            "correlation_id": resolved_correlation_id,
         }
 
         assistant_message = await chat_messages_repository.create(
@@ -173,6 +162,30 @@ class StylistService:
             "session_context": context,
         }
 
+    def _serialize_asset_metadata(self, asset: UploadedAsset | None) -> dict[str, Any]:
+        if asset is None:
+            return {}
+        asset_type = getattr(asset.asset_type, "value", asset.asset_type)
+        return {
+            "asset_id": asset.id,
+            "original_filename": asset.original_filename,
+            "mime_type": asset.mime_type,
+            "size_bytes": asset.size_bytes,
+            "asset_type": asset_type,
+        }
+
+    def _serialize_message_history(self, messages: list[ChatMessage]) -> list[dict[str, str]]:
+        history: list[dict[str, str]] = []
+        for message in messages:
+            content = (message.content or "").strip()
+            if not content:
+                continue
+            role_value = getattr(message.role, "value", "user")
+            if role_value not in {"user", "assistant", "system"}:
+                role_value = "user"
+            history.append({"role": role_value, "content": content[:280]})
+        return history
+
     async def get_history(self, session: AsyncSession, session_id: str):
         history = await chat_messages_repository.list_by_session(session, session_id, limit=50)
         for message in history:
@@ -208,68 +221,9 @@ class StylistService:
             "next_before_message_id": next_before_message_id,
         }
 
-    async def _materialize_generation_job(
-        self,
-        *,
-        session: AsyncSession,
-        locale: str,
-        session_id: str,
-        context: ChatModeContext,
-        decision: DecisionResult,
-        input_text: str,
-        input_asset: UploadedAsset | None,
-        profile_context: dict[str, str | int | None],
-    ) -> tuple[Any, DecisionResult]:
-        existing_job = await generation_jobs_repository.get_latest_active_by_session(session, session_id)
-        if existing_job is not None and existing_job.status in {GenerationStatus.PENDING, GenerationStatus.QUEUED, GenerationStatus.RUNNING}:
-            enriched = await generation_service.enrich_job_runtime(session, existing_job)
-            context.current_job_id = enriched.public_id
-            context.flow_state = self._flow_state_from_generation_status(enriched.status)
-            notice = (
-                "У вас уже есть активная генерация изображения. Дождитесь её завершения, и затем можно будет запустить следующую."
-                if locale == "ru"
-                else "You already have an active image generation task. Let it finish before starting the next one."
-            )
-            return enriched, DecisionResult(
-                decision_type=DecisionType.TEXT_ONLY,
-                active_mode=context.active_mode,
-                flow_state=context.flow_state,
-                text_reply=notice,
-                context_patch=decision.context_patch,
-            )
-
-        generation_payload = decision.generation_payload
-        if generation_payload is None:
-            return None, decision
-
-        generation_job = await generation_service.create_and_submit(
-            session,
-            GenerationJobCreate(
-                session_id=session_id,
-                input_text=input_text,
-                recommendation_ru=decision.text_reply or "",
-                recommendation_en=decision.text_reply or "",
-                prompt=generation_payload.prompt,
-                input_asset_id=input_asset.id if input_asset else None,
-                body_height_cm=self._coerce_int(profile_context.get("height_cm")),
-                body_weight_kg=self._coerce_int(profile_context.get("weight_kg")),
-            ),
-        )
-        context.current_job_id = generation_job.public_id
-        context.generation_intent = generation_payload.generation_intent
-        context.last_generation_prompt = generation_payload.prompt
-        context.flow_state = self._flow_state_from_generation_status(generation_job.status)
-        decision.job_id = generation_job.public_id
-        return generation_job, decision
-
     async def _sync_context_generation_state(self, session: AsyncSession, context: ChatModeContext) -> ChatModeContext:
-        if not context.current_job_id:
-            return context
-        generation_job = await generation_jobs_repository.get_by_public_id(session, context.current_job_id)
-        if generation_job is None:
-            return context
-        context.flow_state = self._flow_state_from_generation_status(generation_job.status)
-        return context
+        orchestrator = build_stylist_chat_orchestrator(session)
+        return await orchestrator.generation_scheduler.sync_context(context)
 
     async def _enforce_message_cooldown(self, session: AsyncSession, session_id: str, locale: str) -> None:
         latest_assistant_message = await chat_messages_repository.get_latest_assistant_message(session, session_id)
@@ -316,6 +270,8 @@ class StylistService:
             FlowState.AWAITING_CLARIFICATION,
             FlowState.READY_FOR_DECISION,
             FlowState.READY_FOR_GENERATION,
+            FlowState.GENERATION_QUEUED,
+            FlowState.GENERATION_IN_PROGRESS,
         }:
             for message in reversed(recent_messages):
                 if message.role == ChatMessageRole.USER and message.uploaded_asset is not None:
@@ -342,15 +298,6 @@ class StylistService:
             return ChatMode(raw_value)
         except ValueError:
             return None
-
-    def _flow_state_from_generation_status(self, status: GenerationStatus) -> FlowState:
-        if status == GenerationStatus.PENDING:
-            return FlowState.GENERATION_QUEUED
-        if status in {GenerationStatus.QUEUED, GenerationStatus.RUNNING}:
-            return FlowState.GENERATION_IN_PROGRESS
-        if status == GenerationStatus.COMPLETED:
-            return FlowState.COMPLETED
-        return FlowState.RECOVERABLE_ERROR
 
     def _fallback_empty_reply(self, locale: str) -> str:
         return "Продолжаем." if locale == "ru" else "Let's continue."

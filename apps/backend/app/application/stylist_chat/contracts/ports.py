@@ -1,0 +1,156 @@
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from app.domain.chat_context import ChatModeContext, GenerationIntent, StyleDirectionContext
+from app.services.chat_mode_resolver import ModeResolution
+
+
+class LLMReasonerError(RuntimeError):
+    pass
+
+
+class LLMReasonerContextLimitError(LLMReasonerError):
+    pass
+
+
+@dataclass(slots=True)
+class ReasoningOutput:
+    reply_text: str
+    image_brief_en: str
+    route: str
+    provider: str
+    raw_content: str = ""
+    reasoning_mode: str = "primary"
+
+
+@dataclass(slots=True)
+class OccasionExtractionOutput:
+    event_type: str | None = None
+    venue: str | None = None
+    dress_code: str | None = None
+    time_of_day: str | None = None
+    season_or_weather: str | None = None
+    desired_impression: str | None = None
+    provider: str = "deterministic"
+    raw_content: str = ""
+
+
+@dataclass(slots=True)
+class KnowledgeItem:
+    key: str
+    text: str
+
+
+@dataclass(slots=True)
+class KnowledgeResult:
+    items: list[KnowledgeItem] = field(default_factory=list)
+    source: str = "none"
+    query: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GenerationScheduleRequest:
+    session_id: str
+    locale: str
+    input_text: str
+    recommendation_text: str
+    prompt: str
+    input_asset_id: int | None
+    profile_context: dict[str, str | int | None]
+    generation_intent: GenerationIntent | None
+    idempotency_key: str
+
+
+@dataclass(slots=True)
+class GenerationScheduleResult:
+    job_id: str | None
+    status: str
+    job: Any | None = None
+    blocked_by_active_job: bool = False
+    notice_text: str | None = None
+
+
+class ChatContextStorePort(Protocol):
+    async def load(self, session_id: str) -> tuple[Any | None, ChatModeContext]:
+        ...
+
+    async def save(
+        self,
+        *,
+        session_id: str,
+        context: ChatModeContext,
+        record: Any | None,
+    ) -> Any:
+        ...
+
+
+class ModeResolverPort(Protocol):
+    def resolve(
+        self,
+        *,
+        context: ChatModeContext,
+        requested_intent: Any,
+        command_name: str | None,
+        command_step: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> ModeResolution:
+        ...
+
+
+class LLMReasoner(Protocol):
+    async def decide(self, *, locale: str, reasoning_input: dict[str, Any]) -> ReasoningOutput:
+        ...
+
+    async def extract_occasion_slots(
+        self,
+        *,
+        locale: str,
+        user_message: str,
+        conversation_history: list[dict[str, str]],
+        existing_slots: dict[str, str | None],
+    ) -> OccasionExtractionOutput:
+        ...
+
+
+class FallbackReasonerStrategy(Protocol):
+    async def decide(self, *, locale: str, reasoning_input: dict[str, Any]) -> ReasoningOutput:
+        ...
+
+
+class PromptBuilder(Protocol):
+    async def build(self, *, brief: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+
+class KnowledgeProvider(Protocol):
+    async def fetch(self, *, query: dict[str, Any]) -> KnowledgeResult:
+        ...
+
+
+class StyleHistoryProvider(Protocol):
+    async def get_recent(self, session_id: str) -> list[StyleDirectionContext]:
+        ...
+
+    async def pick_next(
+        self,
+        *,
+        session_id: str,
+        style_history: list[StyleDirectionContext],
+    ) -> tuple[StyleDirectionContext, Any | None]:
+        ...
+
+    async def record_exposure(self, *, session_id: str, style_direction: Any) -> None:
+        ...
+
+
+class GenerationJobScheduler(Protocol):
+    async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
+        ...
+
+    async def enqueue(self, request: GenerationScheduleRequest) -> GenerationScheduleResult:
+        ...
+
+
+class EventLogger(Protocol):
+    async def emit(self, event_name: str, payload: dict[str, Any]) -> None:
+        ...

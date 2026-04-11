@@ -8,6 +8,9 @@ from app.domain.garment_matching.policies.garment_completeness_policy import Gar
 from app.domain.occasion_outfit.entities.occasion_context import OccasionContext
 from app.domain.occasion_outfit.entities.occasion_outfit_brief import OccasionOutfitBrief
 from app.domain.occasion_outfit.policies.occasion_completeness_policy import OccasionCompletenessAssessment
+from app.domain.style_exploration.entities.diversity_constraints import DiversityConstraints
+from app.domain.style_exploration.entities.style_direction import StyleDirection
+from app.domain.style_exploration.entities.style_exploration_brief import StyleExplorationBrief
 from app.services.chat_mode_resolver import ModeResolution
 
 
@@ -65,6 +68,7 @@ class GenerationScheduleRequest:
     profile_context: dict[str, str | int | None]
     generation_intent: GenerationIntent | None
     idempotency_key: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -232,6 +236,48 @@ class StyleHistoryProvider(Protocol):
         ...
 
 
+class CandidateStyleSelector(Protocol):
+    async def select(
+        self,
+        *,
+        session_id: str,
+        style_history: list[StyleDirection],
+    ) -> tuple[StyleDirection, Any | None]:
+        ...
+
+
+class SemanticDiversityBuilder(Protocol):
+    def build(
+        self,
+        *,
+        history: list[StyleDirection],
+        candidate_style: StyleDirection,
+        session_context: dict[str, Any] | None = None,
+    ) -> DiversityConstraints:
+        ...
+
+
+class VisualDiversityBuilder(Protocol):
+    def build(
+        self,
+        *,
+        history: list[StyleDirection],
+        current_visual_presets: list[dict[str, Any]] | None = None,
+    ) -> DiversityConstraints:
+        ...
+
+
+class StyleExplorationBriefBuilder(Protocol):
+    async def build(
+        self,
+        *,
+        style_direction: StyleDirection,
+        history: list[StyleDirection],
+        diversity_constraints: DiversityConstraints,
+    ) -> StyleExplorationBrief:
+        ...
+
+
 class GenerationJobScheduler(Protocol):
     async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
         ...
@@ -242,4 +288,29 @@ class GenerationJobScheduler(Protocol):
 
 class EventLogger(Protocol):
     async def emit(self, event_name: str, payload: dict[str, Any]) -> None:
+        ...
+
+
+class MetricsRecorder(Protocol):
+    async def increment(
+        self,
+        metric_name: str,
+        *,
+        value: int = 1,
+        tags: dict[str, Any] | None = None,
+    ) -> None:
+        ...
+
+    async def observe(
+        self,
+        metric_name: str,
+        *,
+        value: float,
+        tags: dict[str, Any] | None = None,
+    ) -> None:
+        ...
+
+
+class ContextCheckpointWriter(Protocol):
+    async def save_checkpoint(self, *, session_id: str, context: ChatModeContext) -> None:
         ...

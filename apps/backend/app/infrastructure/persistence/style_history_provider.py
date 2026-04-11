@@ -16,13 +16,12 @@ class DatabaseStyleHistoryProvider(StyleHistoryProvider):
         self.session = session
 
     async def get_recent(self, session_id: str) -> list[StyleDirectionContext]:
-        today = datetime.now(timezone.utc).date()
-        styles = await style_directions_repository.list_active_not_shown_today(
+        recent_styles = await stylist_style_exposures_repository.list_recent_style_directions(
             self.session,
             session_id=session_id,
-            shown_on=today,
+            limit=5,
         )
-        return [self._style_context_from_model(item) for item in styles[:5]]
+        return [self._style_context_from_model(item) for item in recent_styles]
 
     async def pick_next(
         self,
@@ -74,10 +73,17 @@ class DatabaseStyleHistoryProvider(StyleHistoryProvider):
         return StyleDirectionContext(
             style_id=style_direction.slug,
             style_name=style_direction.title_en,
+            style_family=style_direction.title_en.lower(),
             palette=descriptor_parts[:3],
-            silhouette=descriptor_parts[0] if descriptor_parts else None,
+            silhouette_family=descriptor_parts[0] if descriptor_parts else None,
             hero_garments=descriptor_parts[1:3],
-            styling_mood=descriptor_parts[-1] if descriptor_parts else None,
+            footwear=["loafers"] if "prep" in style_direction.title_en.lower() else ["derby shoes"],
+            accessories=["belt"],
+            materials=["wool", "cotton"],
+            styling_mood=[descriptor_parts[-1]] if descriptor_parts else [],
             composition_type="editorial flat lay",
             background_family="studio",
+            layout_density="balanced",
+            camera_distance="medium overhead",
+            visual_preset="editorial_studio",
         )

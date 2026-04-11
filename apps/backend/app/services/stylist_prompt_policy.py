@@ -1,5 +1,5 @@
 import json
-from typing import Literal
+from typing import Any, Literal
 
 
 SessionIntent = Literal["general_advice", "garment_matching", "style_exploration", "occasion_outfit"]
@@ -67,6 +67,8 @@ def build_stylist_user_prompt(
     style_seed: dict[str, str] | None,
     previous_style_directions: list[dict[str, str]],
     occasion_context: dict[str, str] | None,
+    anti_repeat_constraints: dict[str, Any] | None = None,
+    style_exploration_brief: dict[str, Any] | None = None,
 ) -> str:
     payload = {
         "locale": locale,
@@ -78,6 +80,8 @@ def build_stylist_user_prompt(
         "session_intent": session_intent,
         "style_seed": style_seed,
         "previous_style_directions": previous_style_directions,
+        "anti_repeat_constraints": anti_repeat_constraints or {},
+        "style_exploration_brief": style_exploration_brief,
         "conversation_history": conversation_history,
         "profile_context": profile_context,
         "occasion_context": occasion_context,

@@ -83,6 +83,8 @@ export function buildQuickActionCommandPayload({
   assetId?: number | string | null;
   clientMessageId?: string;
 }): ChatCommandPayload {
+  const shouldSuppressAsset =
+    action.id === "occasion_outfit" || action.id === "style_exploration" || assetId == null;
   return {
     sessionId,
     locale,
@@ -90,7 +92,7 @@ export function buildQuickActionCommandPayload({
     commandName: action.commandName,
     commandStep: action.commandStep,
     message: null,
-    assetId: assetId == null ? null : String(assetId),
+    assetId: shouldSuppressAsset ? null : String(assetId),
     metadata: {
       source: "quick_action",
       clientMessageId,

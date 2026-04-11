@@ -86,15 +86,19 @@ export interface OccasionContext {
 export interface StyleDirection {
   style_id?: string | null;
   style_name?: string | null;
+  style_family?: string | null;
   palette: string[];
-  silhouette?: string | null;
+  silhouette_family?: string | null;
   hero_garments: string[];
   footwear: string[];
   accessories: string[];
   materials: string[];
-  styling_mood?: string | null;
+  styling_mood: string[];
   composition_type?: string | null;
   background_family?: string | null;
+  layout_density?: string | null;
+  camera_distance?: string | null;
+  visual_preset?: string | null;
   created_at: string;
 }
 
@@ -118,6 +122,9 @@ export interface GenerationPayload {
   image_brief_en: string;
   recommendation_text: string;
   input_asset_id?: number | null;
+  negative_prompt?: string | null;
+  visual_preset?: string | null;
+  metadata: Record<string, unknown>;
   generation_intent?: GenerationIntent | null;
 }
 

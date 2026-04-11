@@ -77,3 +77,19 @@ class OccasionExtractionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.time_of_day, "evening")
         self.assertEqual(result.season, "spring")
         self.assertEqual(result.desired_impression, "elegant")
+
+    async def test_extract_recognizes_exhibition_and_month_based_season_without_llm(self) -> None:
+        service = OccasionExtractionService(reasoner=None)
+
+        result = await service.extract(
+            locale="en",
+            user_message="An exhibition in October, in the evening",
+            context=ChatModeContext(),
+            existing_context=None,
+            asset_metadata=None,
+            fallback_history=[],
+        )
+
+        self.assertEqual(result.event_type, "exhibition")
+        self.assertEqual(result.time_of_day, "evening")
+        self.assertEqual(result.season, "autumn")

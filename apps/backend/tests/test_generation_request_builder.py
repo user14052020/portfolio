@@ -35,7 +35,9 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
             asset_id=None,
             must_generate=False,
             style_seed=None,
+            previous_style_directions=[],
             occasion_context=None,
+            anti_repeat_constraints={},
         )
 
         self.assertEqual(decision.decision_type, DecisionType.TEXT_ONLY)
@@ -63,7 +65,9 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
             asset_id=42,
             must_generate=True,
             style_seed={"title": "Soft Prep", "descriptor": "relaxed collegiate layering"},
+            previous_style_directions=[],
             occasion_context=None,
+            anti_repeat_constraints={},
         )
 
         self.assertEqual(decision.decision_type, DecisionType.TEXT_AND_GENERATE)
@@ -93,7 +97,9 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
             asset_id=99,
             must_generate=True,
             style_seed=None,
+            previous_style_directions=[],
             occasion_context=None,
+            anti_repeat_constraints={},
         )
 
         request = builder.build_schedule_request(
@@ -134,7 +140,9 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
             asset_id=None,
             must_generate=True,
             style_seed=None,
+            previous_style_directions=[],
             occasion_context=None,
+            anti_repeat_constraints={},
             structured_outfit_brief={
                 "brief_type": "garment_matching",
                 "anchor_summary": "black leather jacket",

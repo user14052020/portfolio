@@ -9,6 +9,7 @@ import {
 import { buildFollowupMessagePayload } from "@/features/send-chat-message/model/sendChatMessage";
 import {
   createDefaultScenarioContext,
+  getComposerMessageSource,
   getScenarioPlaceholder,
   shouldRenderPendingGeneration,
 } from "@/processes/stylist-chat/model/lib";
@@ -66,12 +67,32 @@ test("quick action builds a typed occasion_outfit command payload", () => {
     sessionId: "session-occ-1",
     locale: "en",
     action,
+    assetId: "asset-77",
   });
 
   assert.equal(payload.requestedIntent, "occasion_outfit");
   assert.equal(payload.commandName, "occasion_outfit");
   assert.equal(payload.commandStep, "start");
   assert.equal(payload.message, null);
+  assert.equal(payload.assetId, null);
+});
+
+test("quick action builds a typed style_exploration command payload without asset coupling", () => {
+  const action = getQuickActionDefinitions("en").find((item) => item.id === "style_exploration");
+  assert.ok(action);
+
+  const payload = buildQuickActionCommandPayload({
+    sessionId: "session-style-1",
+    locale: "en",
+    action,
+    assetId: "asset-88",
+  });
+
+  assert.equal(payload.requestedIntent, "style_exploration");
+  assert.equal(payload.commandName, "style_exploration");
+  assert.equal(payload.commandStep, "start");
+  assert.equal(payload.message, null);
+  assert.equal(payload.assetId, null);
 });
 
 test("garment flow placeholder shows an example-style hint after stage 4", () => {
@@ -93,6 +114,30 @@ test("occasion flow placeholder shows an event-specific example after stage 5", 
     placeholder,
     "For example: an evening contemporary art exhibition in autumn, I want to look thoughtful and a little bold"
   );
+});
+
+test("style exploration placeholder shows a diversity-aware hint after stage 6", () => {
+  const context = createDefaultScenarioContext();
+  context.activeMode = "style_exploration";
+
+  const placeholder = getScenarioPlaceholder(context, "en");
+
+  assert.equal(
+    placeholder,
+    "For example: something softer and warmer, with a different palette and silhouette"
+  );
+});
+
+test("composer uses follow-up mode only while a clarification is pending", () => {
+  const context = createDefaultScenarioContext();
+  context.activeMode = "style_exploration";
+  context.commandName = "style_exploration";
+  context.pendingClarification = false;
+
+  assert.equal(getComposerMessageSource(context), "chat_input");
+
+  context.pendingClarification = true;
+  assert.equal(getComposerMessageSource(context), "followup");
 });
 
 test("text_and_generate response adapts to text plus pending image lifecycle", () => {
@@ -154,6 +199,7 @@ test("text_and_generate response adapts to text plus pending image lifecycle", (
         image_brief_en: "editorial outfit",
         recommendation_text: "Here is the outfit direction.",
         input_asset_id: null,
+        metadata: {},
         generation_intent: {
           mode: "style_exploration",
           trigger: "style_exploration",

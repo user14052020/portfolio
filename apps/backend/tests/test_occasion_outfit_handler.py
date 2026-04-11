@@ -96,7 +96,19 @@ class FakeGenerationScheduler:
         return context
 
 
-def build_handler(reasoner: FakeOccasionReasoner, scheduler: FakeGenerationScheduler) -> OccasionOutfitHandler:
+class FakeCheckpointWriter:
+    def __init__(self) -> None:
+        self.saved_contexts: list[ChatModeContext] = []
+
+    async def save_checkpoint(self, *, session_id: str, context: ChatModeContext) -> None:
+        self.saved_contexts.append(context.model_copy(deep=True))
+
+
+def build_handler(
+    reasoner: FakeOccasionReasoner,
+    scheduler: FakeGenerationScheduler,
+    checkpoint_writer: FakeCheckpointWriter | None = None,
+) -> OccasionOutfitHandler:
     extraction_service = OccasionExtractionService(reasoner=reasoner)
     continue_use_case = ContinueOccasionOutfitUseCase(
         occasion_context_extractor=extraction_service,
@@ -116,6 +128,7 @@ def build_handler(reasoner: FakeOccasionReasoner, scheduler: FakeGenerationSched
         continue_use_case=continue_use_case,
         build_outfit_brief_use_case=build_outfit_brief,
         generation_scheduler=scheduler,
+        context_checkpoint_writer=checkpoint_writer,
         reasoner=reasoner,
         fallback_reasoner=FakeFallbackReasoner(),
         knowledge_provider=FakeKnowledgeProvider(),
@@ -173,7 +186,8 @@ class OccasionOutfitHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_followup_with_sufficient_slots_generates_job(self) -> None:
         reasoner = FakeOccasionReasoner()
         scheduler = FakeGenerationScheduler()
-        handler = build_handler(reasoner, scheduler)
+        checkpoint_writer = FakeCheckpointWriter()
+        handler = build_handler(reasoner, scheduler, checkpoint_writer)
         context = ChatModeContext(active_mode=ChatMode.OCCASION_OUTFIT)
         StartOccasionOutfitUseCase(ClarificationMessageBuilder()).execute(context=context, locale="en")
         reasoner.extraction = OccasionExtractionOutput(
@@ -202,3 +216,6 @@ class OccasionOutfitHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.occasion_context.season, "summer")
         self.assertEqual(context.occasion_context.desired_impression, "elegant")
         self.assertEqual(len(scheduler.enqueued), 1)
+        self.assertEqual(len(checkpoint_writer.saved_contexts), 2)
+        self.assertEqual(checkpoint_writer.saved_contexts[0].flow_state, FlowState.READY_FOR_GENERATION)
+        self.assertEqual(checkpoint_writer.saved_contexts[1].flow_state, FlowState.GENERATION_QUEUED)

@@ -40,6 +40,12 @@ class ReasoningContextBuilder:
             "anchor_garment": context.anchor_garment.model_dump(exclude_none=True) if context.anchor_garment else None,
             "structured_outfit_brief": structured_outfit_brief,
             "garment_outfit_brief": structured_outfit_brief,
+            "style_exploration_brief": (
+                structured_outfit_brief
+                if isinstance(structured_outfit_brief, dict)
+                and str(structured_outfit_brief.get("brief_type") or "").strip() == "style_exploration"
+                else None
+            ),
             "knowledge_items": [item.text for item in knowledge_result.items],
             "knowledge_query": knowledge_result.query,
             "anti_repeat_constraints": anti_repeat_constraints or {},

@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.application.stylist_chat.contracts.command import ChatCommand
-from app.application.stylist_chat.contracts.ports import GenerationJobScheduler
+from app.application.stylist_chat.contracts.ports import ContextCheckpointWriter, GenerationJobScheduler
 from app.application.stylist_chat.results.decision_result import DecisionResult
 from app.application.stylist_chat.use_cases.build_occasion_outfit_brief import BuildOccasionOutfitBriefUseCase
 from app.application.stylist_chat.use_cases.continue_occasion_outfit import ContinueOccasionOutfitUseCase
@@ -21,6 +21,7 @@ class OccasionOutfitHandler(BaseChatModeHandler):
         continue_use_case: ContinueOccasionOutfitUseCase,
         build_outfit_brief_use_case: BuildOccasionOutfitBriefUseCase,
         generation_scheduler: GenerationJobScheduler,
+        context_checkpoint_writer: ContextCheckpointWriter | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -28,6 +29,7 @@ class OccasionOutfitHandler(BaseChatModeHandler):
         self.continue_use_case = continue_use_case
         self.build_outfit_brief_use_case = build_outfit_brief_use_case
         self.generation_scheduler = generation_scheduler
+        self.context_checkpoint_writer = context_checkpoint_writer
 
     async def handle(
         self,
@@ -108,6 +110,11 @@ class OccasionOutfitHandler(BaseChatModeHandler):
                     decision.job_id = context.current_job_id
                     context.flow_state = self._flow_state_from_generation_status(GenerationStatus.PENDING.value)
                 else:
+                    if self.context_checkpoint_writer is not None:
+                        await self.context_checkpoint_writer.save_checkpoint(
+                            session_id=command.session_id,
+                            context=context,
+                        )
                     schedule_result = await self.generation_scheduler.enqueue(schedule_request)
                     if schedule_result.blocked_by_active_job:
                         original_telemetry = dict(decision.telemetry)
@@ -133,6 +140,11 @@ class OccasionOutfitHandler(BaseChatModeHandler):
                         context.last_generation_request_key = schedule_request.idempotency_key
                         context.flow_state = self._flow_state_from_generation_status(schedule_result.status)
                         decision.job_id = schedule_result.job_id
+                    if self.context_checkpoint_writer is not None:
+                        await self.context_checkpoint_writer.save_checkpoint(
+                            session_id=command.session_id,
+                            context=context,
+                        )
         decision.telemetry.update(
             {
                 "occasion_completeness": continuation.assessment.completeness_score,

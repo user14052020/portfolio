@@ -99,6 +99,8 @@ class VLLMClient:
         style_seed: dict[str, str] | None,
         previous_style_directions: list[dict[str, str]],
         occasion_context: dict[str, str] | None,
+        anti_repeat_constraints: dict[str, Any] | None,
+        style_exploration_brief: dict[str, Any] | None,
     ) -> StylistLLMResult:
         last_context_error: VLLMContextLimitError | None = None
         for history_limit, max_chars, max_tokens in self._generation_budget_variants():
@@ -125,6 +127,8 @@ class VLLMClient:
                             style_seed=style_seed,
                             previous_style_directions=previous_style_directions,
                             occasion_context=occasion_context,
+                            anti_repeat_constraints=anti_repeat_constraints,
+                            style_exploration_brief=style_exploration_brief,
                         ),
                     },
                 ],

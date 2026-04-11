@@ -2,11 +2,16 @@ from time import perf_counter
 from typing import Any
 
 from app.application.stylist_chat.contracts.command import ChatCommand
-from app.application.stylist_chat.contracts.ports import ChatContextStorePort, EventLogger, GenerationJobScheduler
+from app.application.stylist_chat.contracts.ports import (
+    ChatContextStorePort,
+    EventLogger,
+    GenerationJobScheduler,
+    MetricsRecorder,
+)
 from app.application.stylist_chat.results.decision_result import DecisionResult, DecisionType
 from app.application.stylist_chat.services.generation_request_builder import GenerationRequestBuilder
 from app.domain.chat_context import ChatModeContext
-from app.domain.chat_modes import ChatMode, FlowState
+from app.domain.chat_modes import ChatMode, ClarificationKind, FlowState
 from app.models.enums import GenerationStatus
 
 from .command_dispatcher import CommandDispatcher
@@ -20,6 +25,7 @@ class StylistChatOrchestrator:
         context_store: ChatContextStorePort,
         generation_scheduler: GenerationJobScheduler,
         event_logger: EventLogger,
+        metrics_recorder: MetricsRecorder,
         command_dispatcher: CommandDispatcher,
         mode_router: ModeRouter,
         generation_request_builder: GenerationRequestBuilder,
@@ -27,6 +33,7 @@ class StylistChatOrchestrator:
         self.context_store = context_store
         self.generation_scheduler = generation_scheduler
         self.event_logger = event_logger
+        self.metrics_recorder = metrics_recorder
         self.command_dispatcher = command_dispatcher
         self.mode_router = mode_router
         self.generation_request_builder = generation_request_builder
@@ -36,6 +43,7 @@ class StylistChatOrchestrator:
         session_state_record, context = await self.context_store.load(command.session_id)
         context = await self.generation_scheduler.sync_context(context)
         flow_state_before = context.flow_state
+        clarification_kind_before = context.clarification_kind
 
         dispatch = self.command_dispatcher.dispatch(command=command, context=context)
         context = dispatch.context
@@ -113,10 +121,20 @@ class StylistChatOrchestrator:
                 )
 
         decision.flow_state = context.flow_state
-        decision.context_patch = self.build_context_patch(context)
+        decision.context_patch = {
+            **self.build_context_patch(context),
+            **decision.context_patch,
+        }
         decision.telemetry["generation_job_id"] = decision.job_id
         latency_ms = max(int((perf_counter() - started_at) * 1000), 0)
         decision.telemetry["latency_ms"] = latency_ms
+        await self._record_metrics(
+            command=command,
+            context=context,
+            decision=decision,
+            flow_state_before=flow_state_before,
+            clarification_kind_before=clarification_kind_before,
+        )
         await self.event_logger.emit(
             "stylist_chat_orchestrated",
             {
@@ -142,11 +160,107 @@ class StylistChatOrchestrator:
                 "knowledge_used": decision.telemetry.get("knowledge_items_count", 0),
                 "generation_job_id": decision.job_id,
                 "style_id": context.current_style_id,
+                "style_name": decision.telemetry.get("style_name") or context.current_style_name,
+                "style_history_size": decision.telemetry.get("style_history_size"),
+                "semantic_constraints_hash": decision.telemetry.get("semantic_constraints_hash"),
+                "visual_constraints_hash": decision.telemetry.get("visual_constraints_hash"),
+                "palette": decision.telemetry.get("palette"),
+                "hero_garments": decision.telemetry.get("hero_garments"),
+                "composition_type": decision.telemetry.get("composition_type"),
+                "visual_preset": decision.telemetry.get("visual_preset"),
                 "fallback_used": decision.telemetry.get("fallback_used", False),
                 "latency_ms": latency_ms,
             },
         )
         return decision
+
+    async def _record_metrics(
+        self,
+        *,
+        command: ChatCommand,
+        context: ChatModeContext,
+        decision: DecisionResult,
+        flow_state_before: FlowState,
+        clarification_kind_before: ClarificationKind | None,
+    ) -> None:
+        if context.active_mode == ChatMode.STYLE_EXPLORATION:
+            style_tags: dict[str, Any] = {
+                "mode": context.active_mode.value,
+                "decision_type": decision.decision_type.value,
+                "flow_state_before": flow_state_before.value,
+                "flow_state_after": context.flow_state.value,
+                "visual_preset": decision.telemetry.get("visual_preset"),
+            }
+            if command.command_step == "start":
+                await self.metrics_recorder.increment("style_exploration_flows_started", tags=style_tags)
+            if decision.job_id is not None:
+                await self.metrics_recorder.increment("style_exploration_flows_ending_in_generation", tags=style_tags)
+                await self.metrics_recorder.increment("generation_success_rate_per_visual_preset", tags=style_tags)
+            for metric_name in (
+                "palette_repeat_rate",
+                "hero_garment_repeat_rate",
+                "silhouette_repeat_rate",
+                "composition_repeat_rate",
+                "semantic_diversity_score",
+                "visual_diversity_score",
+            ):
+                raw_value = decision.telemetry.get(metric_name)
+                if isinstance(raw_value, (int, float)):
+                    await self.metrics_recorder.observe(metric_name, value=float(raw_value), tags=style_tags)
+            return
+
+        if context.active_mode != ChatMode.OCCASION_OUTFIT:
+            return
+
+        tags: dict[str, Any] = {
+            "mode": context.active_mode.value,
+            "decision_type": decision.decision_type.value,
+            "flow_state_before": flow_state_before.value,
+            "flow_state_after": context.flow_state.value,
+        }
+        if context.clarification_kind is not None:
+            tags["clarification_kind"] = context.clarification_kind.value
+
+        if command.command_step == "start":
+            await self.metrics_recorder.increment("occasion_flow_started", tags=tags)
+
+        completeness = decision.telemetry.get("occasion_completeness")
+        if isinstance(completeness, (int, float)):
+            await self.metrics_recorder.observe(
+                "occasion_slot_completeness",
+                value=float(completeness),
+                tags=tags,
+            )
+
+        if decision.decision_type == DecisionType.CLARIFICATION_REQUIRED:
+            await self.metrics_recorder.increment("occasion_flow_clarification_steps", tags=tags)
+            if clarification_kind_before is not None and clarification_kind_before == context.clarification_kind:
+                await self.metrics_recorder.increment("occasion_repeated_missing_slot", tags=tags)
+
+        if context.occasion_context is not None and context.occasion_context.is_sufficient_for_generation:
+            await self.metrics_recorder.increment("occasion_flow_ready_for_generation", tags=tags)
+
+        if decision.job_id is not None:
+            await self.metrics_recorder.increment("occasion_flow_ended_in_generation", tags=tags)
+            await self.metrics_recorder.increment("occasion_generation_success_after_readiness", tags=tags)
+            await self.metrics_recorder.observe(
+                "occasion_clarifications_before_generation",
+                value=float(context.clarification_attempts),
+                tags=tags,
+            )
+
+        if decision.decision_type == DecisionType.ERROR_RECOVERABLE:
+            await self.metrics_recorder.increment("occasion_flow_recoverable_failures", tags=tags)
+            if decision.error_code == "generation_enqueue_failed":
+                await self.metrics_recorder.increment("occasion_queue_failures", tags=tags)
+
+        if (
+            context.occasion_context is not None
+            and context.occasion_context.is_sufficient_for_generation
+            and not decision.requires_generation()
+            and decision.decision_type not in {DecisionType.ERROR_RECOVERABLE, DecisionType.ERROR_HARD}
+        ):
+            await self.metrics_recorder.increment("occasion_silent_failures", tags=tags)
 
     def _prepare_generation_intent(
         self,

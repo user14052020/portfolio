@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from app.domain.chat_modes import ChatMode, ClarificationKind, FlowState
 from app.domain.garment_matching.entities.anchor_garment import AnchorGarment
 from app.domain.occasion_outfit.entities.occasion_context import OccasionContext
+from app.domain.style_exploration.entities.style_direction import StyleDirection
 
 
 CURRENT_CHAT_CONTEXT_VERSION = 1
@@ -23,21 +24,6 @@ class CommandContext(BaseModel):
     command_name: str | None = None
     command_step: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class StyleDirection(BaseModel):
-    style_id: str | None = None
-    style_name: str | None = None
-    palette: list[str] = Field(default_factory=list)
-    silhouette: str | None = None
-    hero_garments: list[str] = Field(default_factory=list)
-    footwear: list[str] = Field(default_factory=list)
-    accessories: list[str] = Field(default_factory=list)
-    materials: list[str] = Field(default_factory=list)
-    styling_mood: str | None = None
-    composition_type: str | None = None
-    background_family: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 StyleDirectionContext = StyleDirection

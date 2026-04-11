@@ -31,6 +31,9 @@ export function adaptFrontendScenarioContext(rawContext: ChatModeContext): Front
     pendingClarificationText: rawContext.pending_clarification ?? null,
     clarificationKind: rawContext.clarification_kind ?? null,
     currentJobId: rawContext.current_job_id ?? null,
+    currentStyleId: rawContext.current_style_id ?? null,
+    currentStyleName: rawContext.current_style_name ?? null,
+    styleHistory: rawContext.style_history,
     commandName: normalizeCommandName(
       rawContext.command_context?.command_name,
       rawContext.active_mode

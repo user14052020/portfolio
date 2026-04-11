@@ -27,7 +27,7 @@ export async function runOccasionCommand({
       sessionId,
       locale,
       action,
-      assetId,
+      assetId: null,
       clientMessageId,
     })
   );

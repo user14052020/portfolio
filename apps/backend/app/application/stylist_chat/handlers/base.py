@@ -110,7 +110,9 @@ class BaseChatModeHandler:
             asset_id=command.asset_metadata.get("asset_id"),
             must_generate=must_generate,
             style_seed=style_seed,
+            previous_style_directions=previous_style_directions,
             occasion_context=occasion_context,
+            anti_repeat_constraints=anti_repeat_constraints,
             structured_outfit_brief=structured_outfit_brief,
         )
         self._apply_telemetry(
@@ -127,7 +129,8 @@ class BaseChatModeHandler:
         return decision
 
     def style_seed_from_context(self, style: StyleDirectionContext) -> dict[str, str]:
-        descriptor_bits = [bit for bit in [style.silhouette, style.styling_mood, *style.hero_garments[:2]] if bit]
+        mood_bit = style.primary_mood if hasattr(style, "primary_mood") else None
+        descriptor_bits = [bit for bit in [style.silhouette, mood_bit, *style.hero_garments[:2]] if bit]
         descriptor = ", ".join(descriptor_bits) or style.style_name or "cohesive style direction"
         return {
             "slug": style.style_id or (style.style_name or "style-direction").lower().replace(" ", "-"),

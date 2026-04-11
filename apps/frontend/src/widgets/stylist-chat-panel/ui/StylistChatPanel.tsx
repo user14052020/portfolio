@@ -16,6 +16,8 @@ import { GarmentMatchingFollowup } from "@/widgets/garment-matching-followup/ui/
 import { OccasionEntry } from "@/widgets/occasion-entry/ui/OccasionEntry";
 import { OccasionFollowup } from "@/widgets/occasion-followup/ui/OccasionFollowup";
 import { OccasionGenerationStatus } from "@/widgets/occasion-generation-status/ui/OccasionGenerationStatus";
+import { StyleExplorationEntry } from "@/widgets/style-exploration-entry/ui/StyleExplorationEntry";
+import { StyleGenerationStatus } from "@/widgets/style-generation-status/ui/StyleGenerationStatus";
 
 const RU_ASSISTANT_FALLBACK = "Валентин";
 const RU_ONLINE = "онлайн";
@@ -79,6 +81,9 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
   const scenarioLabel =
     chat.scenarioContext.commandName ??
     (chat.scenarioContext.activeMode === "general_advice" ? null : chat.scenarioContext.activeMode);
+  const isStyleScenario =
+    chat.scenarioContext.activeMode === "style_exploration" ||
+    chat.scenarioContext.commandName === "style_exploration";
   const isOccasionScenario =
     chat.scenarioContext.activeMode === "occasion_outfit" ||
     chat.scenarioContext.commandName === "occasion_outfit";
@@ -173,6 +178,16 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
               queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
               onRefresh={() => void chat.refreshGenerationStatus()}
             />
+          ) : isStyleScenario ? (
+            <StyleGenerationStatus
+              job={chat.activeJob}
+              locale={locale}
+              currentStyleName={chat.scenarioContext.currentStyleName}
+              styleHistorySize={chat.scenarioContext.styleHistory.length}
+              isRefreshing={chat.isRefreshingQueue}
+              queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
+              onRefresh={() => void chat.refreshGenerationStatus()}
+            />
           ) : (
             <GarmentGenerationStatus
               job={chat.activeJob}
@@ -186,6 +201,13 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
           <div className="mb-3 space-y-3">
             {isOccasionScenario ? (
               <OccasionEntry
+                locale={locale}
+                disabled={chat.isGenerationActionLocked}
+                activeCommandName={chat.scenarioContext.commandName}
+                onAction={(actionId) => void chat.runQuickAction(actionId)}
+              />
+            ) : isStyleScenario ? (
+              <StyleExplorationEntry
                 locale={locale}
                 disabled={chat.isGenerationActionLocked}
                 activeCommandName={chat.scenarioContext.commandName}

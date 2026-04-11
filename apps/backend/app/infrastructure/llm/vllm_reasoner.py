@@ -47,6 +47,8 @@ class VLLMReasonerAdapter(LLMReasoner):
                 style_seed=reasoning_input.get("style_seed"),
                 previous_style_directions=reasoning_input.get("previous_style_directions") or [],
                 occasion_context=reasoning_input.get("occasion_context"),
+                anti_repeat_constraints=reasoning_input.get("anti_repeat_constraints") or {},
+                style_exploration_brief=reasoning_input.get("style_exploration_brief"),
             )
         except VLLMContextLimitError as exc:
             raise LLMReasonerContextLimitError(str(exc)) from exc

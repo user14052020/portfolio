@@ -31,10 +31,10 @@ KNOWN_NON_STYLE_TITLES = {
     "community",
 }
 
-DEFAULT_CRAWL_POLICY = SourceCrawlPolicy(
+AESTHETICS_WIKI_API_CRAWL_POLICY = SourceCrawlPolicy(
     user_agent="PortfolioStyleIngestionBot/1.0 (+contact: internal-admin)",
-    respect_robots_txt=True,
-    robots_txt_url="https://aesthetics.fandom.com/robots.txt",
+    respect_robots_txt=False,
+    robots_txt_url=None,
     min_delay_seconds=20.0,
     max_delay_seconds=40.0,
     jitter_ratio=0.3,
@@ -83,7 +83,7 @@ class AestheticsWikiSourceRegistry(StyleSourceRegistry):
                 allowed_domains=("aesthetics.fandom.com",),
                 parser_version="0.2.0",
                 normalizer_version="0.2.0",
-                crawl_policy=DEFAULT_CRAWL_POLICY,
+                crawl_policy=AESTHETICS_WIKI_API_CRAWL_POLICY,
                 discovery_fetch_mode="mediawiki_action_api",
                 detail_fetch_mode="mediawiki_action_api",
                 api_endpoint_url="https://aesthetics.fandom.com/api.php",

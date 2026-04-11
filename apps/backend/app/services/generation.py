@@ -305,17 +305,22 @@ class GenerationService:
             input_asset = await uploads_repository.get(session, job.input_asset_id)
 
         try:
+            existing_provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
             workflow = self.comfyui_client.build_workflow(
                 prompt=job.prompt,
                 input_image_url=input_asset.public_url if input_asset else None,
                 body_height_cm=job.body_height_cm,
                 body_weight_kg=job.body_weight_kg,
             )
+            workflow_with_metadata = {
+                **workflow,
+                **{key: value for key, value in existing_provider_payload.items() if str(key).startswith("_")},
+            }
             job = await self._update_job(
                 session,
                 job,
                 {
-                    "provider_payload": workflow,
+                    "provider_payload": workflow_with_metadata,
                 },
                 action="workflow_built",
                 details={"template": str(self.settings.comfyui_workflow_template)},
@@ -328,7 +333,7 @@ class GenerationService:
                     "status": GenerationStatus.QUEUED,
                     "progress": 20,
                     "external_job_id": external_job_id,
-                    "provider_payload": workflow,
+                    "provider_payload": workflow_with_metadata,
                     "started_at": datetime.now(UTC),
                     "error_message": None,
                 },

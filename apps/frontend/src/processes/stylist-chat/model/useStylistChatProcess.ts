@@ -15,6 +15,7 @@ import {
 } from "@/features/run-chat-command/model/runChatCommand";
 import { runGarmentMatchingCommand } from "@/features/run-garment-matching-command/model/runGarmentMatchingCommand";
 import { runOccasionCommand } from "@/features/run-occasion-command/model/runOccasionCommand";
+import { runStyleExplorationCommand } from "@/features/run-style-exploration-command/model/runStyleExplorationCommand";
 import {
   buildFreeformMessagePayload,
   sendFreeformMessage,
@@ -22,6 +23,7 @@ import {
 import { sendGarmentFollowup } from "@/features/send-garment-followup/model/sendGarmentFollowup";
 import { sendOccasionFollowup } from "@/features/send-occasion-followup/model/sendOccasionFollowup";
 import { retryGeneration } from "@/features/retry-generation/model/retryGeneration";
+import { retryStyleExploration } from "@/features/retry-style-exploration/model/retryStyleExploration";
 import { chatGateway } from "@/shared/api/gateways/chatGateway";
 import { generationGateway } from "@/shared/api/gateways/generationGateway";
 import { sessionContextGateway } from "@/shared/api/gateways/sessionContextGateway";
@@ -315,6 +317,12 @@ export function useStylistChatProcess(locale: Locale) {
           assetId: uploadedAsset?.id ?? null,
           clientMessageId,
         });
+      } else if (action.id === "style_exploration") {
+        response = await runStyleExplorationCommand({
+          sessionId,
+          locale,
+          clientMessageId,
+        });
       } else if (action.id === "occasion_outfit") {
         response = await runOccasionCommand({
           sessionId,
@@ -464,7 +472,10 @@ export function useStylistChatProcess(locale: Locale) {
 
     setIsRefreshingQueue(true);
     try {
-      const nextJob = await retryGeneration(activeJob.public_id);
+      const nextJob =
+        scenarioContext.activeMode === "style_exploration"
+          ? await retryStyleExploration(activeJob.public_id)
+          : await retryGeneration(activeJob.public_id);
       const mergedJob = mergeQueuedJobState(activeJob, nextJob);
       setBackendState("connected");
       setErrorMessage(null);

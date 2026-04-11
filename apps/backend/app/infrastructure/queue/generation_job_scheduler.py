@@ -69,6 +69,14 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
             {
                 "provider_payload": {
                     **provider_payload,
+                    "_stylist": {
+                        **(
+                            provider_payload.get("_stylist")
+                            if isinstance(provider_payload.get("_stylist"), dict)
+                            else {}
+                        ),
+                        **request.metadata,
+                    },
                     "_orchestration": {
                         **(
                             provider_payload.get("_orchestration")

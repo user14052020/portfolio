@@ -268,7 +268,7 @@ export function createOptimisticUserMessage({
 export function getComposerMessageSource(
   context: FrontendScenarioContext | null
 ): "chat_input" | "followup" {
-  return context?.commandName ? "followup" : "chat_input";
+  return context?.pendingClarification ? "followup" : "chat_input";
 }
 
 export function getScenarioPlaceholder(
@@ -295,8 +295,8 @@ export function getScenarioPlaceholder(
 
   if (context.activeMode === "style_exploration") {
     return locale === "ru"
-      ? "РЈС‚РѕС‡РЅРёС‚Рµ, С‡С‚Рѕ С…РѕС‚РёС‚Рµ РїРѕРїСЂРѕР±РѕРІР°С‚СЊ РІ РЅРѕРІРѕРј СЃС‚РёР»Рµ..."
-      : "Add any hint for the next style direction...";
+      ? "Например: попробуем что-то мягче и теплее, без повторения прошлой палитры"
+      : "For example: something softer and warmer, with a different palette and silhouette";
   }
 
   return locale === "ru"

@@ -21,6 +21,9 @@ class GenerationPayload(BaseModel):
     image_brief_en: str
     recommendation_text: str
     input_asset_id: int | None = None
+    negative_prompt: str | None = None
+    visual_preset: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     generation_intent: GenerationIntent | None = None
 
 

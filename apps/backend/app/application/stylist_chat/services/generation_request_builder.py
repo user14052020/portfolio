@@ -12,6 +12,7 @@ from app.domain.chat_context import ChatModeContext, GenerationIntent, OccasionC
 from app.domain.chat_modes import ChatMode, FlowState
 
 from .constants import GENERATION_HINTS
+from .style_prompt_compiler import StylePromptCompiler
 
 
 class GenerationRequestBuilder:
@@ -27,7 +28,9 @@ class GenerationRequestBuilder:
         asset_id: int | None,
         must_generate: bool,
         style_seed: dict[str, str] | None,
+        previous_style_directions: list[dict[str, object]] | None,
         occasion_context: OccasionContext | None,
+        anti_repeat_constraints: dict[str, object] | None,
         structured_outfit_brief: dict[str, Any] | None = None,
     ) -> DecisionResult:
         text_reply = reasoning_output.reply_text.strip()
@@ -53,9 +56,17 @@ class GenerationRequestBuilder:
                 "asset_id": asset_id,
                 "profile_context": command.profile_context,
                 "style_seed": style_seed,
+                "previous_style_directions": previous_style_directions or [],
+                "anti_repeat_constraints": anti_repeat_constraints or {},
                 "occasion_context": occasion_context.model_dump(exclude_none=True) if occasion_context else None,
                 "structured_outfit_brief": structured_outfit_brief,
                 "garment_outfit_brief": structured_outfit_brief,
+                "style_exploration_brief": (
+                    structured_outfit_brief
+                    if isinstance(structured_outfit_brief, dict)
+                    and str(structured_outfit_brief.get("brief_type") or "").strip() == "style_exploration"
+                    else None
+                ),
             }
         )
         generation_intent = context.generation_intent or self.build_generation_intent(
@@ -103,6 +114,7 @@ class GenerationRequestBuilder:
             profile_context=command.profile_context,
             generation_intent=generation_payload.generation_intent,
             idempotency_key=command.build_generation_idempotency_key(active_mode=context.active_mode),
+            metadata=generation_payload.metadata,
         )
 
     def build_clarification_decision(self, *, context: ChatModeContext, text: str) -> DecisionResult:
@@ -170,6 +182,9 @@ class GenerationRequestBuilder:
 
 
 class DefaultPromptBuilder:
+    def __init__(self) -> None:
+        self.style_prompt_compiler = StylePromptCompiler()
+
     async def build(self, *, brief: dict[str, Any]) -> dict[str, Any]:
         user_message = str(brief.get("user_message") or "")
         image_brief_en = str(brief.get("image_brief_en") or "")
@@ -177,27 +192,44 @@ class DefaultPromptBuilder:
         profile_context = brief.get("profile_context")
         asset_id = brief.get("asset_id")
         style_seed = brief.get("style_seed")
+        previous_style_directions = brief.get("previous_style_directions") or []
+        anti_repeat_constraints = brief.get("anti_repeat_constraints") or {}
         occasion_context = brief.get("occasion_context")
         structured_outfit_brief = brief.get("structured_outfit_brief")
         garment_outfit_brief = brief.get("garment_outfit_brief") or structured_outfit_brief
+        style_exploration_brief = brief.get("style_exploration_brief")
+
+        if isinstance(style_exploration_brief, dict):
+            return await self.style_prompt_compiler.build(
+                brief={
+                    **brief,
+                    "style_exploration_brief": style_exploration_brief,
+                    "previous_style_directions": previous_style_directions,
+                    "anti_repeat_constraints": anti_repeat_constraints,
+                }
+            )
 
         compact_brief = re.sub(r"\s+", " ", image_brief_en).strip() or "cohesive editorial outfit"
         compact_brief = " ".join(compact_brief.split()[:24])
         if isinstance(garment_outfit_brief, dict):
             brief_type = str(garment_outfit_brief.get("brief_type") or "").strip()
             if brief_type == "occasion_outfit":
-                occasion_summary = str(garment_outfit_brief.get("occasion_summary") or "").strip()
                 styling_goal = str(garment_outfit_brief.get("styling_goal") or "").strip()
-                dressing_rules = "; ".join(str(item).strip() for item in garment_outfit_brief.get("dressing_rules", [])[:2])
-                palette_direction = "; ".join(
-                    str(item).strip() for item in garment_outfit_brief.get("palette_direction", [])[:2]
+                dress_code_logic = "; ".join(
+                    str(item).strip() for item in garment_outfit_brief.get("dress_code_logic", [])[:2]
+                )
+                garment_recommendations = "; ".join(
+                    str(item).strip() for item in garment_outfit_brief.get("garment_recommendations", [])[:2]
+                )
+                color_logic = "; ".join(
+                    str(item).strip() for item in garment_outfit_brief.get("color_logic", [])[:2]
                 )
                 footwear = "; ".join(
-                    str(item).strip() for item in garment_outfit_brief.get("footwear_guidance", [])[:2]
+                    str(item).strip() for item in garment_outfit_brief.get("footwear_recommendations", [])[:2]
                 )
                 compact_brief = " ".join(
                     bit
-                    for bit in [occasion_summary, styling_goal, dressing_rules, palette_direction, footwear]
+                    for bit in [styling_goal, dress_code_logic, garment_recommendations, color_logic, footwear]
                     if bit
                 ).strip() or compact_brief
             else:
@@ -252,7 +284,13 @@ class DefaultPromptBuilder:
             brief_type = str(garment_outfit_brief.get("brief_type") or "").strip()
             garment_notes = []
             if brief_type == "occasion_outfit":
-                for key in ("dressing_rules", "silhouette_notes", "layering_notes", "etiquette_notes"):
+                for key in (
+                    "dress_code_logic",
+                    "impression_logic",
+                    "silhouette_logic",
+                    "tailoring_notes",
+                    "negative_constraints",
+                ):
                     values = garment_outfit_brief.get(key)
                     if isinstance(values, list):
                         garment_notes.extend(str(value).strip() for value in values[:2] if str(value).strip())
@@ -279,6 +317,7 @@ class DefaultPromptBuilder:
             "image_brief_en": image_brief_en,
             "recommendation_text": recommendation_text,
             "input_asset_id": asset_id,
+            "metadata": {},
         }
 
     def _optional_text(self, value: Any) -> str | None:

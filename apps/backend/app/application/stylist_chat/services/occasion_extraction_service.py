@@ -16,6 +16,31 @@ from app.domain.chat_context import ChatModeContext
 from app.domain.occasion_outfit.entities.occasion_context import OccasionContext
 
 
+MONTH_TO_SEASON: dict[str, tuple[str, ...]] = {
+    "spring": ("march", "april", "may", "\u043c\u0430\u0440\u0442", "\u0430\u043f\u0440\u0435\u043b", "\u043c\u0430\u0439"),
+    "summer": ("june", "july", "august", "\u0438\u044e\u043d", "\u0438\u044e\u043b", "\u0430\u0432\u0433\u0443\u0441\u0442"),
+    "autumn": (
+        "september",
+        "october",
+        "november",
+        "fall",
+        "\u0441\u0435\u043d\u0442\u044f\u0431\u0440",
+        "\u043e\u043a\u0442\u044f\u0431\u0440",
+        "\u043d\u043e\u044f\u0431\u0440",
+        "\u043e\u0441\u0435\u043d\u044c\u044e",
+    ),
+    "winter": (
+        "december",
+        "january",
+        "february",
+        "\u0434\u0435\u043a\u0430\u0431\u0440",
+        "\u044f\u043d\u0432\u0430\u0440",
+        "\u0444\u0435\u0432\u0440\u0430\u043b",
+        "\u0437\u0438\u043c\u043e\u0439",
+    ),
+}
+
+
 class OccasionExtractionService(OccasionContextExtractor):
     def __init__(self, *, reasoner: LLMReasoner | None = None) -> None:
         self.reasoner = reasoner
@@ -58,7 +83,9 @@ class OccasionExtractionService(OccasionContextExtractor):
                 if extraction.season_or_weather:
                     season_or_weather = extraction.season_or_weather.lower()
                     occasion_context.season = (
-                        self.first_keyword_match(season_or_weather, SEASON_KEYWORDS) or occasion_context.season
+                        self.first_keyword_match(season_or_weather, SEASON_KEYWORDS)
+                        or self.infer_season_from_calendar_context(season_or_weather)
+                        or occasion_context.season
                     )
                     occasion_context.weather_context = extraction.season_or_weather
                 occasion_context.dress_code = extraction.dress_code or occasion_context.dress_code
@@ -71,7 +98,11 @@ class OccasionExtractionService(OccasionContextExtractor):
         occasion_context.event_type = occasion_context.event_type or self.first_keyword_match(lowered, EVENT_TYPE_KEYWORDS)
         occasion_context.location = occasion_context.location or self.first_keyword_match(lowered, LOCATION_KEYWORDS)
         occasion_context.time_of_day = occasion_context.time_of_day or self.first_keyword_match(lowered, TIME_OF_DAY_KEYWORDS)
-        occasion_context.season = occasion_context.season or self.first_keyword_match(lowered, SEASON_KEYWORDS)
+        occasion_context.season = (
+            occasion_context.season
+            or self.first_keyword_match(lowered, SEASON_KEYWORDS)
+            or self.infer_season_from_calendar_context(lowered)
+        )
         occasion_context.dress_code = occasion_context.dress_code or self.first_keyword_match(lowered, DRESS_CODE_KEYWORDS)
         occasion_context.desired_impression = (
             occasion_context.desired_impression or self.first_keyword_match(lowered, IMPRESSION_KEYWORDS)
@@ -107,6 +138,9 @@ class OccasionExtractionService(OccasionContextExtractor):
                 return canonical
         return None
 
+    def infer_season_from_calendar_context(self, lowered_text: str) -> str | None:
+        return self.first_keyword_match(lowered_text, MONTH_TO_SEASON)
+
     def _merge_detected_preferences(self, *, occasion_context: OccasionContext, lowered: str) -> None:
         for color in self._find_all_matches(lowered, COLOR_KEYWORDS):
             if color not in occasion_context.color_preferences:
@@ -116,8 +150,8 @@ class OccasionExtractionService(OccasionContextExtractor):
                 occasion_context.garment_preferences.append(garment)
 
         constraint_markers = (
-            ("без каблук", "avoid heels"),
-            ("без галстук", "avoid tie"),
+            ("\u0431\u0435\u0437 \u043a\u0430\u0431\u043b\u0443\u043a", "avoid heels"),
+            ("\u0431\u0435\u0437 \u0433\u0430\u043b\u0441\u0442\u0443\u043a\u0430", "avoid tie"),
             ("no heels", "avoid heels"),
             ("no tie", "avoid tie"),
         )
@@ -126,11 +160,11 @@ class OccasionExtractionService(OccasionContextExtractor):
                 occasion_context.constraints.append(normalized)
 
         comfort_markers = (
-            ("удоб", "comfort-first"),
-            ("комфорт", "comfort-first"),
+            ("\u0443\u0434\u043e\u0431", "comfort-first"),
+            ("\u043a\u043e\u043c\u0444\u043e\u0440\u0442", "comfort-first"),
             ("comfortable", "comfort-first"),
             ("warm enough", "warm layers"),
-            ("не жарко", "breathable"),
+            ("\u043d\u0435 \u0436\u0430\u0440\u043a\u043e", "breathable"),
         )
         for marker, normalized in comfort_markers:
             if marker in lowered and normalized not in occasion_context.comfort_requirements:

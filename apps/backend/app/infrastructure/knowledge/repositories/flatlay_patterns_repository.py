@@ -1,0 +1,32 @@
+from app.domain.knowledge.entities import KnowledgeCard, KnowledgeQuery
+from app.domain.knowledge.enums import KnowledgeType
+
+from .base import DerivedStyleKnowledgeRepository
+
+
+class DatabaseFlatlayPatternsRepository(DerivedStyleKnowledgeRepository):
+    async def search(self, *, query: KnowledgeQuery, context_style_cards: list[KnowledgeCard] | None = None) -> list[KnowledgeCard]:
+        style_cards = await self.resolve_style_cards(query=query, context_style_cards=context_style_cards)
+        cards: list[KnowledgeCard] = []
+        for style_card in style_cards[: max(query.limit, 4)]:
+            prompt_notes = style_card.metadata.get("image_prompt_notes") or []
+            patterns = style_card.metadata.get("patterns_textures") or []
+            body_bits = [str(item).strip() for item in [*prompt_notes[:3], *patterns[:2]] if str(item).strip()]
+            if not body_bits:
+                continue
+            cards.append(
+                KnowledgeCard(
+                    id=f"flatlay:{style_card.style_id or style_card.id}",
+                    knowledge_type=KnowledgeType.FLATLAY_PROMPT_PATTERNS,
+                    title=f"Flatlay composition for {style_card.title}",
+                    summary=body_bits[0],
+                    body="; ".join(body_bits[1:]) or None,
+                    tags=[*style_card.tags[:8], *patterns[:3]],
+                    style_id=style_card.style_id,
+                    source_ref=style_card.source_ref,
+                    confidence=style_card.confidence,
+                    freshness=style_card.freshness,
+                    metadata={"image_prompt_notes": list(prompt_notes), "style_id": style_card.style_id},
+                )
+            )
+        return cards

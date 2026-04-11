@@ -1,6 +1,10 @@
 import re
 from typing import Any
 
+from app.application.prompt_building.services.prompt_pipeline_builder import (
+    PromptPipelineBuilder,
+    PromptPipelineValidationError,
+)
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import (
     GenerationScheduleRequest,
@@ -32,6 +36,9 @@ class GenerationRequestBuilder:
         occasion_context: OccasionContext | None,
         anti_repeat_constraints: dict[str, object] | None,
         structured_outfit_brief: dict[str, Any] | None = None,
+        knowledge_cards: list[dict[str, Any]] | None = None,
+        knowledge_bundle: dict[str, Any] | None = None,
+        knowledge_provider_used: str | None = None,
     ) -> DecisionResult:
         text_reply = reasoning_output.reply_text.strip()
         should_generate = self.resolve_should_generate(
@@ -48,27 +55,47 @@ class GenerationRequestBuilder:
             )
 
         image_brief_en = reasoning_output.image_brief_en.strip() or "cohesive editorial flat lay outfit"
-        compiled_payload = await self.prompt_builder.build(
-            brief={
-                "user_message": command.normalized_message(),
-                "image_brief_en": image_brief_en,
-                "recommendation_text": text_reply,
-                "asset_id": asset_id,
-                "profile_context": command.profile_context,
-                "style_seed": style_seed,
-                "previous_style_directions": previous_style_directions or [],
-                "anti_repeat_constraints": anti_repeat_constraints or {},
-                "occasion_context": occasion_context.model_dump(exclude_none=True) if occasion_context else None,
-                "structured_outfit_brief": structured_outfit_brief,
-                "garment_outfit_brief": structured_outfit_brief,
-                "style_exploration_brief": (
-                    structured_outfit_brief
-                    if isinstance(structured_outfit_brief, dict)
-                    and str(structured_outfit_brief.get("brief_type") or "").strip() == "style_exploration"
-                    else None
-                ),
-            }
-        )
+        try:
+            compiled_payload = await self.prompt_builder.build(
+                brief={
+                    "session_id": command.session_id,
+                    "message_id": command.user_message_id,
+                    "mode": context.active_mode.value,
+                    "user_message": command.normalized_message(),
+                    "image_brief_en": image_brief_en,
+                    "recommendation_text": text_reply,
+                    "asset_id": asset_id,
+                    "profile_context": command.profile_context,
+                    "style_seed": style_seed,
+                    "previous_style_directions": previous_style_directions or [],
+                    "anti_repeat_constraints": anti_repeat_constraints or {},
+                    "occasion_context": occasion_context.model_dump(exclude_none=True) if occasion_context else None,
+                    "structured_outfit_brief": structured_outfit_brief,
+                    "garment_outfit_brief": structured_outfit_brief,
+                    "style_exploration_brief": (
+                        structured_outfit_brief
+                        if isinstance(structured_outfit_brief, dict)
+                        and str(structured_outfit_brief.get("brief_type") or "").strip() == "style_exploration"
+                        else None
+                    ),
+                    "knowledge_cards": knowledge_cards or [],
+                    "knowledge_bundle": knowledge_bundle,
+                    "knowledge_provider_used": knowledge_provider_used,
+                }
+            )
+        except PromptPipelineValidationError as exc:
+            decision = self.build_recoverable_error(
+                context=context,
+                locale=command.locale,
+                error_code="prompt_validation_failed",
+            )
+            decision.telemetry.update(
+                {
+                    "validation_errors": list(exc.errors),
+                    "validation_errors_count": len(exc.errors),
+                }
+            )
+            return decision
         generation_intent = context.generation_intent or self.build_generation_intent(
             mode=context.active_mode,
             trigger=context.active_mode.value,
@@ -92,6 +119,34 @@ class GenerationRequestBuilder:
             text_reply=text_reply,
             generation_payload=payload,
         )
+        if isinstance(payload.metadata, dict):
+            for key in (
+                "brief_hash",
+                "compiled_prompt_hash",
+                "diversity_constraints_hash",
+                "knowledge_cards_count",
+                "knowledge_bundle_hash",
+                "knowledge_query_hash",
+                "validation_errors_count",
+                "workflow_name",
+                "workflow_version",
+                "retrieved_style_cards_count",
+                "retrieved_color_cards_count",
+                "retrieved_history_cards_count",
+                "retrieved_tailoring_cards_count",
+                "retrieved_material_cards_count",
+                "retrieved_flatlay_cards_count",
+                "layout_archetype",
+                "background_family",
+                "object_count_range",
+                "spacing_density",
+                "camera_distance",
+                "shadow_hardness",
+                "anchor_garment_centrality",
+                "practical_coherence",
+            ):
+                if key in payload.metadata:
+                    decision.telemetry[key] = payload.metadata[key]
         return decision
 
     def build_schedule_request(
@@ -110,10 +165,15 @@ class GenerationRequestBuilder:
             input_text=command.normalized_message(),
             recommendation_text=decision.text_reply or generation_payload.recommendation_text,
             prompt=generation_payload.prompt,
+            negative_prompt=generation_payload.negative_prompt,
             input_asset_id=generation_payload.input_asset_id,
             profile_context=command.profile_context,
             generation_intent=generation_payload.generation_intent,
             idempotency_key=command.build_generation_idempotency_key(active_mode=context.active_mode),
+            workflow_name=generation_payload.metadata.get("workflow_name"),
+            workflow_version=generation_payload.metadata.get("workflow_version"),
+            visual_generation_plan=generation_payload.visual_generation_plan,
+            generation_metadata=generation_payload.generation_metadata,
             metadata=generation_payload.metadata,
         )
 
@@ -183,9 +243,12 @@ class GenerationRequestBuilder:
 
 class DefaultPromptBuilder:
     def __init__(self) -> None:
-        self.style_prompt_compiler = StylePromptCompiler()
+        self.prompt_pipeline_builder = PromptPipelineBuilder()
 
     async def build(self, *, brief: dict[str, Any]) -> dict[str, Any]:
+        return await self.prompt_pipeline_builder.build(brief=brief)
+
+    async def build_legacy(self, *, brief: dict[str, Any]) -> dict[str, Any]:
         user_message = str(brief.get("user_message") or "")
         image_brief_en = str(brief.get("image_brief_en") or "")
         recommendation_text = str(brief.get("recommendation_text") or "")
@@ -200,7 +263,7 @@ class DefaultPromptBuilder:
         style_exploration_brief = brief.get("style_exploration_brief")
 
         if isinstance(style_exploration_brief, dict):
-            return await self.style_prompt_compiler.build(
+            return await StylePromptCompiler().build(
                 brief={
                     **brief,
                     "style_exploration_brief": style_exploration_brief,

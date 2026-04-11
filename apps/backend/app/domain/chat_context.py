@@ -50,6 +50,7 @@ class ChatModeContext(BaseModel):
     anchor_garment: AnchorGarment | None = None
     occasion_context: OccasionContext | None = None
     style_history: list[StyleDirection] = Field(default_factory=list)
+    last_retrieved_knowledge_refs: list[dict[str, Any]] = Field(default_factory=list)
     last_generation_prompt: str | None = None
     last_generated_outfit_summary: str | None = None
     conversation_memory: list[ConversationMemoryItem] = Field(default_factory=list)
@@ -101,8 +102,12 @@ class ChatModeContext(BaseModel):
             flow_state=FlowState.IDLE,
             should_auto_generate=should_auto_generate,
             style_history=[item.model_copy(deep=True) for item in self.style_history],
+            last_retrieved_knowledge_refs=[dict(item) for item in self.last_retrieved_knowledge_refs],
+            last_generation_prompt=self.last_generation_prompt,
             last_generated_outfit_summary=self.last_generated_outfit_summary,
             conversation_memory=[item.model_copy(deep=True) for item in self.conversation_memory[-MAX_CONVERSATION_MEMORY:]],
             command_context=command_context,
+            current_style_id=self.current_style_id,
+            current_style_name=self.current_style_name,
             updated_at=datetime.now(timezone.utc),
         )

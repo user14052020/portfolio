@@ -79,3 +79,34 @@ class StyleHistoryServiceTests(unittest.TestCase):
             ["style-2", "style-4", "style-5", "style-3", "style-6"],
         )
 
+    def test_to_prompt_items_preserves_full_style_direction_shape(self) -> None:
+        service = StyleHistoryService()
+        history = [
+            make_style(
+                "gallery-noir",
+                palette=["forest", "ink"],
+                hero_garments=["field jacket"],
+                silhouette_family="boxy layering",
+                visual_preset="dark_gallery",
+            ).model_copy(
+                update={
+                    "footwear": ["boots"],
+                    "accessories": ["scarf"],
+                    "materials": ["twill"],
+                    "styling_mood": ["quiet", "sharp"],
+                    "composition_type": "editorial flat lay",
+                    "background_family": "stone",
+                    "layout_density": "compact",
+                    "camera_distance": "tight overhead",
+                }
+            )
+        ]
+
+        items = service.to_prompt_items(history)
+
+        self.assertEqual(items[0]["footwear"], ["boots"])
+        self.assertEqual(items[0]["accessories"], ["scarf"])
+        self.assertEqual(items[0]["materials"], ["twill"])
+        self.assertEqual(items[0]["styling_mood"], ["quiet", "sharp"])
+        self.assertEqual(items[0]["layout_density"], "compact")
+        self.assertEqual(items[0]["camera_distance"], "tight overhead")

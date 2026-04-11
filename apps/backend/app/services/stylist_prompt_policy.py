@@ -65,7 +65,7 @@ def build_stylist_user_prompt(
     profile_context: dict[str, str | int | None],
     session_intent: SessionIntent,
     style_seed: dict[str, str] | None,
-    previous_style_directions: list[dict[str, str]],
+    previous_style_directions: list[dict[str, Any]],
     occasion_context: dict[str, str] | None,
     anti_repeat_constraints: dict[str, Any] | None = None,
     style_exploration_brief: dict[str, Any] | None = None,

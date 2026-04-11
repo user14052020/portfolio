@@ -87,6 +87,7 @@ class OccasionOutfitHandler(BaseChatModeHandler):
             style_history_used=False,
             structured_outfit_brief=build_result.compiled_brief,
             knowledge_result_override=build_result.knowledge_result,
+            knowledge_bundle_override=build_result.knowledge_bundle,
         )
         context.last_generated_outfit_summary = decision.text_reply
         if decision.generation_payload is not None:

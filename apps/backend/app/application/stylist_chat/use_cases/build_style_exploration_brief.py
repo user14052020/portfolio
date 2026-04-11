@@ -41,6 +41,23 @@ class BuildStyleExplorationBriefUseCase:
             negative_constraints.append(
                 f"avoid hero garments: {', '.join(diversity_constraints.avoid_hero_garments[:4])}"
             )
+        if diversity_constraints.avoid_silhouette_families:
+            negative_constraints.append(
+                "avoid silhouette families: "
+                + ", ".join(diversity_constraints.avoid_silhouette_families[:3])
+            )
+        if diversity_constraints.avoid_materials:
+            negative_constraints.append(
+                f"avoid materials: {', '.join(diversity_constraints.avoid_materials[:4])}"
+            )
+        if diversity_constraints.avoid_footwear:
+            negative_constraints.append(
+                f"avoid footwear: {', '.join(diversity_constraints.avoid_footwear[:3])}"
+            )
+        if diversity_constraints.avoid_accessories:
+            negative_constraints.append(
+                f"avoid accessories: {', '.join(diversity_constraints.avoid_accessories[:3])}"
+            )
         if diversity_constraints.avoid_composition_types:
             negative_constraints.append(
                 f"avoid composition: {', '.join(diversity_constraints.avoid_composition_types[:2])}"
@@ -48,6 +65,14 @@ class BuildStyleExplorationBriefUseCase:
         if diversity_constraints.avoid_background_families:
             negative_constraints.append(
                 f"avoid background: {', '.join(diversity_constraints.avoid_background_families[:2])}"
+            )
+        if diversity_constraints.avoid_layout_density:
+            negative_constraints.append(
+                f"avoid layout density: {', '.join(diversity_constraints.avoid_layout_density[:2])}"
+            )
+        if diversity_constraints.avoid_camera_distance:
+            negative_constraints.append(
+                f"avoid camera distance: {', '.join(diversity_constraints.avoid_camera_distance[:2])}"
             )
         composition_rules = []
         if style_direction.composition_type:
@@ -58,6 +83,12 @@ class BuildStyleExplorationBriefUseCase:
             composition_rules.append(f"{style_direction.layout_density} layout density")
         if style_direction.camera_distance:
             composition_rules.append(f"{style_direction.camera_distance} camera distance")
+        if diversity_constraints.force_material_contrast:
+            composition_rules.append("force visible material contrast against the recent history")
+        if diversity_constraints.force_footwear_change:
+            composition_rules.append("change the footwear family versus the recent history")
+        if diversity_constraints.force_accessory_change:
+            composition_rules.append("change the accessory logic versus the recent history")
         if diversity_constraints.suggested_visual_preset:
             composition_rules.append(f"shift to {diversity_constraints.suggested_visual_preset} visual preset")
         return StyleExplorationBrief(
@@ -86,4 +117,5 @@ class BuildStyleExplorationBriefUseCase:
             background_family=style_direction.background_family,
             semantic_constraints_hash=diversity_constraints.semantic_hash(),
             visual_constraints_hash=diversity_constraints.visual_hash(),
+            diversity_constraints_hash=diversity_constraints.combined_hash(),
         )

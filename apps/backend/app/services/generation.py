@@ -1,13 +1,20 @@
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
 import redis.asyncio as redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.visual_generation.services.comfy_generation_orchestrator import ComfyGenerationOrchestrator
+from app.application.visual_generation.services.generation_metadata_recorder import GenerationMetadataRecorder
+from app.application.visual_generation.use_cases.persist_generation_result import PersistGenerationResultUseCase
+from app.application.visual_generation.use_cases.run_generation_job import RunGenerationJobUseCase
 from app.core.config import get_settings
-from app.integrations.comfyui import ComfyUIClient
+from app.domain.visual_generation import GenerationMetadata, VisualGenerationPlan
+from app.infrastructure.comfy.adapters.comfy_generation_adapter import ComfyGenerationAdapter
+from app.infrastructure.comfy.client.comfy_client import ComfyClient
+from app.infrastructure.persistence.generation_metadata_store import GenerationJobMetadataStore
 from app.models.enums import GenerationProvider, GenerationStatus
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.repositories.uploads import uploads_repository
@@ -15,6 +22,7 @@ from app.schemas.generation_job import GenerationJobCreate
 
 
 logger = logging.getLogger(__name__)
+UTC = timezone.utc
 
 
 class QueueRefreshCooldownError(RuntimeError):
@@ -28,10 +36,21 @@ class GenerationService:
     QUEUE_DISPATCH_LOCK_KEY = "generation-queue:dispatch-lock"
     QUEUE_REFRESH_KEY_PREFIX = "generation-queue:refresh:"
 
-    def __init__(self) -> None:
-        self.settings = get_settings()
-        self.comfyui_client = ComfyUIClient()
-        self.redis = redis.from_url(self.settings.redis_url, decode_responses=True)
+    def __init__(
+        self,
+        *,
+        settings=None,
+        comfy_client: ComfyClient | None = None,
+        generation_backend_adapter: ComfyGenerationAdapter | None = None,
+        redis_client=None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.comfyui_client = comfy_client or ComfyClient()
+        self.generation_backend_adapter = generation_backend_adapter or ComfyGenerationAdapter(client=self.comfyui_client)
+        self.run_generation_job = RunGenerationJobUseCase(
+            generation_backend_adapter=self.generation_backend_adapter
+        )
+        self.redis = redis_client or redis.from_url(self.settings.redis_url, decode_responses=True)
 
     async def create_and_submit(self, session: AsyncSession, payload: GenerationJobCreate):
         existing_active_job = None
@@ -66,7 +85,7 @@ class GenerationService:
                 "input_asset_id": payload.input_asset_id,
                 "body_height_cm": payload.body_height_cm,
                 "body_weight_kg": payload.body_weight_kg,
-                "provider_payload": {},
+                "provider_payload": self._build_initial_provider_payload(payload),
                 "operation_log": [
                     self._log_entry(
                         "job_created",
@@ -112,6 +131,12 @@ class GenerationService:
 
         provider_status = await self.comfyui_client.get_job_status(job.external_job_id)
         provider_payload = self._decorate_provider_payload(job, provider_status)
+        provider_payload = self._merge_generation_metadata(
+            job=job,
+            provider_payload=provider_payload,
+            status=provider_status.status,
+            result_url=provider_status.image_url,
+        )
         stale_failure = await self._fail_stalled_comfyui_job_if_needed(
             session=session,
             job=job,
@@ -259,6 +284,9 @@ class GenerationService:
         setattr(job, "queue_total", queue_total)
         setattr(job, "queue_refresh_available_at", queue_refresh_available_at)
         setattr(job, "queue_refresh_retry_after_seconds", queue_refresh_retry_after_seconds)
+        provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
+        setattr(job, "visual_generation_plan", provider_payload.get("_visual_generation_plan"))
+        setattr(job, "generation_metadata", provider_payload.get("_generation_metadata"))
         return job
 
     async def refresh_pending_job_queue_position(self, session: AsyncSession, job):
@@ -306,15 +334,37 @@ class GenerationService:
 
         try:
             existing_provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
-            workflow = self.comfyui_client.build_workflow(
-                prompt=job.prompt,
+            visual_plan = self._extract_visual_generation_plan(job)
+            recorder = GenerationMetadataRecorder(store=GenerationJobMetadataStore(session))
+            generation_orchestrator = ComfyGenerationOrchestrator(
+                run_generation_job=self.run_generation_job,
+                persist_generation_result=PersistGenerationResultUseCase(
+                    generation_metadata_recorder=recorder
+                ),
+            )
+            generation_metadata = self._extract_generation_metadata(job=job, plan=visual_plan)
+            orchestration = await generation_orchestrator.prepare_generation(
+                job=job,
+                plan=visual_plan,
+                metadata=generation_metadata,
                 input_image_url=input_asset.public_url if input_asset else None,
                 body_height_cm=job.body_height_cm,
                 body_weight_kg=job.body_weight_kg,
             )
+            job = orchestration.job
+            visual_plan = orchestration.plan
+            generation_metadata = orchestration.metadata
+            prepared_run = orchestration.prepared_run
+            self._log_generation_trace(
+                "generation_run_prepared",
+                job=job,
+                metadata=generation_metadata,
+            )
             workflow_with_metadata = {
-                **workflow,
+                **prepared_run.workflow_payload,
                 **{key: value for key, value in existing_provider_payload.items() if str(key).startswith("_")},
+                "_visual_generation_plan": visual_plan.model_dump(mode="json"),
+                "_generation_metadata": generation_metadata.model_dump(mode="json"),
             }
             job = await self._update_job(
                 session,
@@ -323,9 +373,11 @@ class GenerationService:
                     "provider_payload": workflow_with_metadata,
                 },
                 action="workflow_built",
-                details={"template": str(self.settings.comfyui_workflow_template)},
+                details={"template": prepared_run.workflow_version},
             )
-            external_job_id = await self.comfyui_client.queue_prompt(workflow)
+            external_job_id = await self.generation_backend_adapter.submit(
+                workflow_payload=prepared_run.workflow_payload
+            )
             job = await self._update_job(
                 session,
                 job,
@@ -339,6 +391,12 @@ class GenerationService:
                 },
                 action="provider_job_submitted",
                 details={"external_job_id": external_job_id},
+            )
+            self._log_generation_trace(
+                "generation_run_submitted",
+                job=job,
+                metadata=generation_metadata,
+                extra={"external_job_id": external_job_id},
             )
             return job
         except Exception as exc:
@@ -450,7 +508,11 @@ class GenerationService:
 
     def _decorate_provider_payload(self, job, provider_status) -> dict[str, Any]:
         raw_payload = provider_status.raw_payload if isinstance(provider_status.raw_payload, dict) else {}
-        payload = dict(raw_payload)
+        existing_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
+        payload = {
+            **{key: value for key, value in existing_payload.items() if str(key).startswith("_")},
+            **dict(raw_payload),
+        }
         payload["_watchdog"] = self._build_watchdog_state(job, provider_status)
         return payload
 
@@ -555,6 +617,181 @@ class GenerationService:
             logger.exception("Failed to clean up stalled ComfyUI job %s", job.public_id)
             return f"Automatic provider cleanup failed: {exc}"
         return ""
+
+    def _extract_visual_generation_plan(self, job) -> VisualGenerationPlan:
+        provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
+        raw_plan = provider_payload.get("_visual_generation_plan")
+        if isinstance(raw_plan, dict) and raw_plan:
+            try:
+                return VisualGenerationPlan.model_validate(raw_plan)
+            except Exception:
+                pass
+        orchestration = provider_payload.get("_orchestration") if isinstance(provider_payload.get("_orchestration"), dict) else {}
+        workflow_name = orchestration.get("workflow_name") if isinstance(orchestration.get("workflow_name"), str) else "fashion_flatlay_base"
+        workflow_version = orchestration.get("workflow_version") if isinstance(orchestration.get("workflow_version"), str) else f"{workflow_name}.json"
+        stylist = provider_payload.get("_stylist") if isinstance(provider_payload.get("_stylist"), dict) else {}
+        return VisualGenerationPlan(
+            mode=str(stylist.get("mode") or "general_advice"),
+            style_id=stylist.get("style_id"),
+            style_name=stylist.get("style_name"),
+            fashion_brief_hash=stylist.get("brief_hash"),
+            compiled_prompt_hash=stylist.get("compiled_prompt_hash"),
+            final_prompt=job.prompt,
+            negative_prompt=str(stylist.get("negative_prompt") or ""),
+            visual_preset_id=stylist.get("visual_preset"),
+            workflow_name=workflow_name,
+            workflow_version=workflow_version,
+            layout_archetype=stylist.get("layout_archetype"),
+            background_family=stylist.get("background_family"),
+            object_count_range=stylist.get("object_count_range"),
+            spacing_density=stylist.get("spacing_density"),
+            camera_distance=stylist.get("camera_distance"),
+            shadow_hardness=stylist.get("shadow_hardness"),
+            anchor_garment_centrality=stylist.get("anchor_garment_centrality"),
+            practical_coherence=stylist.get("practical_coherence"),
+            diversity_profile=stylist.get("diversity_constraints") if isinstance(stylist.get("diversity_constraints"), dict) else {},
+            palette_tags=list(stylist.get("palette_tags") or []),
+            garments_tags=list(stylist.get("garment_tags") or []),
+            materials_tags=list(stylist.get("materials") or []),
+            knowledge_refs=list(stylist.get("knowledge_refs") or []),
+            metadata=dict(stylist),
+        )
+
+    def _extract_generation_metadata(self, *, job, plan: VisualGenerationPlan) -> GenerationMetadata:
+        provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
+        raw_metadata = provider_payload.get("_generation_metadata")
+        if isinstance(raw_metadata, dict) and raw_metadata:
+            try:
+                return GenerationMetadata.model_validate(raw_metadata)
+            except Exception:
+                pass
+        return GenerationMetadata(
+            generation_job_id=job.public_id,
+            mode=plan.mode,
+            style_id=plan.style_id,
+            style_name=plan.style_name,
+            fashion_brief_hash=plan.fashion_brief_hash,
+            compiled_prompt_hash=plan.compiled_prompt_hash,
+            final_prompt=plan.final_prompt,
+            negative_prompt=plan.negative_prompt,
+            workflow_name=plan.workflow_name,
+            workflow_version=plan.workflow_version,
+            visual_preset_id=plan.visual_preset_id,
+            background_family=plan.background_family,
+            layout_archetype=plan.layout_archetype,
+            spacing_density=plan.spacing_density,
+            camera_distance=plan.camera_distance,
+            shadow_hardness=plan.shadow_hardness,
+            anchor_garment_centrality=plan.anchor_garment_centrality,
+            practical_coherence=plan.practical_coherence,
+            palette_tags=list(plan.palette_tags),
+            garments_tags=list(plan.garments_tags),
+            materials_tags=list(plan.materials_tags),
+            diversity_constraints=dict(plan.diversity_profile),
+            knowledge_refs=list(plan.knowledge_refs),
+        )
+
+    def _merge_generation_metadata(
+        self,
+        *,
+        job,
+        provider_payload: dict[str, Any],
+        status,
+        result_url: str | None,
+    ) -> dict[str, Any]:
+        plan = self._extract_visual_generation_plan(job)
+        metadata = self._extract_generation_metadata(job=job, plan=plan)
+        metadata.generation_job_id = job.public_id
+        provider_payload["_visual_generation_plan"] = plan.model_dump(mode="json")
+        provider_payload["_generation_metadata"] = metadata.model_dump(mode="json")
+        if result_url:
+            provider_payload["_result_url"] = result_url
+        provider_payload["_provider_status"] = status.value if hasattr(status, "value") else str(status)
+        return provider_payload
+
+    def _log_generation_trace(
+        self,
+        event_name: str,
+        *,
+        job,
+        metadata: GenerationMetadata,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
+        stylist_payload = provider_payload.get("_stylist") if isinstance(provider_payload.get("_stylist"), dict) else {}
+        logger.info(
+            "%s | %s",
+            event_name,
+            {
+                "session_id": job.session_id,
+                "message_id": stylist_payload.get("source_message_id"),
+                "mode": metadata.mode,
+                "style_id": metadata.style_id,
+                "fashion_brief_hash": metadata.fashion_brief_hash,
+                "compiled_prompt_hash": metadata.compiled_prompt_hash,
+                "workflow_name": metadata.workflow_name,
+                "workflow_version": metadata.workflow_version,
+                "visual_preset_id": metadata.visual_preset_id,
+                "layout_archetype": metadata.layout_archetype,
+                "background_family": metadata.background_family,
+                "camera_distance": metadata.camera_distance,
+                "spacing_density": metadata.spacing_density,
+                "seed": metadata.seed,
+                "generation_job_id": metadata.generation_job_id or job.public_id,
+                **(extra or {}),
+            },
+        )
+
+    def _build_initial_provider_payload(self, payload: GenerationJobCreate) -> dict[str, Any]:
+        provider_payload: dict[str, Any] = {}
+        raw_visual_generation_plan = (
+            dict(payload.visual_generation_plan)
+            if isinstance(payload.visual_generation_plan, dict)
+            else {}
+        )
+        raw_generation_metadata = (
+            dict(payload.generation_metadata)
+            if isinstance(payload.generation_metadata, dict)
+            else {}
+        )
+        workflow_name = (
+            payload.workflow_name
+            or raw_visual_generation_plan.get("workflow_name")
+            or raw_generation_metadata.get("workflow_name")
+        )
+        workflow_version = (
+            payload.workflow_version
+            or raw_visual_generation_plan.get("workflow_version")
+            or raw_generation_metadata.get("workflow_version")
+        )
+        negative_prompt = (
+            payload.negative_prompt
+            or raw_visual_generation_plan.get("negative_prompt")
+            or raw_generation_metadata.get("negative_prompt")
+        )
+        stylist_payload = dict(payload.metadata) if isinstance(payload.metadata, dict) else {}
+        if negative_prompt and "negative_prompt" not in stylist_payload:
+            stylist_payload["negative_prompt"] = negative_prompt
+        if workflow_name and "workflow_name" not in stylist_payload:
+            stylist_payload["workflow_name"] = workflow_name
+        if workflow_version and "workflow_version" not in stylist_payload:
+            stylist_payload["workflow_version"] = workflow_version
+        if stylist_payload:
+            provider_payload["_stylist"] = stylist_payload
+        if raw_visual_generation_plan:
+            provider_payload["_visual_generation_plan"] = raw_visual_generation_plan
+        if raw_generation_metadata:
+            provider_payload["_generation_metadata"] = raw_generation_metadata
+        orchestration: dict[str, Any] = {}
+        if payload.idempotency_key:
+            orchestration["idempotency_key"] = payload.idempotency_key
+        if workflow_name:
+            orchestration["workflow_name"] = workflow_name
+        if workflow_version:
+            orchestration["workflow_version"] = workflow_version
+        if orchestration:
+            provider_payload["_orchestration"] = orchestration
+        return provider_payload
 
     def _queue_refresh_key(self, public_id: str) -> str:
         return f"{self.QUEUE_REFRESH_KEY_PREFIX}{public_id}"

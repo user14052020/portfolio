@@ -56,10 +56,15 @@ class DiversityConstraints(BaseModel):
         payload = json.dumps(self.visual_payload(), ensure_ascii=False, sort_keys=True)
         return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
+    def combined_hash(self) -> str:
+        payload = json.dumps(self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
     def to_reasoning_dict(self) -> dict[str, object]:
         return {
             **self.semantic_payload(),
             **self.visual_payload(),
             "semantic_constraints_hash": self.semantic_hash(),
             "visual_constraints_hash": self.visual_hash(),
+            "diversity_constraints_hash": self.combined_hash(),
         }

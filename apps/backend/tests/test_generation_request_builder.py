@@ -10,11 +10,66 @@ from app.domain.chat_modes import ChatMode
 
 class FakePromptBuilder:
     async def build(self, *, brief: dict[str, object]) -> dict[str, object]:
+        mode = str(brief.get("mode") or "general_advice")
+        workflow_name = {
+            "garment_matching": "garment_matching_variation",
+            "occasion_outfit": "occasion_outfit_variation",
+            "style_exploration": "style_exploration_variation",
+        }.get(mode, "fashion_flatlay_base")
+        visual_preset = {
+            "garment_matching": "editorial_studio",
+            "occasion_outfit": "practical_board",
+            "style_exploration": "textured_surface",
+        }.get(mode, "editorial_studio")
+        layout_archetype = {
+            "garment_matching": "centered anchor composition",
+            "occasion_outfit": "practical dressing board",
+            "style_exploration": "diagonal editorial spread",
+        }.get(mode, "catalog grid-like arrangement")
+        background_family = {
+            "garment_matching": "muted studio background",
+            "occasion_outfit": "neutral paper",
+            "style_exploration": "warm wood",
+        }.get(mode, "off-white linen")
+        visual_generation_plan = {
+            "mode": mode,
+            "final_prompt": f"prompt::{brief.get('image_brief_en', '')}",
+            "negative_prompt": "avoid clutter",
+            "visual_preset_id": visual_preset,
+            "workflow_name": workflow_name,
+            "workflow_version": f"{workflow_name}.json",
+            "layout_archetype": layout_archetype,
+            "background_family": background_family,
+            "anchor_garment_centrality": "high" if mode == "garment_matching" else "medium",
+            "practical_coherence": "high" if mode == "occasion_outfit" else "medium",
+            "diversity_profile": dict(brief.get("anti_repeat_constraints") or {}),
+        }
         return {
             "prompt": f"prompt::{brief.get('image_brief_en', '')}",
             "image_brief_en": brief.get("image_brief_en", ""),
             "recommendation_text": brief.get("recommendation_text", ""),
             "input_asset_id": brief.get("asset_id"),
+            "negative_prompt": "avoid clutter",
+            "visual_preset": visual_preset,
+            "visual_generation_plan": visual_generation_plan,
+            "generation_metadata": {
+                "mode": mode,
+                "final_prompt": visual_generation_plan["final_prompt"],
+                "negative_prompt": "avoid clutter",
+                "workflow_name": workflow_name,
+                "workflow_version": f"{workflow_name}.json",
+                "visual_preset_id": visual_preset,
+                "background_family": background_family,
+                "layout_archetype": layout_archetype,
+                "diversity_constraints": dict(brief.get("anti_repeat_constraints") or {}),
+            },
+            "metadata": {
+                "workflow_name": workflow_name,
+                "workflow_version": f"{workflow_name}.json",
+                "visual_preset": visual_preset,
+                "layout_archetype": layout_archetype,
+                "background_family": background_family,
+            },
         }
 
 
@@ -116,7 +171,12 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
 
         assert request is not None
         self.assertEqual(request.prompt, "prompt::indigo denim shirt outfit flat lay")
+        self.assertEqual(request.negative_prompt, "avoid clutter")
         self.assertEqual(request.input_asset_id, 99)
+        self.assertEqual(request.workflow_name, "garment_matching_variation")
+        self.assertEqual(request.workflow_version, "garment_matching_variation.json")
+        self.assertEqual(request.visual_generation_plan["anchor_garment_centrality"], "high")
+        self.assertEqual(request.generation_metadata["workflow_name"], "garment_matching_variation")
         self.assertEqual(request.idempotency_key, "garment-1:garment_matching:cmd:cmd-12")
 
     async def test_build_from_reasoning_passes_structured_garment_brief_to_prompt_builder(self) -> None:

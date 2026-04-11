@@ -158,16 +158,39 @@ class StylistChatOrchestrator:
                 "knowledge_provider_used": decision.telemetry.get("knowledge_provider_used"),
                 "provider": decision.telemetry.get("provider"),
                 "knowledge_used": decision.telemetry.get("knowledge_items_count", 0),
+                "knowledge_query_hash": decision.telemetry.get("knowledge_query_hash"),
+                "knowledge_bundle_hash": decision.telemetry.get("knowledge_bundle_hash"),
+                "retrieved_style_cards_count": decision.telemetry.get("retrieved_style_cards_count"),
+                "retrieved_color_cards_count": decision.telemetry.get("retrieved_color_cards_count"),
+                "retrieved_history_cards_count": decision.telemetry.get("retrieved_history_cards_count"),
+                "retrieved_tailoring_cards_count": decision.telemetry.get("retrieved_tailoring_cards_count"),
+                "retrieved_material_cards_count": decision.telemetry.get("retrieved_material_cards_count"),
+                "retrieved_flatlay_cards_count": decision.telemetry.get("retrieved_flatlay_cards_count"),
                 "generation_job_id": decision.job_id,
                 "style_id": context.current_style_id,
                 "style_name": decision.telemetry.get("style_name") or context.current_style_name,
                 "style_history_size": decision.telemetry.get("style_history_size"),
                 "semantic_constraints_hash": decision.telemetry.get("semantic_constraints_hash"),
                 "visual_constraints_hash": decision.telemetry.get("visual_constraints_hash"),
+                "brief_hash": decision.telemetry.get("brief_hash"),
+                "compiled_prompt_hash": decision.telemetry.get("compiled_prompt_hash"),
+                "diversity_constraints_hash": decision.telemetry.get("diversity_constraints_hash"),
+                "knowledge_cards_count": decision.telemetry.get("knowledge_cards_count"),
+                "validation_errors_count": decision.telemetry.get("validation_errors_count"),
                 "palette": decision.telemetry.get("palette"),
                 "hero_garments": decision.telemetry.get("hero_garments"),
                 "composition_type": decision.telemetry.get("composition_type"),
                 "visual_preset": decision.telemetry.get("visual_preset"),
+                "workflow_name": decision.telemetry.get("workflow_name"),
+                "workflow_version": decision.telemetry.get("workflow_version"),
+                "layout_archetype": decision.telemetry.get("layout_archetype"),
+                "background_family": decision.telemetry.get("background_family"),
+                "object_count_range": decision.telemetry.get("object_count_range"),
+                "spacing_density": decision.telemetry.get("spacing_density"),
+                "camera_distance": decision.telemetry.get("camera_distance"),
+                "shadow_hardness": decision.telemetry.get("shadow_hardness"),
+                "anchor_garment_centrality": decision.telemetry.get("anchor_garment_centrality"),
+                "practical_coherence": decision.telemetry.get("practical_coherence"),
                 "fallback_used": decision.telemetry.get("fallback_used", False),
                 "latency_ms": latency_ms,
             },
@@ -183,6 +206,39 @@ class StylistChatOrchestrator:
         flow_state_before: FlowState,
         clarification_kind_before: ClarificationKind | None,
     ) -> None:
+        knowledge_counts = [
+            int(decision.telemetry.get("retrieved_style_cards_count") or 0),
+            int(decision.telemetry.get("retrieved_color_cards_count") or 0),
+            int(decision.telemetry.get("retrieved_history_cards_count") or 0),
+            int(decision.telemetry.get("retrieved_tailoring_cards_count") or 0),
+            int(decision.telemetry.get("retrieved_material_cards_count") or 0),
+            int(decision.telemetry.get("retrieved_flatlay_cards_count") or 0),
+        ]
+        if decision.telemetry.get("knowledge_query_hash"):
+            knowledge_tags = {
+                "mode": context.active_mode.value,
+                "decision_type": decision.decision_type.value,
+            }
+            await self.metrics_recorder.increment("knowledge_retrieval_requests", tags=knowledge_tags)
+            await self.metrics_recorder.observe(
+                "knowledge_bundle_size",
+                value=float(sum(knowledge_counts)),
+                tags=knowledge_tags,
+            )
+            if sum(knowledge_counts) == 0:
+                await self.metrics_recorder.increment("knowledge_empty_bundle", tags=knowledge_tags)
+
+        if decision.job_id is not None and decision.telemetry.get("workflow_name"):
+            visual_tags: dict[str, Any] = {
+                "mode": context.active_mode.value,
+                "workflow_name": decision.telemetry.get("workflow_name"),
+                "visual_preset": decision.telemetry.get("visual_preset"),
+                "layout_archetype": decision.telemetry.get("layout_archetype"),
+                "background_family": decision.telemetry.get("background_family"),
+            }
+            await self.metrics_recorder.increment("generation_runs_by_workflow", tags=visual_tags)
+            await self.metrics_recorder.increment("generation_runs_by_visual_preset", tags=visual_tags)
+
         if context.active_mode == ChatMode.STYLE_EXPLORATION:
             style_tags: dict[str, Any] = {
                 "mode": context.active_mode.value,
@@ -309,6 +365,10 @@ class StylistChatOrchestrator:
             patch["occasion_context"] = context.occasion_context.model_dump(mode="json", exclude_none=True)
         if context.current_style_name:
             patch["current_style_name"] = context.current_style_name
+        if context.current_style_id:
+            patch["current_style_id"] = context.current_style_id
+        if context.last_retrieved_knowledge_refs:
+            patch["last_retrieved_knowledge_refs"] = [dict(item) for item in context.last_retrieved_knowledge_refs]
         if context.last_generation_request_key:
             patch["last_generation_request_key"] = context.last_generation_request_key
         return patch

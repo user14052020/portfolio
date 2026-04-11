@@ -141,22 +141,112 @@ class FakeKnowledgeProvider:
 class FakePromptBuilder:
     async def build(self, *, brief: dict[str, object]) -> dict[str, object]:
         style_brief = brief.get("style_exploration_brief") or {}
+        mode = str(brief.get("mode") or "general_advice")
+        workflow_name = {
+            "garment_matching": "garment_matching_variation",
+            "occasion_outfit": "occasion_outfit_variation",
+            "style_exploration": "style_exploration_variation",
+        }.get(mode, "fashion_flatlay_base")
+        visual_preset = {
+            "garment_matching": "editorial_studio",
+            "occasion_outfit": "practical_board",
+            "style_exploration": style_brief.get("visual_preset") or "textured_surface",
+        }.get(mode, "editorial_studio")
+        style_exploration_layouts = {
+            "editorial_studio": "centered anchor composition",
+            "airy_catalog": "catalog grid-like arrangement",
+            "textured_surface": "diagonal editorial spread",
+            "dark_gallery": "radial outfit spread",
+        }
+        style_exploration_backgrounds = {
+            "editorial_studio": "muted studio background",
+            "airy_catalog": "off-white linen",
+            "textured_surface": "warm wood",
+            "dark_gallery": "dark textured surface",
+        }
+        layout_archetype = {
+            "garment_matching": "centered anchor composition",
+            "occasion_outfit": "practical dressing board",
+            "style_exploration": style_exploration_layouts.get(str(visual_preset), "diagonal editorial spread"),
+        }.get(mode, "catalog grid-like arrangement")
+        background_family = {
+            "garment_matching": "muted studio background",
+            "occasion_outfit": "neutral paper",
+            "style_exploration": style_exploration_backgrounds.get(str(visual_preset), "off-white linen"),
+        }.get(mode, "muted studio background")
+        shadow_hardness = "soft diffused" if mode == "occasion_outfit" else "moderate natural"
+        visual_generation_plan = {
+            "mode": mode,
+            "style_id": (
+                (style_brief.get("selected_style_direction", {}) or {}).get("style_id")
+                if isinstance(style_brief, dict)
+                else None
+            ),
+            "style_name": (
+                (style_brief.get("selected_style_direction", {}) or {}).get("style_name")
+                if isinstance(style_brief, dict)
+                else None
+            ),
+            "final_prompt": f"prompt::{brief.get('image_brief_en', '')}",
+            "negative_prompt": "avoid clutter",
+            "visual_preset_id": visual_preset,
+            "workflow_name": workflow_name,
+            "workflow_version": f"{workflow_name}.json",
+            "layout_archetype": layout_archetype,
+            "background_family": background_family,
+            "object_count_range": "balanced outfit set",
+            "spacing_density": "balanced",
+            "camera_distance": "medium flat lay",
+            "shadow_hardness": shadow_hardness,
+            "anchor_garment_centrality": "high" if mode == "garment_matching" else "medium",
+            "practical_coherence": "high" if mode == "occasion_outfit" else "medium",
+            "diversity_profile": dict(brief.get("anti_repeat_constraints") or {}),
+        }
         return {
             "prompt": f"prompt::{brief.get('image_brief_en', '')}",
             "image_brief_en": brief.get("image_brief_en", ""),
             "recommendation_text": brief.get("recommendation_text", ""),
             "input_asset_id": brief.get("asset_id"),
-            "negative_prompt": None,
-            "visual_preset": style_brief.get("visual_preset"),
+            "negative_prompt": "avoid clutter",
+            "visual_preset": visual_preset,
+            "visual_generation_plan": visual_generation_plan,
+            "generation_metadata": {
+                "mode": mode,
+                "style_id": visual_generation_plan["style_id"],
+                "style_name": visual_generation_plan["style_name"],
+                "final_prompt": visual_generation_plan["final_prompt"],
+                "negative_prompt": "avoid clutter",
+                "workflow_name": workflow_name,
+                "workflow_version": f"{workflow_name}.json",
+                "visual_preset_id": visual_preset,
+                "background_family": background_family,
+                "layout_archetype": layout_archetype,
+                "spacing_density": "balanced",
+                "camera_distance": "medium flat lay",
+                "shadow_hardness": shadow_hardness,
+                "anchor_garment_centrality": visual_generation_plan["anchor_garment_centrality"],
+                "practical_coherence": visual_generation_plan["practical_coherence"],
+                "diversity_constraints": dict(brief.get("anti_repeat_constraints") or {}),
+            },
             "metadata": {
                 "style_name": (
                     style_brief.get("selected_style_direction", {}) or {}
                 ).get("style_name"),
-                "visual_preset": style_brief.get("visual_preset"),
+                "visual_preset": visual_preset,
                 "semantic_constraints_hash": style_brief.get("semantic_constraints_hash"),
                 "visual_constraints_hash": style_brief.get("visual_constraints_hash"),
                 "previous_style_directions": brief.get("previous_style_directions") or [],
                 "anti_repeat_constraints": brief.get("anti_repeat_constraints") or {},
+                "workflow_name": workflow_name,
+                "workflow_version": f"{workflow_name}.json",
+                "layout_archetype": layout_archetype,
+                "background_family": background_family,
+                "object_count_range": "balanced outfit set",
+                "spacing_density": "balanced",
+                "camera_distance": "medium flat lay",
+                "shadow_hardness": shadow_hardness,
+                "anchor_garment_centrality": visual_generation_plan["anchor_garment_centrality"],
+                "practical_coherence": visual_generation_plan["practical_coherence"],
             },
         }
 

@@ -17,18 +17,8 @@ class StyleHistoryService:
     def to_prompt_items(self, history: list[StyleDirection]) -> list[dict[str, object]]:
         items: list[dict[str, object]] = []
         for style in history[-5:]:
-            title = style.style_name or "Style Direction"
-            items.append(
-                {
-                    "style_id": style.style_id,
-                    "style_name": title,
-                    "style_family": style.style_family,
-                    "palette": list(style.palette),
-                    "silhouette_family": style.silhouette_family,
-                    "hero_garments": list(style.hero_garments),
-                    "composition_type": style.composition_type,
-                    "background_family": style.background_family,
-                    "visual_preset": style.visual_preset,
-                }
-            )
+            payload = style.model_dump(mode="json", exclude_none=True)
+            if not payload.get("style_name"):
+                payload["style_name"] = "Style Direction"
+            items.append(payload)
         return items

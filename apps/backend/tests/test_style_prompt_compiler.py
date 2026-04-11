@@ -22,6 +22,7 @@ class StylePromptCompilerTests(unittest.IsolatedAsyncioTestCase):
                 "anti_repeat_constraints": {
                     "avoid_palette": ["chalk", "charcoal"],
                     "avoid_hero_garments": ["structured coat"],
+                    "force_footwear_change": True,
                 },
                 "style_exploration_brief": {
                     "style_identity": "Soft Retro Prep",
@@ -31,8 +32,16 @@ class StylePromptCompilerTests(unittest.IsolatedAsyncioTestCase):
                     "materials": ["cotton"],
                     "footwear": ["loafers"],
                     "accessories": ["belt"],
-                    "composition_rules": ["use catalog grid", "shift to textured_surface visual preset"],
-                    "negative_constraints": ["avoid palette: chalk, charcoal"],
+                    "styling_notes": ["soft collegiate layering"],
+                    "composition_rules": [
+                        "use catalog grid",
+                        "change the footwear family versus the recent history",
+                        "shift to textured_surface visual preset",
+                    ],
+                    "negative_constraints": [
+                        "avoid palette: chalk, charcoal",
+                        "avoid footwear: derbies",
+                    ],
                     "diversity_constraints": {
                         "target_semantic_distance": "high",
                         "target_visual_distance": "high",
@@ -48,12 +57,15 @@ class StylePromptCompilerTests(unittest.IsolatedAsyncioTestCase):
                     "background_family": "paper",
                     "semantic_constraints_hash": "abc123def456",
                     "visual_constraints_hash": "fed654cba321",
+                    "diversity_constraints_hash": "aaa111bbb222",
                 },
             }
         )
 
         self.assertEqual(payload["visual_preset"], "textured_surface")
         self.assertIn("Soft Retro Prep", payload["prompt"])
+        self.assertIn("Styling notes: soft collegiate layering", payload["prompt"])
+        self.assertEqual(payload["negative_prompt"], "avoid palette: chalk, charcoal; avoid footwear: derbies")
         self.assertEqual(
             payload["metadata"]["previous_style_directions"][0]["style_id"],
             "artful-minimalism",
@@ -64,4 +76,4 @@ class StylePromptCompilerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(payload["metadata"]["semantic_constraints_hash"], "abc123def456")
         self.assertEqual(payload["metadata"]["visual_constraints_hash"], "fed654cba321")
-
+        self.assertEqual(payload["metadata"]["diversity_constraints_hash"], "aaa111bbb222")

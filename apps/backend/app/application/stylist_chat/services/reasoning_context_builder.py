@@ -2,6 +2,7 @@ from typing import Any
 
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import KnowledgeResult
+from app.domain.knowledge.entities import KnowledgeBundle
 from app.domain.chat_context import ChatModeContext, OccasionContext
 
 
@@ -13,10 +14,11 @@ class ReasoningContextBuilder:
         context: ChatModeContext,
         auto_generate: bool,
         style_seed: dict[str, str] | None,
-        previous_style_directions: list[dict[str, str]],
+        previous_style_directions: list[dict[str, Any]],
         occasion_context: OccasionContext | None,
         knowledge_result: KnowledgeResult,
-        anti_repeat_constraints: dict[str, list[str]] | None,
+        knowledge_bundle: KnowledgeBundle | None,
+        anti_repeat_constraints: dict[str, Any] | None,
         structured_outfit_brief: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         profile_context = command.profile_context
@@ -48,6 +50,7 @@ class ReasoningContextBuilder:
             ),
             "knowledge_items": [item.text for item in knowledge_result.items],
             "knowledge_query": knowledge_result.query,
+            "knowledge_bundle": knowledge_bundle.model_dump(mode="json") if knowledge_bundle is not None else None,
             "anti_repeat_constraints": anti_repeat_constraints or {},
             "last_generation_prompt": context.last_generation_prompt,
             "last_generated_outfit_summary": context.last_generated_outfit_summary,

@@ -53,8 +53,11 @@ class StyleExplorationBriefTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brief.visual_preset, "textured_surface")
         self.assertEqual(brief.selected_style_direction.visual_preset, "textured_surface")
         self.assertIn("avoid palette: camel, cream", brief.negative_constraints)
+        self.assertIn("avoid composition: editorial flat lay", brief.negative_constraints)
+        self.assertIn("avoid background: paper", brief.negative_constraints)
         self.assertIn("shift to textured_surface visual preset", brief.composition_rules)
+        self.assertEqual(brief.diversity_constraints_hash, constraints.combined_hash())
         self.assertEqual(payload["semantic_constraints_hash"], constraints.semantic_hash())
         self.assertEqual(payload["visual_constraints_hash"], constraints.visual_hash())
+        self.assertEqual(payload["diversity_constraints_hash"], constraints.combined_hash())
         self.assertEqual(payload["selected_style_direction"]["visual_preset"], "textured_surface")
-

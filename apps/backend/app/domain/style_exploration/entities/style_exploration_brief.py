@@ -26,6 +26,7 @@ class StyleExplorationBrief(BaseModel):
     background_family: str | None = None
     semantic_constraints_hash: str | None = None
     visual_constraints_hash: str | None = None
+    diversity_constraints_hash: str | None = None
 
     def to_prompt_payload(self) -> dict[str, object]:
         return {
@@ -51,4 +52,5 @@ class StyleExplorationBrief(BaseModel):
             "background_family": self.background_family,
             "semantic_constraints_hash": self.semantic_constraints_hash,
             "visual_constraints_hash": self.visual_constraints_hash,
+            "diversity_constraints_hash": self.diversity_constraints_hash,
         }

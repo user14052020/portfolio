@@ -57,36 +57,24 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
                 recommendation_ru=request.recommendation_text,
                 recommendation_en=request.recommendation_text,
                 prompt=request.prompt,
+                negative_prompt=request.negative_prompt,
                 input_asset_id=request.input_asset_id,
                 body_height_cm=self._coerce_int(request.profile_context.get("height_cm")),
                 body_weight_kg=self._coerce_int(request.profile_context.get("weight_kg")),
+                workflow_name=request.workflow_name,
+                workflow_version=request.workflow_version,
+                visual_generation_plan=request.visual_generation_plan,
+                generation_metadata=request.generation_metadata,
+                metadata={
+                    **request.metadata,
+                    "source_message_id": (
+                        request.generation_intent.source_message_id
+                        if request.generation_intent is not None
+                        else None
+                    ),
+                },
+                idempotency_key=request.idempotency_key,
             ),
-        )
-        provider_payload = generation_job.provider_payload if isinstance(generation_job.provider_payload, dict) else {}
-        generation_job = await generation_jobs_repository.update(
-            self.session,
-            generation_job,
-            {
-                "provider_payload": {
-                    **provider_payload,
-                    "_stylist": {
-                        **(
-                            provider_payload.get("_stylist")
-                            if isinstance(provider_payload.get("_stylist"), dict)
-                            else {}
-                        ),
-                        **request.metadata,
-                    },
-                    "_orchestration": {
-                        **(
-                            provider_payload.get("_orchestration")
-                            if isinstance(provider_payload.get("_orchestration"), dict)
-                            else {}
-                        ),
-                        "idempotency_key": request.idempotency_key,
-                    },
-                }
-            },
         )
         return GenerationScheduleResult(
             job_id=generation_job.public_id,

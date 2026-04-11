@@ -13,9 +13,16 @@ class GenerationJobCreate(BaseModel):
     recommendation_ru: str
     recommendation_en: str
     prompt: str
+    negative_prompt: str | None = None
     input_asset_id: int | None = None
     body_height_cm: int | None = None
     body_weight_kg: int | None = None
+    workflow_name: str | None = None
+    workflow_version: str | None = None
+    visual_generation_plan: dict | None = None
+    generation_metadata: dict | None = None
+    metadata: dict = {}
+    idempotency_key: str | None = None
     provider: GenerationProvider = GenerationProvider.COMFYUI
 
 
@@ -46,3 +53,5 @@ class GenerationJobRead(TimestampedRead):
     queue_total: int | None = None
     queue_refresh_available_at: datetime | None = None
     queue_refresh_retry_after_seconds: int | None = None
+    visual_generation_plan: dict | None = None
+    generation_metadata: dict | None = None

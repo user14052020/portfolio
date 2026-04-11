@@ -11,6 +11,7 @@ class StylePromptCompiler:
         materials = [str(item).strip() for item in style_brief.get("materials", []) if str(item).strip()]
         footwear = [str(item).strip() for item in style_brief.get("footwear", []) if str(item).strip()]
         accessories = [str(item).strip() for item in style_brief.get("accessories", []) if str(item).strip()]
+        styling_notes = [str(item).strip() for item in style_brief.get("styling_notes", []) if str(item).strip()]
         composition_rules = [
             str(item).strip() for item in style_brief.get("composition_rules", []) if str(item).strip()
         ]
@@ -39,6 +40,7 @@ class StylePromptCompiler:
             f"Materials: {', '.join(materials[:3])}" if materials else "",
             f"Footwear: {', '.join(footwear[:2])}" if footwear else "",
             f"Accessories: {', '.join(accessories[:2])}" if accessories else "",
+            f"Styling notes: {', '.join(styling_notes[:3])}" if styling_notes else "",
             f"Visual preset: {visual_preset}",
             f"Composition: {composition_type} on {background_family}",
             "; ".join(composition_rules[:3]),
@@ -66,7 +68,8 @@ class StylePromptCompiler:
                 "background_family": background_family,
                 "semantic_constraints_hash": style_brief.get("semantic_constraints_hash"),
                 "visual_constraints_hash": style_brief.get("visual_constraints_hash"),
-                "diversity_constraints_hash": style_brief.get("semantic_constraints_hash")
+                "diversity_constraints_hash": style_brief.get("diversity_constraints_hash")
+                or style_brief.get("semantic_constraints_hash")
                 or style_brief.get("visual_constraints_hash"),
                 "diversity_tags": {
                     "semantic": diversity_constraints.get("target_semantic_distance"),

@@ -81,3 +81,48 @@ class StylistMessageResponse(BaseModel):
     timestamp: datetime
     decision: DecisionResult
     session_context: ChatModeContext
+
+
+class PromptPipelinePreviewRequest(BaseModel):
+    mode: Literal["general_advice", "garment_matching", "style_exploration", "occasion_outfit"] = "general_advice"
+    user_message: str | None = None
+    image_brief_en: str | None = None
+    recommendation_text: str | None = None
+    asset_id: int | None = None
+    profile_context: dict[str, Any] = Field(default_factory=dict)
+    style_seed: dict[str, Any] | None = None
+    previous_style_directions: list[dict[str, Any]] = Field(default_factory=list)
+    anti_repeat_constraints: dict[str, Any] = Field(default_factory=dict)
+    occasion_context: dict[str, Any] | None = None
+    structured_outfit_brief: dict[str, Any] | None = None
+    knowledge_cards: list[dict[str, Any]] = Field(default_factory=list)
+    session_id: str | None = None
+    message_id: int | None = None
+    knowledge_provider_used: str | None = None
+
+
+class PromptPipelinePreviewResponse(BaseModel):
+    fashion_brief: dict[str, Any]
+    compiled_prompt: dict[str, Any] | None = None
+    generation_payload: dict[str, Any] | None = None
+    validation_errors: list[str]
+
+
+class KnowledgePreviewRequest(BaseModel):
+    mode: Literal["general_advice", "garment_matching", "style_exploration", "occasion_outfit"] = "general_advice"
+    session_id: str = "debug-session"
+    locale: str = "en"
+    message: str | None = None
+    style_id: str | None = None
+    style_name: str | None = None
+    anchor_garment: dict[str, Any] | None = None
+    occasion_context: dict[str, Any] | None = None
+    diversity_constraints: dict[str, Any] = Field(default_factory=dict)
+    intent: str | None = None
+    limit: int = Field(default=6, ge=1, le=20)
+    profile_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgePreviewResponse(BaseModel):
+    knowledge_query: dict[str, Any]
+    knowledge_bundle: dict[str, Any]

@@ -24,6 +24,8 @@ class GenerationPayload(BaseModel):
     negative_prompt: str | None = None
     visual_preset: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    visual_generation_plan: dict[str, Any] | None = None
+    generation_metadata: dict[str, Any] | None = None
     generation_intent: GenerationIntent | None = None
 
 

@@ -64,10 +64,15 @@ class GenerationScheduleRequest:
     input_text: str
     recommendation_text: str
     prompt: str
+    negative_prompt: str | None
     input_asset_id: int | None
     profile_context: dict[str, str | int | None]
     generation_intent: GenerationIntent | None
     idempotency_key: str
+    workflow_name: str | None = None
+    workflow_version: str | None = None
+    visual_generation_plan: dict[str, Any] | None = None
+    generation_metadata: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

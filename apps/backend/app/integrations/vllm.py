@@ -97,7 +97,7 @@ class VLLMClient:
         profile_context: dict[str, str | int | None],
         session_intent: str,
         style_seed: dict[str, str] | None,
-        previous_style_directions: list[dict[str, str]],
+        previous_style_directions: list[dict[str, Any]],
         occasion_context: dict[str, str] | None,
         anti_repeat_constraints: dict[str, Any] | None,
         style_exploration_brief: dict[str, Any] | None,

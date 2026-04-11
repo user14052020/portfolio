@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.application.stylist_chat.contracts.command import ChatCommand
+from app.domain.knowledge.entities import KnowledgeBundle
 from app.application.stylist_chat.contracts.ports import (
     FallbackReasonerStrategy,
     KnowledgeResult,
@@ -24,12 +25,18 @@ class BaseChatModeHandler:
         knowledge_provider: KnowledgeProvider,
         reasoning_context_builder: ReasoningContextBuilder,
         generation_request_builder: GenerationRequestBuilder,
+        knowledge_query_builder=None,
+        resolve_knowledge_bundle_use_case=None,
+        inject_knowledge_into_reasoning_use_case=None,
     ) -> None:
         self.reasoner = reasoner
         self.fallback_reasoner = fallback_reasoner
         self.knowledge_provider = knowledge_provider
         self.reasoning_context_builder = reasoning_context_builder
         self.generation_request_builder = generation_request_builder
+        self.knowledge_query_builder = knowledge_query_builder
+        self.resolve_knowledge_bundle_use_case = resolve_knowledge_bundle_use_case
+        self.inject_knowledge_into_reasoning_use_case = inject_knowledge_into_reasoning_use_case
 
     async def handle(
         self,
@@ -46,23 +53,53 @@ class BaseChatModeHandler:
         context: ChatModeContext,
         must_generate: bool,
         style_seed: dict[str, str] | None,
-        previous_style_directions: list[dict[str, str]],
+        previous_style_directions: list[dict[str, Any]],
         occasion_context: OccasionContext | None,
-        anti_repeat_constraints: dict[str, list[str]] | None,
+        anti_repeat_constraints: dict[str, Any] | None,
         knowledge_mode: str,
         style_history_used: bool,
         structured_outfit_brief: dict[str, Any] | None = None,
         knowledge_result_override: KnowledgeResult | None = None,
+        knowledge_bundle_override: KnowledgeBundle | None = None,
     ) -> DecisionResult:
-        if knowledge_result_override is None:
-            knowledge_query = self.reasoning_context_builder.build_knowledge_query(
-                command=command,
-                context=context,
-                mode=knowledge_mode,
-            )
-            knowledge_result = await self.knowledge_provider.fetch(query=knowledge_query)
+        injected_knowledge = None
+        if knowledge_bundle_override is not None and self.inject_knowledge_into_reasoning_use_case is not None:
+            injected_knowledge = self.inject_knowledge_into_reasoning_use_case.execute(bundle=knowledge_bundle_override)
+            knowledge_result = injected_knowledge.knowledge_result
+            context.last_retrieved_knowledge_refs = injected_knowledge.refs
+        elif knowledge_result_override is None:
+            if self.knowledge_query_builder is not None and self.resolve_knowledge_bundle_use_case is not None:
+                knowledge_query = self.knowledge_query_builder.execute(
+                    command=command,
+                    context=context,
+                    mode=knowledge_mode,
+                    intent=knowledge_mode,
+                    style_id=(style_seed or {}).get("slug") if isinstance(style_seed, dict) else None,
+                    style_name=(style_seed or {}).get("title") if isinstance(style_seed, dict) else None,
+                    anchor_garment=context.anchor_garment.model_dump(exclude_none=True) if context.anchor_garment else None,
+                    occasion_context=occasion_context or context.occasion_context,
+                    diversity_constraints=anti_repeat_constraints,
+                    limit=6,
+                )
+                knowledge_bundle = await self.resolve_knowledge_bundle_use_case.execute(query=knowledge_query)
+                if self.inject_knowledge_into_reasoning_use_case is not None:
+                    injected_knowledge = self.inject_knowledge_into_reasoning_use_case.execute(bundle=knowledge_bundle)
+                    knowledge_result = injected_knowledge.knowledge_result
+                    context.last_retrieved_knowledge_refs = injected_knowledge.refs
+                else:
+                    knowledge_result = KnowledgeResult(source="knowledge_layer", query=dict(knowledge_bundle.retrieval_trace))
+            else:
+                knowledge_query = self.reasoning_context_builder.build_knowledge_query(
+                    command=command,
+                    context=context,
+                    mode=knowledge_mode,
+                )
+                knowledge_result = await self.knowledge_provider.fetch(query=knowledge_query)
+                context.last_retrieved_knowledge_refs = []
         else:
             knowledge_result = knowledge_result_override
+            context.last_retrieved_knowledge_refs = []
+
         reasoning_input = self.reasoning_context_builder.build(
             command=command,
             context=context,
@@ -71,6 +108,7 @@ class BaseChatModeHandler:
             previous_style_directions=previous_style_directions,
             occasion_context=occasion_context,
             knowledge_result=knowledge_result,
+            knowledge_bundle=injected_knowledge.bundle if injected_knowledge is not None else knowledge_bundle_override,
             anti_repeat_constraints=anti_repeat_constraints,
             structured_outfit_brief=structured_outfit_brief,
         )
@@ -95,6 +133,8 @@ class BaseChatModeHandler:
                 anchor_garment_confidence=context.anchor_garment.confidence if context.anchor_garment else 0.0,
                 anchor_garment_completeness=context.anchor_garment.completeness_score if context.anchor_garment else 0.0,
             )
+            if injected_knowledge is not None:
+                decision.telemetry.update(injected_knowledge.bundle.retrieval_trace)
             return decision
         except LLMReasonerError:
             reasoning_output = await self.fallback_reasoner.decide(
@@ -114,6 +154,18 @@ class BaseChatModeHandler:
             occasion_context=occasion_context,
             anti_repeat_constraints=anti_repeat_constraints,
             structured_outfit_brief=structured_outfit_brief,
+            knowledge_cards=[
+                {"key": item.key, "text": item.text}
+                for item in knowledge_result.items
+            ] if injected_knowledge is None else injected_knowledge.knowledge_cards,
+            knowledge_bundle=(
+                injected_knowledge.bundle.model_dump(mode="json")
+                if injected_knowledge is not None
+                else knowledge_bundle_override.model_dump(mode="json")
+                if knowledge_bundle_override is not None
+                else None
+            ),
+            knowledge_provider_used=knowledge_result.source,
         )
         self._apply_telemetry(
             decision=decision,
@@ -126,6 +178,8 @@ class BaseChatModeHandler:
             anchor_garment_confidence=context.anchor_garment.confidence if context.anchor_garment else 0.0,
             anchor_garment_completeness=context.anchor_garment.completeness_score if context.anchor_garment else 0.0,
         )
+        if injected_knowledge is not None:
+            decision.telemetry.update(injected_knowledge.bundle.retrieval_trace)
         return decision
 
     def style_seed_from_context(self, style: StyleDirectionContext) -> dict[str, str]:

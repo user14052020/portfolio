@@ -1,5 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.knowledge.services.knowledge_bundle_builder import KnowledgeBundleBuilder
+from app.application.knowledge.services.knowledge_ranker import KnowledgeRanker
+from app.application.knowledge.services.knowledge_retrieval_service import DefaultKnowledgeRetrievalService
+from app.application.knowledge.use_cases.build_knowledge_query import BuildKnowledgeQueryUseCase
+from app.application.knowledge.use_cases.inject_knowledge_into_reasoning import InjectKnowledgeIntoReasoningUseCase
+from app.application.knowledge.use_cases.resolve_knowledge_bundle import ResolveKnowledgeBundleUseCase
 from app.application.stylist_chat.handlers.garment_matching_handler import GarmentMatchingHandler
 from app.application.stylist_chat.handlers.general_advice_handler import GeneralAdviceHandler
 from app.application.stylist_chat.handlers.occasion_outfit_handler import OccasionOutfitHandler
@@ -42,6 +48,14 @@ from app.domain.occasion_outfit.policies.occasion_clarification_policy import Oc
 from app.domain.occasion_outfit.policies.occasion_completeness_policy import OccasionCompletenessPolicy
 from app.domain.style_exploration.policies.semantic_diversity_policy import SemanticDiversityPolicy
 from app.domain.style_exploration.policies.visual_diversity_policy import VisualDiversityPolicy
+from app.infrastructure.knowledge.caches.knowledge_cache import InMemoryKnowledgeCache
+from app.infrastructure.knowledge.repositories.color_theory_repository import DatabaseColorTheoryRepository
+from app.infrastructure.knowledge.repositories.fashion_history_repository import DatabaseFashionHistoryRepository
+from app.infrastructure.knowledge.repositories.flatlay_patterns_repository import DatabaseFlatlayPatternsRepository
+from app.infrastructure.knowledge.repositories.materials_fabrics_repository import DatabaseMaterialsFabricsRepository
+from app.infrastructure.knowledge.repositories.style_catalog_repository import DatabaseStyleCatalogRepository
+from app.infrastructure.knowledge.repositories.tailoring_principles_repository import DatabaseTailoringPrinciplesRepository
+from app.infrastructure.knowledge.search.knowledge_search_adapter import DefaultKnowledgeSearchAdapter
 from app.infrastructure.knowledge.occasion_knowledge_provider import StaticOccasionKnowledgeProvider
 from app.infrastructure.knowledge.garment_knowledge_provider import StaticGarmentKnowledgeProvider
 from app.infrastructure.llm.llm_garment_extractor import LLMGarmentExtractorAdapter
@@ -70,6 +84,11 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
     occasion_brief_compiler = OccasionBriefCompiler()
     style_history_service = StyleHistoryService()
     style_exploration_context_builder = StyleExplorationContextBuilder()
+    knowledge_query_builder = BuildKnowledgeQueryUseCase()
+    knowledge_search_adapter = DefaultKnowledgeSearchAdapter()
+    knowledge_bundle_builder = KnowledgeBundleBuilder()
+    knowledge_ranker = KnowledgeRanker()
+    knowledge_cache = InMemoryKnowledgeCache()
 
     context_store = SessionChatContextStore(session)
     context_checkpoint_writer = SessionContextCheckpointWriter(context_store)
@@ -81,6 +100,23 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
     knowledge_provider = StaticKnowledgeProvider()
     garment_knowledge_provider = StaticGarmentKnowledgeProvider()
     occasion_knowledge_provider = StaticOccasionKnowledgeProvider()
+    style_catalog_repository = DatabaseStyleCatalogRepository(session)
+    knowledge_retrieval_service = DefaultKnowledgeRetrievalService(
+        style_catalog_repository=style_catalog_repository,
+        color_theory_repository=DatabaseColorTheoryRepository(style_catalog_repository=style_catalog_repository),
+        fashion_history_repository=DatabaseFashionHistoryRepository(style_catalog_repository=style_catalog_repository),
+        tailoring_principles_repository=DatabaseTailoringPrinciplesRepository(style_catalog_repository=style_catalog_repository),
+        materials_fabrics_repository=DatabaseMaterialsFabricsRepository(style_catalog_repository=style_catalog_repository),
+        flatlay_patterns_repository=DatabaseFlatlayPatternsRepository(style_catalog_repository=style_catalog_repository),
+        knowledge_ranker=knowledge_ranker,
+        knowledge_bundle_builder=knowledge_bundle_builder,
+        knowledge_search_adapter=knowledge_search_adapter,
+        knowledge_cache=knowledge_cache,
+    )
+    resolve_knowledge_bundle = ResolveKnowledgeBundleUseCase(
+        knowledge_retrieval_service=knowledge_retrieval_service,
+    )
+    inject_knowledge_into_reasoning = InjectKnowledgeIntoReasoningUseCase()
     garment_extractor = LLMGarmentExtractorAdapter()
     occasion_extractor = LLMOccasionExtractorAdapter(reasoner=occasion_reasoner)
     garment_completeness_policy = GarmentCompletenessPolicy()
@@ -89,7 +125,10 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
     occasion_completeness_policy = OccasionCompletenessPolicy()
     occasion_clarification_policy = OccasionClarificationPolicy()
     occasion_clarification_service = OccasionClarificationService(occasion_clarification_policy)
-    style_history_provider = DatabaseStyleHistoryProvider(session)
+    style_history_provider = DatabaseStyleHistoryProvider(
+        session,
+        style_catalog_repository=style_catalog_repository,
+    )
     candidate_style_selector = CandidateStyleSelector(style_history_provider)
     semantic_diversity_service = SemanticDiversityService(SemanticDiversityPolicy())
     visual_diversity_service = VisualDiversityService(VisualDiversityPolicy())
@@ -116,12 +155,18 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
         garment_matching_context_builder=garment_matching_context_builder,
         outfit_brief_builder=garment_brief_compiler,
         garment_brief_compiler=garment_brief_compiler,
+        knowledge_query_builder=knowledge_query_builder,
+        resolve_knowledge_bundle_use_case=resolve_knowledge_bundle,
+        inject_knowledge_into_reasoning_use_case=inject_knowledge_into_reasoning,
     )
     build_occasion_outfit_brief = BuildOccasionOutfitBriefUseCase(
         occasion_knowledge_provider=occasion_knowledge_provider,
         occasion_context_builder=occasion_context_builder,
         outfit_brief_builder=occasion_brief_compiler,
         occasion_brief_compiler=occasion_brief_compiler,
+        knowledge_query_builder=knowledge_query_builder,
+        resolve_knowledge_bundle_use_case=resolve_knowledge_bundle,
+        inject_knowledge_into_reasoning_use_case=inject_knowledge_into_reasoning,
     )
     start_style_exploration = StartStyleExplorationUseCase()
     select_candidate_style = SelectCandidateStyleUseCase(
@@ -146,6 +191,9 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
         "knowledge_provider": knowledge_provider,
         "reasoning_context_builder": reasoning_context_builder,
         "generation_request_builder": generation_request_builder,
+        "knowledge_query_builder": knowledge_query_builder,
+        "resolve_knowledge_bundle_use_case": resolve_knowledge_bundle,
+        "inject_knowledge_into_reasoning_use_case": inject_knowledge_into_reasoning,
     }
     garment_handler_kwargs = {
         **shared_handler_kwargs,

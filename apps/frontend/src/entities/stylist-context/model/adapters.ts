@@ -1,4 +1,5 @@
 import type { CommandName } from "@/entities/command/model/types";
+import type { VisualizationOfferState } from "@/entities/visualization-offer/model/types";
 import type { ChatModeContext } from "@/shared/api/types";
 
 import type { FrontendScenarioContext } from "./types";
@@ -24,6 +25,11 @@ function normalizeCommandName(rawValue: string | null | undefined, activeMode: C
 }
 
 export function adaptFrontendScenarioContext(rawContext: ChatModeContext): FrontendScenarioContext {
+  const visualizationOffer: VisualizationOfferState = {
+    canOfferVisualization: Boolean(rawContext.visualization_offer?.can_offer_visualization),
+    ctaText: rawContext.visualization_offer?.cta_text ?? null,
+    visualizationType: rawContext.visualization_offer?.visualization_type ?? null,
+  };
   return {
     activeMode: rawContext.active_mode,
     flowState: rawContext.flow_state,
@@ -40,6 +46,7 @@ export function adaptFrontendScenarioContext(rawContext: ChatModeContext): Front
     ),
     canSendFreeformMessage: true,
     canAttachAsset: true,
+    visualizationOffer,
     rawContext,
   };
 }

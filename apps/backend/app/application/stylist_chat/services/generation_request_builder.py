@@ -1,6 +1,10 @@
 import re
 from typing import Any
 
+from app.application.product_behavior.services.generation_policy_service import (
+    GenerationPolicyInput,
+    GenerationPolicyService,
+)
 from app.application.prompt_building.services.prompt_pipeline_builder import (
     PromptPipelineBuilder,
     PromptPipelineValidationError,
@@ -20,8 +24,14 @@ from .style_prompt_compiler import StylePromptCompiler
 
 
 class GenerationRequestBuilder:
-    def __init__(self, *, prompt_builder: PromptBuilder | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        prompt_builder: PromptBuilder | None = None,
+        generation_policy_service: GenerationPolicyService | None = None,
+    ) -> None:
         self.prompt_builder = prompt_builder or DefaultPromptBuilder()
+        self.generation_policy_service = generation_policy_service or GenerationPolicyService()
 
     async def build_from_reasoning(
         self,
@@ -41,18 +51,24 @@ class GenerationRequestBuilder:
         knowledge_provider_used: str | None = None,
     ) -> DecisionResult:
         text_reply = reasoning_output.reply_text.strip()
-        should_generate = self.resolve_should_generate(
-            auto_generate=context.should_auto_generate,
-            requested_route=reasoning_output.route,
-            must_generate=must_generate,
+        generation_decision = await self.generation_policy_service.decide(
+            GenerationPolicyInput(
+                command=command,
+                context=context,
+                reasoning_output=reasoning_output,
+                must_generate=must_generate,
+                has_visualizable_brief=structured_outfit_brief is not None,
+            )
         )
-        if not should_generate:
-            return DecisionResult(
+        if not generation_decision.should_generate:
+            decision = DecisionResult(
                 decision_type=DecisionType.TEXT_ONLY,
                 active_mode=context.active_mode,
                 flow_state=FlowState.COMPLETED,
                 text_reply=text_reply,
             )
+            decision.apply_visualization_offer(generation_decision.to_offer())
+            return decision
 
         image_brief_en = reasoning_output.image_brief_en.strip() or "cohesive editorial flat lay outfit"
         try:
@@ -98,9 +114,9 @@ class GenerationRequestBuilder:
             return decision
         generation_intent = context.generation_intent or self.build_generation_intent(
             mode=context.active_mode,
-            trigger=context.active_mode.value,
-            reason="reasoning_requested_generation",
-            must_generate=must_generate,
+            trigger=self._resolve_generation_trigger(command=command, context=context),
+            reason=generation_decision.reason,
+            must_generate=True,
             source_message_id=command.user_message_id,
         )
         payload = GenerationPayload.model_validate(
@@ -119,6 +135,7 @@ class GenerationRequestBuilder:
             text_reply=text_reply,
             generation_payload=payload,
         )
+        decision.apply_visualization_offer(generation_decision.to_offer())
         if isinstance(payload.metadata, dict):
             for key in (
                 "brief_hash",
@@ -224,14 +241,18 @@ class GenerationRequestBuilder:
             source_message_id=source_message_id,
         )
 
-    def resolve_should_generate(self, *, auto_generate: bool, requested_route: str, must_generate: bool) -> bool:
-        if must_generate:
-            return True
-        return auto_generate and requested_route == "text_and_generation"
-
     def explicitly_requests_generation(self, text: str) -> bool:
         lowered = text.lower()
         return any(keyword in lowered for keyword in GENERATION_HINTS)
+
+    def _resolve_generation_trigger(self, *, command: ChatCommand, context: ChatModeContext) -> str:
+        if command.source == "quick_action" and command.command_name == ChatMode.STYLE_EXPLORATION.value:
+            return ChatMode.STYLE_EXPLORATION.value
+        if command.source in {"visualization_cta", "explicit_visual_request"}:
+            return command.source
+        if self.explicitly_requests_generation(command.normalized_message()):
+            return "explicit_visual_request"
+        return context.active_mode.value
 
     def recoverable_error_text(self, locale: str) -> str:
         return (

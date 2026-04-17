@@ -10,6 +10,7 @@ import type {
   ParserAdminStartPayload,
   Project,
   SiteSettings,
+  StyleIngestionRuntimeSettings,
   StylistMessageResponse,
   TokenPair,
   UploadedAsset,
@@ -22,6 +23,24 @@ export async function getSiteSettings(fetchOptions?: Pick<RequestOptions, "cache
 
 export async function updateSiteSettings(payload: Record<string, unknown>, token: string) {
   return request<SiteSettings>("/site-settings", {
+    method: "PUT",
+    token,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getStyleIngestionSettings(sourceName: string, token: string) {
+  return request<StyleIngestionRuntimeSettings>(`/style-ingestion-settings/${sourceName}`, {
+    token
+  });
+}
+
+export async function updateStyleIngestionSettings(
+  sourceName: string,
+  payload: Record<string, unknown>,
+  token: string
+) {
+  return request<StyleIngestionRuntimeSettings>(`/style-ingestion-settings/${sourceName}`, {
     method: "PUT",
     token,
     body: JSON.stringify(payload)
@@ -216,9 +235,23 @@ export async function sendStylistMessage(payload: {
   profile_gender?: string;
   body_height_cm?: number;
   body_weight_kg?: number;
-  auto_generate?: boolean;
 }) {
   return request<StylistMessageResponse>("/stylist-chat/message", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function requestStylistVisualization(payload: {
+  session_id: string;
+  locale: string;
+  visualization_type: string;
+  message?: string;
+  asset_id?: number;
+  uploaded_asset_id?: number;
+  metadata?: Record<string, unknown>;
+}) {
+  return request<StylistMessageResponse>("/stylist-chat/visualize", {
     method: "POST",
     body: JSON.stringify(payload)
   });

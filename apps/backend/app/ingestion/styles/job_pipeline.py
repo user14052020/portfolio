@@ -7,6 +7,7 @@ import os
 import socket
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
+from typing import Callable
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
@@ -26,10 +27,17 @@ from app.ingestion.styles.contracts import (
     StyleSourceRegistryEntry,
 )
 from app.ingestion.styles.ingest_job_service import (
+    ACTIVE_JOB_STATUSES,
     COOLDOWN_DEFERRED_STATUS,
     HARD_FAILED_STATUS,
+    QUEUED_STATUS,
+    RUNNING_STATUS,
     SOFT_FAILED_STATUS,
     StyleIngestJobService,
+)
+from app.ingestion.styles.runtime_settings_service import (
+    ResolvedStyleIngestionSource,
+    StyleIngestionRuntimeSettingsService,
 )
 from app.ingestion.styles.source_fetch_state_service import SourceFetchStateService
 from app.ingestion.styles.style_db_writer import SQLAlchemyStyleDBWriter, build_style_persistence_payload
@@ -48,8 +56,6 @@ DISCOVER_SOURCE_PAGES_JOB_TYPE = "discover_source_pages"
 FETCH_STYLE_PAGE_JOB_TYPE = "fetch_style_page"
 NORMALIZE_STYLE_PAGE_JOB_TYPE = "normalize_style_page"
 STALE_RUNNING_JOB_TIMEOUT_SECONDS = 900.0
-SOURCE_WORKER_LEASE_TTL_SECONDS = 120.0
-SOURCE_WORKER_LEASE_HEARTBEAT_INTERVAL_SECONDS = 30.0
 TAXONOMY_PAGE_KIND_TO_TYPE = {
     "taxonomy_family": "family",
     "taxonomy_type": "category",
@@ -96,6 +102,8 @@ GENERIC_TAXONOMY_GROUP_TITLES = {
     "aesthetics by country",
     "aesthetics by region",
 }
+
+StyleIngestProgressReporter = Callable[[str, dict[str, object]], None]
 
 
 def _serialize_candidate(candidate: DiscoveredStyleCandidate) -> dict[str, str]:
@@ -231,14 +239,128 @@ class _TaxonomyContextHTMLParser(HTMLParser):
 
 
 class StyleIngestJobPipeline:
-    def __init__(self, *, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 30.0,
+        progress_reporter: StyleIngestProgressReporter | None = None,
+        runtime_settings_service: StyleIngestionRuntimeSettingsService | None = None,
+    ) -> None:
         self.registry = AestheticsWikiSourceRegistry()
-        self.scraper = HTTPStyleScraper(timeout_seconds=timeout_seconds, session_factory=SessionLocal)
+        self.runtime_settings_service = runtime_settings_service or StyleIngestionRuntimeSettingsService(
+            registry=self.registry
+        )
+        self.progress_reporter = progress_reporter
+        self.scraper = HTTPStyleScraper(
+            timeout_seconds=timeout_seconds,
+            session_factory=SessionLocal,
+            event_reporter=progress_reporter,
+        )
         self.normalizer = DefaultStyleNormalizer()
         self.enricher = DefaultStyleEnricher()
         self.validator = DefaultStyleValidator()
         self.job_service = StyleIngestJobService()
         self.source_fetch_state_service = SourceFetchStateService()
+
+    def _emit_progress(self, event: str, **payload: object) -> None:
+        if self.progress_reporter is None:
+            return
+        try:
+            self.progress_reporter(event, dict(payload))
+        except Exception:
+            return
+
+    async def _resolve_runtime_source(
+        self,
+        *,
+        source_name: str,
+    ) -> ResolvedStyleIngestionSource:
+        async with SessionLocal() as session:
+            resolved = await self.runtime_settings_service.resolve_source(session, source_name=source_name)
+            await session.commit()
+        return resolved
+
+    async def _resolve_source(self, *, source_name: str) -> StyleSourceRegistryEntry:
+        resolved = await self._resolve_runtime_source(source_name=source_name)
+        return resolved.source
+
+    def _emit_job_started(
+        self,
+        *,
+        source_name: str,
+        job_id: int,
+        job_type: str,
+        source_title: str | None = None,
+        source_url: str | None = None,
+        source_page_id: int | None = None,
+        source_page_version_id: int | None = None,
+    ) -> None:
+        self._emit_progress(
+            "job_started",
+            source_name=source_name,
+            job_id=job_id,
+            job_type=job_type,
+            source_title=source_title,
+            source_url=source_url,
+            source_page_id=source_page_id,
+            source_page_version_id=source_page_version_id,
+        )
+
+    async def _build_queue_snapshot(self, *, source_name: str) -> dict[str, object]:
+        now = datetime.now(UTC)
+        async with SessionLocal() as session:
+            rows = (
+                await session.execute(
+                    select(StyleIngestJob.status, StyleIngestJob.available_at)
+                    .where(
+                        StyleIngestJob.source_name == source_name,
+                        StyleIngestJob.status.in_(tuple(ACTIVE_JOB_STATUSES)),
+                    )
+                    .order_by(StyleIngestJob.available_at.asc(), StyleIngestJob.id.asc())
+                )
+            ).all()
+
+        queued_jobs = 0
+        cooldown_jobs = 0
+        running_jobs = 0
+        claimable_jobs = 0
+        future_jobs = 0
+        next_available_at: datetime | None = None
+
+        for status, available_at in rows:
+            if status == RUNNING_STATUS:
+                running_jobs += 1
+                continue
+
+            if status == QUEUED_STATUS:
+                queued_jobs += 1
+            elif status == COOLDOWN_DEFERRED_STATUS:
+                cooldown_jobs += 1
+
+            if available_at is not None and available_at <= now:
+                claimable_jobs += 1
+            else:
+                future_jobs += 1
+                if next_available_at is None or (available_at is not None and available_at < next_available_at):
+                    next_available_at = available_at
+
+        return {
+            "queued_jobs": queued_jobs,
+            "cooldown_jobs": cooldown_jobs,
+            "running_jobs": running_jobs,
+            "claimable_jobs": claimable_jobs,
+            "future_jobs": future_jobs,
+            "next_available_at": next_available_at,
+        }
+
+    def _resolve_worker_idle_reason(self, snapshot: dict[str, object]) -> str:
+        if int(snapshot.get("claimable_jobs") or 0) > 0:
+            return "claimable_jobs_present"
+        if int(snapshot.get("future_jobs") or 0) > 0:
+            return "available_at_in_future"
+        if int(snapshot.get("running_jobs") or 0) > 0:
+            return "running_jobs_present"
+        return "queue_empty"
 
     async def enqueue_discovery_job(
         self,
@@ -274,6 +396,15 @@ class StyleIngestJobPipeline:
             )
             await session.commit()
 
+        self._emit_progress(
+            "discovery_job_enqueued",
+            source_name=source_name,
+            job_id=job.id,
+            job_type=DISCOVER_SOURCE_PAGES_JOB_TYPE,
+            offset=max(int(offset), 0),
+            limit=max(int(limit), 1),
+            title_contains=title_filter,
+        )
         return QueuedJobBatchReport(
             source_name=source_name,
             discovered_count=None,
@@ -299,6 +430,7 @@ class StyleIngestJobPipeline:
             enricher=self.enricher,
             validator=self.validator,
             session_factory=SessionLocal,
+            runtime_settings_service=self.runtime_settings_service,
         )
         selection = await runner.discover_candidates(
             source_name=source_name,
@@ -408,11 +540,21 @@ class StyleIngestJobPipeline:
         self,
         *,
         source_name: str,
-        idle_sleep_seconds: float = 5.0,
+        idle_sleep_seconds: float | None = None,
         max_jobs: int | None = None,
         stop_when_idle: bool = False,
     ) -> IngestWorkerRunReport:
-        source = self.registry.get_source(source_name)
+        resolved_source = await self._resolve_runtime_source(source_name=source_name)
+        source = resolved_source.source
+        effective_idle_sleep_seconds = (
+            resolved_source.runtime_settings.worker_idle_sleep_seconds
+            if idle_sleep_seconds is None
+            else idle_sleep_seconds
+        )
+        worker_lease_ttl_seconds = resolved_source.runtime_settings.worker_lease_ttl_seconds
+        worker_lease_heartbeat_interval_seconds = (
+            resolved_source.runtime_settings.worker_lease_heartbeat_interval_seconds
+        )
         lease_owner = self._build_worker_lease_owner(source_name=source_name)
         processed_jobs = 0
         succeeded_jobs = 0
@@ -420,11 +562,19 @@ class StyleIngestJobPipeline:
         cooldown_deferred_jobs = 0
         soft_failed_jobs = 0
         hard_failed_jobs = 0
+        created_styles_count = 0
+        updated_styles_count = 0
+        skipped_styles_count = 0
         idle_polls = 0
         last_result: ProcessedIngestJobResult | None = None
 
-        acquired = await self._try_acquire_worker_lease(source=source, lease_owner=lease_owner)
+        acquired = await self._try_acquire_worker_lease(
+            source=source,
+            lease_owner=lease_owner,
+            lease_ttl_seconds=worker_lease_ttl_seconds,
+        )
         if not acquired:
+            self._emit_progress("worker_source_locked", source_name=source_name)
             return self._build_worker_report(
                 source_name=source_name,
                 processed_jobs=processed_jobs,
@@ -433,10 +583,14 @@ class StyleIngestJobPipeline:
                 cooldown_deferred_jobs=cooldown_deferred_jobs,
                 soft_failed_jobs=soft_failed_jobs,
                 hard_failed_jobs=hard_failed_jobs,
+                created_styles_count=created_styles_count,
+                updated_styles_count=updated_styles_count,
+                skipped_styles_count=skipped_styles_count,
                 idle_polls=idle_polls,
                 stopped_reason="source_locked",
                 last_result=last_result,
             )
+        self._emit_progress("worker_lease_acquired", source_name=source_name)
 
         heartbeat_stop = asyncio.Event()
         lease_lost = asyncio.Event()
@@ -446,12 +600,15 @@ class StyleIngestJobPipeline:
                 lease_owner=lease_owner,
                 stop_event=heartbeat_stop,
                 lease_lost_event=lease_lost,
+                lease_ttl_seconds=worker_lease_ttl_seconds,
+                heartbeat_interval_seconds=worker_lease_heartbeat_interval_seconds,
             )
         )
 
         try:
             while True:
                 if lease_lost.is_set():
+                    self._emit_progress("worker_lease_lost", source_name=source_name)
                     return self._build_worker_report(
                         source_name=source_name,
                         processed_jobs=processed_jobs,
@@ -460,6 +617,9 @@ class StyleIngestJobPipeline:
                         cooldown_deferred_jobs=cooldown_deferred_jobs,
                         soft_failed_jobs=soft_failed_jobs,
                         hard_failed_jobs=hard_failed_jobs,
+                        created_styles_count=created_styles_count,
+                        updated_styles_count=updated_styles_count,
+                        skipped_styles_count=skipped_styles_count,
                         idle_polls=idle_polls,
                         stopped_reason="lease_lost",
                         last_result=last_result,
@@ -468,6 +628,15 @@ class StyleIngestJobPipeline:
                 result = await self.process_next_job(source_name=source_name)
                 if result is None:
                     idle_polls += 1
+                    snapshot = await self._build_queue_snapshot(source_name=source_name)
+                    self._emit_progress(
+                        "worker_idle",
+                        source_name=source_name,
+                        idle_polls=idle_polls,
+                        wait_reason=self._resolve_worker_idle_reason(snapshot),
+                        wait_seconds=0.0 if stop_when_idle else effective_idle_sleep_seconds,
+                        **snapshot,
+                    )
                     if stop_when_idle:
                         return self._build_worker_report(
                             source_name=source_name,
@@ -477,12 +646,15 @@ class StyleIngestJobPipeline:
                             cooldown_deferred_jobs=cooldown_deferred_jobs,
                             soft_failed_jobs=soft_failed_jobs,
                             hard_failed_jobs=hard_failed_jobs,
+                            created_styles_count=created_styles_count,
+                            updated_styles_count=updated_styles_count,
+                            skipped_styles_count=skipped_styles_count,
                             idle_polls=idle_polls,
                             stopped_reason="idle",
                             last_result=last_result,
                         )
                     try:
-                        await asyncio.wait_for(lease_lost.wait(), timeout=max(idle_sleep_seconds, 0.1))
+                        await asyncio.wait_for(lease_lost.wait(), timeout=effective_idle_sleep_seconds)
                     except asyncio.TimeoutError:
                         continue
                     return self._build_worker_report(
@@ -493,6 +665,9 @@ class StyleIngestJobPipeline:
                         cooldown_deferred_jobs=cooldown_deferred_jobs,
                         soft_failed_jobs=soft_failed_jobs,
                         hard_failed_jobs=hard_failed_jobs,
+                        created_styles_count=created_styles_count,
+                        updated_styles_count=updated_styles_count,
+                        skipped_styles_count=skipped_styles_count,
                         idle_polls=idle_polls,
                         stopped_reason="lease_lost",
                         last_result=last_result,
@@ -500,9 +675,40 @@ class StyleIngestJobPipeline:
 
                 idle_polls = 0
                 last_result = result
+                self._emit_progress(
+                    "job_finished",
+                    source_name=result.source_name,
+                    job_id=result.job_id,
+                    job_type=result.job_type,
+                    status=result.status,
+                    source_title=result.source_title,
+                    source_url=result.source_url,
+                    source_page_id=result.source_page_id,
+                    source_page_version_id=result.source_page_version_id,
+                    style_id=result.style_id,
+                    style_slug=result.style_slug,
+                    detail_job_id=result.detail_job_id,
+                    normalize_job_id=result.normalize_job_id,
+                    error_class=result.error_class,
+                    error_message=result.error_message,
+                    cooldown_until=result.cooldown_until,
+                    discovered_count=result.discovered_count,
+                    selected_count=result.selected_count,
+                    enqueued_count=result.enqueued_count,
+                    reused_count=result.reused_count,
+                    was_style_created=result.was_style_created,
+                    was_style_updated=result.was_style_updated,
+                    persist_outcome=result.persist_outcome,
+                )
                 processed_jobs += 1
                 if result.status == "succeeded":
                     succeeded_jobs += 1
+                    if result.persist_outcome == "created":
+                        created_styles_count += 1
+                    elif result.persist_outcome == "updated":
+                        updated_styles_count += 1
+                    elif result.persist_outcome == "skipped":
+                        skipped_styles_count += 1
                 elif result.status == "requeued":
                     requeued_jobs += 1
                 elif result.status == COOLDOWN_DEFERRED_STATUS:
@@ -521,6 +727,9 @@ class StyleIngestJobPipeline:
                         cooldown_deferred_jobs=cooldown_deferred_jobs,
                         soft_failed_jobs=soft_failed_jobs,
                         hard_failed_jobs=hard_failed_jobs,
+                        created_styles_count=created_styles_count,
+                        updated_styles_count=updated_styles_count,
+                        skipped_styles_count=skipped_styles_count,
                         idle_polls=idle_polls,
                         stopped_reason="max_jobs_reached",
                         last_result=last_result,
@@ -531,13 +740,25 @@ class StyleIngestJobPipeline:
             with suppress(asyncio.CancelledError):
                 await heartbeat_task
             await self._release_worker_lease(source=source, lease_owner=lease_owner)
+            self._emit_progress("worker_lease_released", source_name=source_name)
 
     async def process_next_job_with_lease(self, *, source_name: str) -> tuple[str, ProcessedIngestJobResult | None]:
-        source = self.registry.get_source(source_name)
+        resolved_source = await self._resolve_runtime_source(source_name=source_name)
+        source = resolved_source.source
+        worker_lease_ttl_seconds = resolved_source.runtime_settings.worker_lease_ttl_seconds
+        worker_lease_heartbeat_interval_seconds = (
+            resolved_source.runtime_settings.worker_lease_heartbeat_interval_seconds
+        )
         lease_owner = self._build_worker_lease_owner(source_name=source_name)
-        acquired = await self._try_acquire_worker_lease(source=source, lease_owner=lease_owner)
+        acquired = await self._try_acquire_worker_lease(
+            source=source,
+            lease_owner=lease_owner,
+            lease_ttl_seconds=worker_lease_ttl_seconds,
+        )
         if not acquired:
+            self._emit_progress("worker_source_locked", source_name=source_name)
             return "source_locked", None
+        self._emit_progress("worker_lease_acquired", source_name=source_name)
 
         heartbeat_stop = asyncio.Event()
         lease_lost = asyncio.Event()
@@ -547,14 +768,51 @@ class StyleIngestJobPipeline:
                 lease_owner=lease_owner,
                 stop_event=heartbeat_stop,
                 lease_lost_event=lease_lost,
+                lease_ttl_seconds=worker_lease_ttl_seconds,
+                heartbeat_interval_seconds=worker_lease_heartbeat_interval_seconds,
             )
         )
         try:
             result = await self.process_next_job(source_name=source_name)
             if lease_lost.is_set():
+                self._emit_progress("worker_lease_lost", source_name=source_name)
                 return "lease_lost", result
             if result is None:
+                snapshot = await self._build_queue_snapshot(source_name=source_name)
+                self._emit_progress(
+                    "worker_idle",
+                    source_name=source_name,
+                    idle_polls=1,
+                    wait_reason=self._resolve_worker_idle_reason(snapshot),
+                    wait_seconds=0.0,
+                    **snapshot,
+                )
                 return "idle", None
+            self._emit_progress(
+                "job_finished",
+                source_name=result.source_name,
+                job_id=result.job_id,
+                job_type=result.job_type,
+                status=result.status,
+                source_title=result.source_title,
+                source_url=result.source_url,
+                source_page_id=result.source_page_id,
+                source_page_version_id=result.source_page_version_id,
+                style_id=result.style_id,
+                style_slug=result.style_slug,
+                detail_job_id=result.detail_job_id,
+                normalize_job_id=result.normalize_job_id,
+                error_class=result.error_class,
+                error_message=result.error_message,
+                cooldown_until=result.cooldown_until,
+                discovered_count=result.discovered_count,
+                selected_count=result.selected_count,
+                enqueued_count=result.enqueued_count,
+                reused_count=result.reused_count,
+                was_style_created=result.was_style_created,
+                was_style_updated=result.was_style_updated,
+                persist_outcome=result.persist_outcome,
+            )
             return "processed", result
         finally:
             heartbeat_stop.set()
@@ -562,6 +820,7 @@ class StyleIngestJobPipeline:
             with suppress(asyncio.CancelledError):
                 await heartbeat_task
             await self._release_worker_lease(source=source, lease_owner=lease_owner)
+            self._emit_progress("worker_lease_released", source_name=source_name)
 
     async def process_next_job(self, *, source_name: str) -> ProcessedIngestJobResult | None:
         async with SessionLocal() as session:
@@ -577,6 +836,17 @@ class StyleIngestJobPipeline:
             job, _attempt = claimed
             await session.commit()
 
+        payload = dict(job.payload_json or {})
+        self._emit_progress(
+            "job_claimed",
+            source_name=job.source_name,
+            job_id=job.id,
+            job_type=job.job_type,
+            source_title=payload.get("source_title"),
+            source_url=payload.get("source_url"),
+            source_page_id=job.source_page_id,
+            source_page_version_id=job.source_page_version_id,
+        )
         if job.job_type == DISCOVER_SOURCE_PAGES_JOB_TYPE:
             return await self._process_discovery_job(job_id=job.id)
         if job.job_type == FETCH_STYLE_PAGE_JOB_TYPE:
@@ -614,6 +884,9 @@ class StyleIngestJobPipeline:
         cooldown_deferred_jobs: int,
         soft_failed_jobs: int,
         hard_failed_jobs: int,
+        created_styles_count: int,
+        updated_styles_count: int,
+        skipped_styles_count: int,
         idle_polls: int,
         stopped_reason: str,
         last_result: ProcessedIngestJobResult | None,
@@ -626,6 +899,9 @@ class StyleIngestJobPipeline:
             cooldown_deferred_jobs=cooldown_deferred_jobs,
             soft_failed_jobs=soft_failed_jobs,
             hard_failed_jobs=hard_failed_jobs,
+            created_styles_count=created_styles_count,
+            updated_styles_count=updated_styles_count,
+            skipped_styles_count=skipped_styles_count,
             idle_polls=idle_polls,
             stopped_reason=stopped_reason,
             last_job_id=last_result.job_id if last_result else None,
@@ -644,13 +920,14 @@ class StyleIngestJobPipeline:
         *,
         source: StyleSourceRegistryEntry,
         lease_owner: str,
+        lease_ttl_seconds: float,
     ) -> bool:
         async with SessionLocal() as session:
             acquired, _state = await self.source_fetch_state_service.try_acquire_worker_lease(
                 session,
                 source=source,
                 lease_owner=lease_owner,
-                lease_ttl_seconds=SOURCE_WORKER_LEASE_TTL_SECONDS,
+                lease_ttl_seconds=lease_ttl_seconds,
             )
             await session.commit()
         return acquired
@@ -676,14 +953,12 @@ class StyleIngestJobPipeline:
         lease_owner: str,
         stop_event: asyncio.Event,
         lease_lost_event: asyncio.Event,
+        lease_ttl_seconds: float,
+        heartbeat_interval_seconds: float,
     ) -> None:
-        heartbeat_interval = min(
-            SOURCE_WORKER_LEASE_HEARTBEAT_INTERVAL_SECONDS,
-            max(SOURCE_WORKER_LEASE_TTL_SECONDS / 3.0, 1.0),
-        )
         while not stop_event.is_set():
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_interval)
+                await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_interval_seconds)
                 return
             except asyncio.TimeoutError:
                 pass
@@ -694,7 +969,7 @@ class StyleIngestJobPipeline:
                         session,
                         source=source,
                         lease_owner=lease_owner,
-                        lease_ttl_seconds=SOURCE_WORKER_LEASE_TTL_SECONDS,
+                        lease_ttl_seconds=lease_ttl_seconds,
                     )
                     await session.commit()
             except Exception:
@@ -709,7 +984,8 @@ class StyleIngestJobPipeline:
         async with SessionLocal() as session:
             job, _attempt = await self._load_job_context(session, job_id)
             payload = dict(job.payload_json or {})
-            source = self.registry.get_source(job.source_name)
+            resolved = await self.runtime_settings_service.resolve_source(session, source_name=job.source_name)
+            source = resolved.source
             await session.commit()
 
         title_contains = payload.get("title_contains")
@@ -717,6 +993,21 @@ class StyleIngestJobPipeline:
             title_contains = None
         offset = max(self._coerce_int(payload.get("offset")) or 0, 0)
         limit = max(self._coerce_int(payload.get("limit")) or 20, 1)
+        self._emit_job_started(
+            source_name=source.source_name,
+            job_id=job_id,
+            job_type=DISCOVER_SOURCE_PAGES_JOB_TYPE,
+            source_url=source.index_url,
+        )
+        self._emit_progress(
+            "discovery_job_started",
+            source_name=source.source_name,
+            job_id=job_id,
+            job_type=DISCOVER_SOURCE_PAGES_JOB_TYPE,
+            title_contains=title_contains,
+            offset=offset,
+            limit=limit,
+        )
 
         try:
             report = await self.enqueue_detail_jobs_from_discovery(
@@ -724,6 +1015,15 @@ class StyleIngestJobPipeline:
                 title_contains=title_contains,
                 offset=offset,
                 limit=limit,
+            )
+            self._emit_progress(
+                "discovery_detail_jobs_enqueued",
+                source_name=source.source_name,
+                job_id=job_id,
+                discovered_count=report.discovered_count,
+                selected_count=report.selected_count,
+                enqueued_count=report.enqueued_count,
+                reused_count=report.reused_count,
             )
         except Exception as exc:
             return await self._handle_failed_job(
@@ -756,7 +1056,8 @@ class StyleIngestJobPipeline:
         async with SessionLocal() as session:
             job, _attempt = await self._load_job_context(session, job_id)
             payload = dict(job.payload_json or {})
-            source = self.registry.get_source(job.source_name)
+            resolved = await self.runtime_settings_service.resolve_source(session, source_name=job.source_name)
+            source = resolved.source
             await session.commit()
 
         try:
@@ -771,6 +1072,21 @@ class StyleIngestJobPipeline:
                 job_type=FETCH_STYLE_PAGE_JOB_TYPE,
             )
 
+        self._emit_job_started(
+            source_name=source.source_name,
+            job_id=job_id,
+            job_type=FETCH_STYLE_PAGE_JOB_TYPE,
+            source_title=candidate.source_title,
+            source_url=candidate.source_url,
+        )
+        self._emit_progress(
+            "detail_job_started",
+            source_name=source.source_name,
+            job_id=job_id,
+            job_type=FETCH_STYLE_PAGE_JOB_TYPE,
+            source_title=candidate.source_title,
+            source_url=candidate.source_url,
+        )
         try:
             scraped = await self.scraper.fetch_style_page(source, candidate)
         except Exception as exc:
@@ -863,12 +1179,32 @@ class StyleIngestJobPipeline:
     async def _process_normalize_job(self, *, job_id: int) -> ProcessedIngestJobResult:
         async with SessionLocal() as session:
             job, attempt = await self._load_job_context(session, job_id)
-            source = self.registry.get_source(job.source_name)
+            resolved = await self.runtime_settings_service.resolve_source(session, source_name=job.source_name)
+            source = resolved.source
 
             try:
                 payload = dict(job.payload_json or {})
                 source_page = await self._load_source_page(session, payload["source_page_id"])
                 version = await self._load_source_page_version(session, payload["source_page_version_id"])
+                self._emit_job_started(
+                    source_name=source.source_name,
+                    job_id=job_id,
+                    job_type=NORMALIZE_STYLE_PAGE_JOB_TYPE,
+                    source_title=source_page.source_title,
+                    source_url=source_page.page_url,
+                    source_page_id=source_page.id,
+                    source_page_version_id=version.id,
+                )
+                self._emit_progress(
+                    "normalize_job_started",
+                    source_name=source.source_name,
+                    job_id=job_id,
+                    job_type=NORMALIZE_STYLE_PAGE_JOB_TYPE,
+                    source_title=source_page.source_title,
+                    source_url=source_page.page_url,
+                    source_page_id=source_page.id,
+                    source_page_version_id=version.id,
+                )
                 scraped = self._build_scraped_page(
                     source=source,
                     source_page=source_page,
@@ -900,6 +1236,23 @@ class StyleIngestJobPipeline:
                 job.source_page_version_id = version.id
                 await self.job_service.mark_job_succeeded(session, job=job, attempt=attempt)
                 await session.commit()
+                persist_outcome = "created" if result.was_style_created else "updated" if result.was_style_updated else "skipped"
+                self._emit_progress(
+                    "style_persisted",
+                    source_name=job.source_name,
+                    job_id=job.id,
+                    job_type=job.job_type,
+                    source_title=source_page.source_title,
+                    source_url=source_page.page_url,
+                    source_page_id=source_page.id,
+                    source_page_version_id=version.id,
+                    style_id=result.style_id,
+                    style_slug=result.style_slug,
+                    was_source_created=result.was_source_created,
+                    was_style_created=result.was_style_created,
+                    was_style_updated=result.was_style_updated,
+                    persist_outcome=persist_outcome,
+                )
 
                 return ProcessedIngestJobResult(
                     job_id=job.id,
@@ -912,6 +1265,9 @@ class StyleIngestJobPipeline:
                     source_page_version_id=version.id,
                     style_id=result.style_id,
                     style_slug=result.style_slug,
+                    was_style_created=result.was_style_created,
+                    was_style_updated=result.was_style_updated,
+                    persist_outcome=persist_outcome,
                 )
             except Exception as exc:
                 await session.rollback()
@@ -939,7 +1295,8 @@ class StyleIngestJobPipeline:
         source_page_version_id: int | None = None,
     ) -> ProcessedIngestJobResult:
         async with SessionLocal() as session:
-            source = self.registry.get_source(source_name)
+            resolved = await self.runtime_settings_service.resolve_source(session, source_name=source_name)
+            source = resolved.source
             job, attempt = await self._load_job_context(session, job_id)
             state = await self.source_fetch_state_service.get_or_create(session, source=source)
 
@@ -958,6 +1315,18 @@ class StyleIngestJobPipeline:
                     cooldown_until=state.next_allowed_at,
                 )
                 await session.commit()
+                self._emit_progress(
+                    "job_failed",
+                    source_name=source_name,
+                    job_id=job.id,
+                    job_type=job_type,
+                    source_title=source_title,
+                    source_url=source_url,
+                    status=COOLDOWN_DEFERRED_STATUS,
+                    error_class=error_class,
+                    error_message=error_message,
+                    cooldown_until=state.next_allowed_at,
+                )
                 return ProcessedIngestJobResult(
                     job_id=job.id,
                     job_type=job_type,
@@ -994,6 +1363,18 @@ class StyleIngestJobPipeline:
                     error_message=error_message,
                 )
                 await session.commit()
+                self._emit_progress(
+                    "job_failed",
+                    source_name=source_name,
+                    job_id=job.id,
+                    job_type=job_type,
+                    source_title=source_title,
+                    source_url=source_url,
+                    status="requeued",
+                    error_class=error_class,
+                    error_message=error_message,
+                    cooldown_until=retry_at,
+                )
                 return ProcessedIngestJobResult(
                     job_id=job.id,
                     job_type=job_type,
@@ -1018,6 +1399,17 @@ class StyleIngestJobPipeline:
                 error_message=error_message,
             )
             await session.commit()
+            self._emit_progress(
+                "job_failed",
+                source_name=source_name,
+                job_id=job.id,
+                job_type=job_type,
+                source_title=source_title,
+                source_url=source_url,
+                status=terminal_status,
+                error_class=error_class,
+                error_message=error_message,
+            )
             return ProcessedIngestJobResult(
                 job_id=job.id,
                 job_type=job_type,
@@ -1284,7 +1676,7 @@ class StyleIngestJobPipeline:
             return ()
 
         records: dict[tuple[str, str], dict[str, object]] = {}
-        source = self.registry.get_source(source_name)
+        source = await self._resolve_source(source_name=source_name)
         for page in pages:
             version = await self._load_latest_page_version(session, page)
             if version is None:

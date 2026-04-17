@@ -18,7 +18,7 @@ from app.infrastructure.persistence.generation_metadata_store import GenerationJ
 from app.models.enums import GenerationProvider, GenerationStatus
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.repositories.uploads import uploads_repository
-from app.schemas.generation_job import GenerationJobCreate
+from app.schemas.generation_job import GenerationJobCreate, StyleExplanationRead
 
 
 logger = logging.getLogger(__name__)
@@ -287,6 +287,7 @@ class GenerationService:
         provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
         setattr(job, "visual_generation_plan", provider_payload.get("_visual_generation_plan"))
         setattr(job, "generation_metadata", provider_payload.get("_generation_metadata"))
+        setattr(job, "style_explanation", self._build_style_explanation(job))
         return job
 
     async def refresh_pending_job_queue_position(self, session: AsyncSession, job):
@@ -709,6 +710,38 @@ class GenerationService:
         provider_payload["_provider_status"] = status.value if hasattr(status, "value") else str(status)
         return provider_payload
 
+    def _build_style_explanation(self, job) -> StyleExplanationRead | None:
+        provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}
+        raw_generation_metadata = (
+            provider_payload.get("_generation_metadata")
+            if isinstance(provider_payload.get("_generation_metadata"), dict)
+            else {}
+        )
+        raw_visual_plan = (
+            provider_payload.get("_visual_generation_plan")
+            if isinstance(provider_payload.get("_visual_generation_plan"), dict)
+            else {}
+        )
+        style_name = self._optional_text(
+            raw_generation_metadata.get("style_name")
+            or raw_visual_plan.get("style_name")
+            or raw_generation_metadata.get("style_identity")
+        )
+        short_explanation = self._optional_text(raw_generation_metadata.get("style_explanation_short"))
+        supporting_text = self._optional_text(raw_generation_metadata.get("style_explanation_supporting_text"))
+        if supporting_text == short_explanation:
+            supporting_text = None
+        distinct_points = self._clean_string_list(raw_generation_metadata.get("style_explanation_distinct_points"))[:3]
+        if not any([style_name, short_explanation, supporting_text, distinct_points]):
+            return None
+        return StyleExplanationRead(
+            style_id=self._optional_text(raw_generation_metadata.get("style_id") or raw_visual_plan.get("style_id")),
+            style_name=style_name,
+            short_explanation=short_explanation,
+            supporting_text=supporting_text,
+            distinct_points=distinct_points,
+        )
+
     def _log_generation_trace(
         self,
         event_name: str,
@@ -792,6 +825,19 @@ class GenerationService:
         if orchestration:
             provider_payload["_orchestration"] = orchestration
         return provider_payload
+
+    def _optional_text(self, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        cleaned = value.strip()
+        return cleaned or None
+
+    def _clean_string_list(self, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
 
     def _queue_refresh_key(self, public_id: str) -> str:
         return f"{self.QUEUE_REFRESH_KEY_PREFIX}{public_id}"

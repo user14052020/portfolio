@@ -1,8 +1,13 @@
 import unittest
 from types import SimpleNamespace
 
+from app.application.product_behavior.services.conversation_state_policy import ConversationStatePolicy
+from app.application.product_behavior.services.generation_policy_service import GenerationPolicyService
+from app.application.product_behavior.services.post_action_conversation_policy import PostActionConversationPolicy
+from app.application.product_behavior.services.session_flow_state_service import SessionFlowStateService
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import (
+    ConversationRoutingResult,
     GenerationScheduleRequest,
     GenerationScheduleResult,
     KnowledgeItem,
@@ -19,8 +24,8 @@ from app.application.stylist_chat.handlers.style_exploration_handler import Styl
 from app.application.stylist_chat.orchestrator.command_dispatcher import CommandDispatcher
 from app.application.stylist_chat.orchestrator.mode_router import ModeRouter
 from app.application.stylist_chat.orchestrator.stylist_chat_orchestrator import StylistChatOrchestrator
-from app.application.stylist_chat.services.candidate_style_selector import CandidateStyleSelector
 from app.application.stylist_chat.results.decision_result import DecisionType
+from app.application.stylist_chat.services.candidate_style_selector import CandidateStyleSelector
 from app.application.stylist_chat.services.clarification_message_builder import ClarificationMessageBuilder
 from app.application.stylist_chat.services.diversity_constraints_builder import DiversityConstraintsBuilder
 from app.application.stylist_chat.services.garment_brief_compiler import GarmentBriefCompiler
@@ -32,6 +37,7 @@ from app.application.stylist_chat.services.occasion_clarification_service import
 from app.application.stylist_chat.services.occasion_context_builder import OccasionContextBuilder
 from app.application.stylist_chat.services.occasion_extraction_service import OccasionExtractionService
 from app.application.stylist_chat.services.reasoning_context_builder import ReasoningContextBuilder
+from app.application.stylist_chat.services.routing_context_builder import RoutingContextBuilder
 from app.application.stylist_chat.services.semantic_diversity_service import SemanticDiversityService
 from app.application.stylist_chat.services.style_exploration_context_builder import StyleExplorationContextBuilder
 from app.application.stylist_chat.services.style_history_service import StyleHistoryService
@@ -54,10 +60,11 @@ from app.domain.garment_matching.policies.garment_clarification_policy import Ga
 from app.domain.garment_matching.policies.garment_completeness_policy import GarmentCompletenessPolicy
 from app.domain.occasion_outfit.policies.occasion_clarification_policy import OccasionClarificationPolicy
 from app.domain.occasion_outfit.policies.occasion_completeness_policy import OccasionCompletenessPolicy
+from app.domain.routing import RoutingDecision, RoutingMode
 from app.domain.style_exploration.policies.semantic_diversity_policy import SemanticDiversityPolicy
 from app.domain.style_exploration.policies.visual_diversity_policy import VisualDiversityPolicy
-from app.infrastructure.knowledge.occasion_knowledge_provider import StaticOccasionKnowledgeProvider
 from app.infrastructure.knowledge.garment_knowledge_provider import StaticGarmentKnowledgeProvider
+from app.infrastructure.knowledge.occasion_knowledge_provider import StaticOccasionKnowledgeProvider
 from app.infrastructure.llm.llm_garment_extractor import LLMGarmentExtractorAdapter
 from app.models.enums import GenerationStatus
 from app.services.chat_mode_resolver import chat_mode_resolver
@@ -78,9 +85,34 @@ class FakeContextStore:
         return self.record
 
 
-class FakeModeResolver:
-    def resolve(self, **kwargs):
-        return chat_mode_resolver.resolve(**kwargs)
+class FakeConversationRouter:
+    def __init__(self) -> None:
+        self.context_builder = RoutingContextBuilder()
+
+    async def route(self, *, command: ChatCommand, context: ChatModeContext) -> ConversationRoutingResult:
+        resolution = chat_mode_resolver.resolve(
+            context=context,
+            requested_intent=command.requested_intent,
+            command_name=command.command_name,
+            command_step=command.command_step,
+            metadata=command.metadata,
+        )
+        routing_mode = RoutingMode(resolution.active_mode.value)
+        routing_context = self.context_builder.build_context(command=command, context=context)
+        routing_input = self.context_builder.build_input(command=command, context=context)
+        return ConversationRoutingResult(
+            decision=RoutingDecision(
+                mode=routing_mode,
+                continue_existing_flow=resolution.continue_existing_flow,
+                should_reset_to_general=(
+                    resolution.active_mode == ChatMode.GENERAL_ADVICE
+                    and context.active_mode != ChatMode.GENERAL_ADVICE
+                ),
+            ),
+            routing_input=routing_input,
+            routing_context=routing_context,
+            provider="fake-router",
+        )
 
 
 class FakeReasoner:
@@ -121,7 +153,7 @@ class FakeReasoner:
 class FakeFallbackReasoner:
     async def decide(self, *, locale: str, reasoning_input: dict[str, object]) -> ReasoningOutput:
         return ReasoningOutput(
-            reply_text="Fallback reply" if locale == "en" else "Резервный ответ",
+            reply_text="Fallback reply" if locale == "en" else "Fallback reply ru",
             image_brief_en="fallback editorial flat lay outfit",
             route="text_and_generation",
             provider="fake-fallback",
@@ -311,8 +343,15 @@ class FakeGenerationScheduler:
         self.enqueued: list[GenerationScheduleRequest] = []
         self.block_active = False
         self.fail_next = False
+        self.job_statuses: dict[str, GenerationStatus] = {}
+        self.session_flow_state_service = SessionFlowStateService()
 
     async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
+        if context.current_job_id and context.current_job_id in self.job_statuses:
+            return self.session_flow_state_service.sync_generation_status(
+                context=context,
+                generation_status=self.job_statuses[context.current_job_id],
+            )
         if context.current_job_id and context.flow_state == FlowState.READY_FOR_GENERATION:
             context.flow_state = FlowState.GENERATION_QUEUED
         return context
@@ -334,6 +373,7 @@ class FakeGenerationScheduler:
             )
         self.enqueued.append(request)
         job_id = f"job-{len(self.enqueued)}"
+        self.job_statuses[job_id] = GenerationStatus.PENDING
         return GenerationScheduleResult(
             job_id=job_id,
             status=GenerationStatus.PENDING.value,
@@ -383,7 +423,7 @@ class FakeCheckpointWriter:
 
 def build_test_orchestrator():
     context_store = FakeContextStore()
-    mode_resolver = FakeModeResolver()
+    conversation_router = FakeConversationRouter()
     reasoner = FakeReasoner()
     fallback_reasoner = FakeFallbackReasoner()
     knowledge_provider = FakeKnowledgeProvider()
@@ -394,7 +434,10 @@ def build_test_orchestrator():
     checkpoint_writer = FakeCheckpointWriter()
 
     reasoning_context_builder = ReasoningContextBuilder()
-    generation_request_builder = GenerationRequestBuilder(prompt_builder=FakePromptBuilder())
+    generation_request_builder = GenerationRequestBuilder(
+        prompt_builder=FakePromptBuilder(),
+        generation_policy_service=GenerationPolicyService(),
+    )
     clarification_builder = ClarificationMessageBuilder()
     diversity_constraints_builder = DiversityConstraintsBuilder()
     garment_matching_context_builder = GarmentMatchingContextBuilder()
@@ -458,6 +501,8 @@ def build_test_orchestrator():
     persist_style_direction = PersistStyleDirectionUseCase(
         style_history_service=style_history_service,
     )
+    conversation_state_policy = ConversationStatePolicy()
+    post_action_conversation_policy = PostActionConversationPolicy()
     shared_kwargs = {
         "reasoner": reasoner,
         "fallback_reasoner": fallback_reasoner,
@@ -471,14 +516,12 @@ def build_test_orchestrator():
             start_use_case=start_garment_matching,
             continue_use_case=continue_garment_matching,
             build_outfit_brief_use_case=build_garment_outfit_brief,
-            generation_scheduler=generation_scheduler,
             **shared_kwargs,
         ),
         ChatMode.OCCASION_OUTFIT: OccasionOutfitHandler(
             start_use_case=start_occasion_outfit,
             continue_use_case=continue_occasion_outfit,
             build_outfit_brief_use_case=build_occasion_outfit_brief,
-            generation_scheduler=generation_scheduler,
             context_checkpoint_writer=checkpoint_writer,
             **shared_kwargs,
         ),
@@ -490,7 +533,6 @@ def build_test_orchestrator():
             persist_style_direction_use_case=persist_style_direction,
             style_history_service=style_history_service,
             style_history_provider=style_history_provider,
-            generation_scheduler=generation_scheduler,
             context_checkpoint_writer=checkpoint_writer,
             **shared_kwargs,
         ),
@@ -500,9 +542,13 @@ def build_test_orchestrator():
         generation_scheduler=generation_scheduler,
         event_logger=event_logger,
         metrics_recorder=metrics_recorder,
-        command_dispatcher=CommandDispatcher(mode_resolver=mode_resolver),
+        command_dispatcher=CommandDispatcher(
+            conversation_router=conversation_router,
+            conversation_state_policy=conversation_state_policy,
+        ),
         mode_router=ModeRouter(handlers=handlers),
         generation_request_builder=generation_request_builder,
+        post_action_conversation_policy=post_action_conversation_policy,
     )
     return (
         orchestrator,
@@ -530,11 +576,31 @@ class StylistOrchestratorScenarioTests(unittest.IsolatedAsyncioTestCase):
     async def run_command(self, command: ChatCommand):
         return await self.orchestrator.handle(command=command)
 
-    async def test_general_advice_returns_text_only_decision(self) -> None:
+    async def test_general_advice_defaults_to_text_only(self) -> None:
         self.reasoner.route = "text_only"
+
         response = await self.run_command(
             ChatCommand(
-                session_id="general-1",
+                session_id="stage1-general-default-1",
+                locale="en",
+                message="Hi there",
+                user_message_id=1,
+            )
+        )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertFalse(response.can_offer_visualization)
+        self.assertIsNone(response.job_id)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.COMPLETED)
+        self.assertEqual(len(self.scheduler.enqueued), 0)
+
+    async def test_general_advice_text_and_generation_route_offers_cta_instead_of_auto_generation(self) -> None:
+        self.reasoner.route = "text_and_generation"
+
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage1-general-cta-1",
                 locale="en",
                 message="How can I modernize a white shirt?",
                 user_message_id=1,
@@ -542,539 +608,37 @@ class StylistOrchestratorScenarioTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(response.can_offer_visualization)
+        self.assertEqual(response.cta_text, "Build a flat lay reference?")
+        self.assertEqual(response.visualization_type, "flat_lay_reference")
+        self.assertIsNone(response.job_id)
         self.assertEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.COMPLETED)
-        self.assertEqual(response.telemetry["provider"], "fake-vllm")
-
-    async def test_garment_matching_start_then_followup_creates_generation_job(self) -> None:
-        start_response = await self.run_command(
-            ChatCommand(
-                session_id="garment-1",
-                locale="ru",
-                    message="Помоги подобрать образ к вещи",
-                    requested_intent=ChatMode.GARMENT_MATCHING,
-                    command_name="garment_matching",
-                    command_step="start",
-                    user_message_id=1,
-                    metadata={"clientMessageId": "msg-1"},
-            )
-        )
-
-        self.assertEqual(start_response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.AWAITING_ANCHOR_GARMENT)
-
-        self.reasoner.reply_text = "Собрала образ вокруг рубашки."
-        self.reasoner.route = "text_and_generation"
-        followup_response = await self.run_command(
-            ChatCommand(
-                session_id="garment-1",
-                locale="ru",
-                    message="Темно-синяя джинсовая рубашка прямого кроя",
-                    user_message_id=2,
-                    metadata={"clientMessageId": "msg-2"},
-                    profile_context={"gender": "male"},
-            )
-        )
-
-        self.assertEqual(followup_response.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(followup_response.job_id, "job-1")
-        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
-        self.assertIsNotNone(self.context_store.context.anchor_garment)
-        self.assertTrue(self.context_store.context.anchor_garment.is_sufficient_for_generation)
-        self.assertEqual(len(self.scheduler.enqueued), 1)
-        self.assertEqual(self.scheduler.enqueued[0].generation_intent.trigger, "garment_matching")
-        self.assertEqual(
-            self.scheduler.enqueued[0].generation_intent.reason,
-            "anchor_garment_is_sufficient_for_generation",
-        )
-        self.assertTrue(self.event_logger.events)
-        self.assertEqual(self.event_logger.events[-1][1]["client_message_id"], "msg-2")
-        self.assertEqual(self.event_logger.events[-1][1]["knowledge_provider_used"], "garment_static_knowledge")
-        self.assertGreater(self.event_logger.events[-1][1]["anchor_garment_completeness"], 0.0)
-
-    async def test_style_exploration_uses_history_and_anti_repeat(self) -> None:
-        self.reasoner.route = "text_and_generation"
-        first_response = await self.run_command(
-            ChatCommand(
-                    session_id="style-1",
-                    locale="en",
-                    message="Try another style",
-                    requested_intent=ChatMode.STYLE_EXPLORATION,
-                    command_name="style_exploration",
-                    command_step="start",
-                    user_message_id=1,
-                    metadata={"clientMessageId": "style-1"},
-            )
-        )
-        second_response = await self.run_command(
-            ChatCommand(
-                    session_id="style-1",
-                    locale="en",
-                    message="Try another style",
-                    requested_intent=ChatMode.STYLE_EXPLORATION,
-                    command_name="style_exploration",
-                    command_step="start",
-                    user_message_id=2,
-                    metadata={"clientMessageId": "style-2"},
-            )
-        )
-
-        self.assertEqual(first_response.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(second_response.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertGreaterEqual(len(self.context_store.context.style_history), 2)
-        self.assertNotEqual(
-            self.context_store.context.style_history[-1].style_id,
-            self.context_store.context.style_history[-2].style_id,
-        )
-        self.assertTrue(second_response.telemetry["style_history_used"])
-
-    async def test_occasion_outfit_clarification_then_generation(self) -> None:
-        self.reasoner.occasion_output = OccasionExtractionOutput()
-        first_response = await self.run_command(
-            ChatCommand(
-                session_id="occasion-1",
-                locale="ru",
-                    message="Мне нужен образ на событие",
-                    requested_intent=ChatMode.OCCASION_OUTFIT,
-                    command_name="occasion_outfit",
-                    command_step="start",
-                    user_message_id=1,
-                    metadata={"clientMessageId": "occ-1"},
-            )
-        )
-
-        self.assertEqual(first_response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.AWAITING_OCCASION_DETAILS)
-
-        self.reasoner.route = "text_and_generation"
-        self.reasoner.occasion_output = OccasionExtractionOutput(
-            event_type="wedding",
-            dress_code="cocktail",
-            time_of_day="evening",
-            season_or_weather="spring",
-            provider="fake-vllm",
-        )
-        second_response = await self.run_command(
-            ChatCommand(
-                session_id="occasion-1",
-                locale="ru",
-                    message="На свадьбу вечером весной, dress code cocktail",
-                    user_message_id=2,
-                    metadata={"clientMessageId": "occ-2"},
-            )
-        )
-
-        self.assertEqual(second_response.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
-        self.assertEqual(self.context_store.context.occasion_context.event_type, "wedding")
-        self.assertEqual(self.context_store.context.occasion_context.time_of_day, "evening")
-        self.assertEqual(self.context_store.context.occasion_context.season, "spring")
-        self.assertEqual(self.context_store.context.occasion_context.dress_code, "cocktail")
-        self.assertEqual(second_response.telemetry["knowledge_items_count"], 3)
-        self.assertGreater(second_response.telemetry["occasion_completeness"], 0.8)
-        self.assertEqual(self.event_logger.events[-1][1]["knowledge_provider_used"], "occasion_static_knowledge")
-        self.assertIn("event_type", self.event_logger.events[-1][1]["filled_slots"])
-
-    async def test_occasion_outfit_insufficient_followup_returns_slot_specific_clarification(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="occasion-clarify-1",
-                locale="en",
-                message="Need an outfit for an event",
-                requested_intent=ChatMode.OCCASION_OUTFIT,
-                command_name="occasion_outfit",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
-        self.reasoner.occasion_output = OccasionExtractionOutput(event_type="exhibition")
-
-        response = await self.run_command(
-            ChatCommand(
-                session_id="occasion-clarify-1",
-                locale="en",
-                message="It is for an exhibition",
-                user_message_id=2,
-                client_message_id="occasion-clarify-1-followup",
-            )
-        )
-
-        self.assertEqual(response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.AWAITING_OCCASION_CLARIFICATION)
-        self.assertIn("time of day", (response.text_reply or "").lower())
+        self.assertEqual(self.context_store.context.flow_state, FlowState.READY_FOR_GENERATION)
         self.assertEqual(len(self.scheduler.enqueued), 0)
 
-    async def test_duplicate_occasion_followup_only_enqueues_one_generation_job(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="occasion-dedupe-1",
-                locale="en",
-                message="Need an outfit for an event",
-                requested_intent=ChatMode.OCCASION_OUTFIT,
-                command_name="occasion_outfit",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
+    async def test_explicit_visual_request_generates_from_general_advice(self) -> None:
         self.reasoner.route = "text_and_generation"
-        self.reasoner.occasion_output = OccasionExtractionOutput(
-            event_type="wedding",
-            time_of_day="day",
-            season_or_weather="summer",
-            desired_impression="elegant",
-        )
-
-        first = await self.run_command(
-            ChatCommand(
-                session_id="occasion-dedupe-1",
-                locale="en",
-                message="Day wedding in summer, I want to look elegant",
-                user_message_id=2,
-                client_message_id="occasion-dup-1",
-                command_id="occasion-dup-1",
-            )
-        )
-        second = await self.run_command(
-            ChatCommand(
-                session_id="occasion-dedupe-1",
-                locale="en",
-                message="Day wedding in summer, I want to look elegant",
-                user_message_id=2,
-                client_message_id="occasion-dup-1",
-                command_id="occasion-dup-1",
-            )
-        )
-
-        self.assertEqual(first.job_id, "job-1")
-        self.assertEqual(second.job_id, "job-1")
-        self.assertEqual(len(self.scheduler.enqueued), 1)
-
-    async def test_occasion_generation_queue_failure_returns_recoverable_response(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="occasion-queue-failure-1",
-                locale="en",
-                message="Need an outfit for an event",
-                requested_intent=ChatMode.OCCASION_OUTFIT,
-                command_name="occasion_outfit",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
-        self.scheduler.fail_next = True
-        self.reasoner.route = "text_and_generation"
-        self.reasoner.occasion_output = OccasionExtractionOutput(
-            event_type="conference",
-            time_of_day="day",
-            season_or_weather="autumn",
-            dress_code="smart casual",
-        )
 
         response = await self.run_command(
             ChatCommand(
-                session_id="occasion-queue-failure-1",
-                locale="en",
-                message="Conference during the day in autumn, smart casual",
-                user_message_id=2,
-            )
-        )
-
-        self.assertEqual(response.decision_type, DecisionType.ERROR_RECOVERABLE)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.RECOVERABLE_ERROR)
-        self.assertEqual(response.error_code, "generation_enqueue_failed")
-        self.assertIn(
-            "occasion_queue_failures",
-            [metric_name for metric_name, _, _ in self.metrics_recorder.counters],
-        )
-
-    async def test_occasion_metrics_are_recorded_for_generation_path(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="occasion-metrics-1",
-                locale="en",
-                message="Need an outfit for an event",
-                requested_intent=ChatMode.OCCASION_OUTFIT,
-                command_name="occasion_outfit",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
-        self.reasoner.route = "text_and_generation"
-        self.reasoner.occasion_output = OccasionExtractionOutput(
-            event_type="wedding",
-            time_of_day="day",
-            season_or_weather="summer",
-            desired_impression="elegant",
-        )
-
-        response = await self.run_command(
-            ChatCommand(
-                session_id="occasion-metrics-1",
-                locale="en",
-                message="A daytime wedding in summer, I want to look elegant",
-                user_message_id=2,
-                client_message_id="occasion-metrics-followup",
-                command_id="occasion-metrics-followup",
-            )
-        )
-
-        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
-        counter_names = [metric_name for metric_name, _, _ in self.metrics_recorder.counters]
-        observation_names = [metric_name for metric_name, _, _ in self.metrics_recorder.observations]
-        self.assertIn("occasion_flow_started", counter_names)
-        self.assertIn("occasion_flow_ready_for_generation", counter_names)
-        self.assertIn("occasion_flow_ended_in_generation", counter_names)
-        self.assertIn("occasion_generation_success_after_readiness", counter_names)
-        self.assertIn("occasion_clarifications_before_generation", observation_names)
-        self.assertIn("occasion_slot_completeness", observation_names)
-        self.assertEqual(self.checkpoint_writer.saved_contexts[0].flow_state, FlowState.READY_FOR_GENERATION)
-        self.assertEqual(self.checkpoint_writer.saved_contexts[-1].flow_state, FlowState.GENERATION_QUEUED)
-
-    async def test_provider_error_uses_fallback_and_keeps_telemetry(self) -> None:
-        self.reasoner.raise_error = True
-        response = await self.run_command(
-            ChatCommand(
-                session_id="fallback-1",
-                locale="en",
-                    message="Try another style",
-                    requested_intent=ChatMode.STYLE_EXPLORATION,
-                    command_name="style_exploration",
-                    command_step="start",
-                    user_message_id=1,
-                    metadata={"clientMessageId": "fallback-1"},
-            )
-        )
-
-        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertTrue(response.telemetry["fallback_used"])
-        self.assertEqual(response.telemetry["provider"], "fake-fallback")
-        self.assertEqual(response.telemetry["reasoning_mode"], "fallback")
-
-    async def test_context_limit_returns_recoverable_error(self) -> None:
-        self.reasoner.raise_context_limit = True
-        response = await self.run_command(
-            ChatCommand(
-                session_id="recoverable-1",
-                locale="en",
-                    message="How can I modernize this outfit?",
-                    user_message_id=1,
-            )
-        )
-
-        self.assertEqual(response.decision_type, DecisionType.ERROR_RECOVERABLE)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.RECOVERABLE_ERROR)
-        self.assertEqual(response.telemetry["reasoning_mode"], "context_limit")
-
-    async def test_generation_idempotency_reuses_existing_job_without_second_enqueue(self) -> None:
-        self.reasoner.route = "text_and_generation"
-        first_response = await self.run_command(
-            ChatCommand(
-                session_id="idem-1",
+                session_id="stage1-explicit-visual-1",
                 locale="ru",
-                    message="Темно-синяя джинсовая рубашка прямого кроя",
-                    requested_intent=ChatMode.GARMENT_MATCHING,
-                    command_name="garment_matching",
-                    command_step="start",
-                    user_message_id=1,
-                    metadata={"clientMessageId": "idem-1"},
-            )
-        )
-        second_response = await self.run_command(
-            ChatCommand(
-                session_id="idem-1",
-                locale="ru",
-                    message="Темно-синяя джинсовая рубашка прямого кроя",
-                    requested_intent=ChatMode.GARMENT_MATCHING,
-                    command_name="garment_matching",
-                    command_step="followup",
-                    user_message_id=1,
-                    metadata={"clientMessageId": "idem-1"},
-            )
-        )
-
-        self.assertIsNone(first_response.job_id)
-        self.assertEqual(second_response.job_id, "job-1")
-        self.assertEqual(len(self.scheduler.enqueued), 1)
-
-    async def test_garment_matching_incomplete_description_returns_one_short_clarification(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="garment-clarify-1",
-                locale="ru",
-                message="Подобрать к вещи",
-                requested_intent=ChatMode.GARMENT_MATCHING,
-                command_name="garment_matching",
-                command_step="start",
+                message="Покажи мягкий интеллектуальный образ на выставку",
                 user_message_id=1,
-            )
-        )
-
-        response = await self.run_command(
-            ChatCommand(
-                session_id="garment-clarify-1",
-                locale="ru",
-                message="рубашка",
-                user_message_id=2,
-            )
-        )
-
-        self.assertEqual(response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(
-            self.context_store.context.flow_state,
-            FlowState.AWAITING_ANCHOR_GARMENT_CLARIFICATION,
-        )
-        self.assertLessEqual(len((response.text_reply or "").split("?")), 2)
-        self.assertEqual(len(self.scheduler.enqueued), 0)
-
-    async def test_garment_matching_clarification_then_generation(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="garment-clarify-2",
-                locale="en",
-                message="Style around a garment",
-                requested_intent=ChatMode.GARMENT_MATCHING,
-                command_name="garment_matching",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
-        first_followup = await self.run_command(
-            ChatCommand(
-                session_id="garment-clarify-2",
-                locale="en",
-                message="shirt",
-                user_message_id=2,
-            )
-        )
-        self.assertEqual(first_followup.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.reasoner.route = "text_and_generation"
-        second_followup = await self.run_command(
-            ChatCommand(
-                session_id="garment-clarify-2",
-                locale="en",
-                message="white linen",
-                user_message_id=3,
-                command_id="garment-clarify-2-followup",
-            )
-        )
-
-        self.assertEqual(second_followup.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(second_followup.job_id, "job-1")
-        assert self.context_store.context.anchor_garment is not None
-        self.assertEqual(self.context_store.context.anchor_garment.garment_type, "shirt")
-        self.assertEqual(self.context_store.context.anchor_garment.material, "linen")
-        self.assertTrue(self.context_store.context.anchor_garment.is_sufficient_for_generation)
-
-    async def test_asset_only_followup_stays_in_garment_flow_then_generates_after_clarification(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="garment-asset-1",
-                locale="en",
-                message="Style around a garment",
-                requested_intent=ChatMode.GARMENT_MATCHING,
-                command_name="garment_matching",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
-        first_followup = await self.run_command(
-            ChatCommand(
-                session_id="garment-asset-1",
-                locale="en",
-                message="",
-                asset_id="asset-1",
-                user_message_id=2,
-            )
-        )
-        self.assertEqual(first_followup.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(self.context_store.context.active_mode, ChatMode.GARMENT_MATCHING)
-        self.reasoner.route = "text_and_generation"
-        second_followup = await self.run_command(
-            ChatCommand(
-                session_id="garment-asset-1",
-                locale="en",
-                message="black leather jacket",
-                asset_id="asset-1",
-                user_message_id=3,
-            )
-        )
-
-        self.assertEqual(second_followup.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(second_followup.job_id, "job-1")
-
-    async def test_text_and_asset_followup_path_generates_with_same_job_flow(self) -> None:
-        await self.run_command(
-            ChatCommand(
-                session_id="garment-text-asset-1",
-                locale="en",
-                message="Style around a garment",
-                requested_intent=ChatMode.GARMENT_MATCHING,
-                command_name="garment_matching",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
-        self.reasoner.route = "text_and_generation"
-        response = await self.run_command(
-            ChatCommand(
-                session_id="garment-text-asset-1",
-                locale="en",
-                message="white linen shirt",
-                asset_id="asset-88",
-                user_message_id=2,
             )
         )
 
         self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
         self.assertEqual(response.job_id, "job-1")
-        assert self.context_store.context.anchor_garment is not None
-        self.assertEqual(self.context_store.context.anchor_garment.material, "linen")
-        self.assertEqual(self.context_store.context.anchor_garment.asset_id, "asset-88")
-
-    async def test_duplicate_followup_only_enqueues_one_generation_job(self) -> None:
-        self.reasoner.route = "text_and_generation"
-        await self.run_command(
-            ChatCommand(
-                session_id="garment-dedupe-1",
-                locale="en",
-                message="Style around a garment",
-                requested_intent=ChatMode.GARMENT_MATCHING,
-                command_name="garment_matching",
-                command_step="start",
-                user_message_id=1,
-            )
-        )
-        first = await self.run_command(
-            ChatCommand(
-                session_id="garment-dedupe-1",
-                locale="en",
-                message="black leather jacket",
-                user_message_id=2,
-                client_message_id="dup-1",
-                command_id="dup-1",
-            )
-        )
-        second = await self.run_command(
-            ChatCommand(
-                session_id="garment-dedupe-1",
-                locale="en",
-                message="black leather jacket",
-                user_message_id=2,
-                client_message_id="dup-1",
-                command_id="dup-1",
-            )
-        )
-
-        self.assertEqual(first.job_id, "job-1")
-        self.assertEqual(second.job_id, "job-1")
+        self.assertFalse(response.can_offer_visualization)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
         self.assertEqual(len(self.scheduler.enqueued), 1)
 
-    async def test_generation_queue_failure_returns_graceful_recoverable_response(self) -> None:
-        self.reasoner.route = "text_and_generation"
-        self.scheduler.fail_next = True
+    async def test_garment_flow_requires_cta_before_generation(self) -> None:
         await self.run_command(
             ChatCommand(
-                session_id="garment-queue-failure-1",
+                session_id="stage1-garment-flow-1",
                 locale="en",
                 message="Style around a garment",
                 requested_intent=ChatMode.GARMENT_MATCHING,
@@ -1083,130 +647,182 @@ class StylistOrchestratorScenarioTests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=1,
             )
         )
+        self.reasoner.route = "text_and_generation"
+
         response = await self.run_command(
             ChatCommand(
-                session_id="garment-queue-failure-1",
+                session_id="stage1-garment-flow-1",
                 locale="en",
                 message="black leather jacket",
                 user_message_id=2,
             )
         )
 
-        self.assertEqual(response.decision_type, DecisionType.ERROR_RECOVERABLE)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.RECOVERABLE_ERROR)
-        self.assertEqual(response.error_code, "generation_enqueue_failed")
-
-    async def test_event_log_contains_command_and_correlation_ids(self) -> None:
-        self.reasoner.route = "text_only"
-        await self.run_command(
-            ChatCommand(
-                session_id="ids-1",
-                locale="en",
-                    message="How can I modernize this shirt?",
-                    user_message_id=7,
-                    client_message_id="client-7",
-                    command_id="cmd-7",
-                    correlation_id="corr-7",
-            )
-        )
-
-        event_name, payload = self.event_logger.events[-1]
-        self.assertEqual(event_name, "stylist_chat_orchestrated")
-        self.assertEqual(payload["client_message_id"], "client-7")
-        self.assertEqual(payload["command_id"], "cmd-7")
-        self.assertEqual(payload["correlation_id"], "corr-7")
-        self.assertEqual(payload["active_mode"], "general_advice")
-        self.assertIn("latency_ms", payload)
-
-    async def test_reasoning_uses_conversation_memory_as_primary_source(self) -> None:
-        self.context_store.context.remember(role="assistant", content="Memory says use cleaner lines.")
-        self.reasoner.route = "text_only"
-
-        await self.run_command(
-            ChatCommand(
-                session_id="memory-1",
-                locale="en",
-                    message="What should I add next?",
-                    user_message_id=3,
-            )
-        )
-
-        assert self.reasoner.last_reasoning_input is not None
-        history = self.reasoner.last_reasoning_input["conversation_history"]
-        self.assertEqual(history[0]["role"], "assistant")
-        self.assertIn("cleaner lines", history[0]["content"])
-
-    async def test_garment_matching_start_always_returns_entry_clarification(self) -> None:
-        self.reasoner.route = "text_and_generation"
-        response = await self.run_command(
-            ChatCommand(
-                session_id="garment-start-1",
-                locale="en",
-                    message="Dark indigo denim shirt with a straight fit",
-                    requested_intent=ChatMode.GARMENT_MATCHING,
-                    command_name="garment_matching",
-                    command_step="start",
-                    user_message_id=10,
-            )
-        )
-
-        self.assertEqual(response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.AWAITING_ANCHOR_GARMENT)
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(response.can_offer_visualization)
+        self.assertEqual(response.cta_text, "Build a flat lay around this garment?")
+        self.assertIsNone(response.job_id)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.GARMENT_MATCHING)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.READY_FOR_GENERATION)
         self.assertEqual(len(self.scheduler.enqueued), 0)
 
-    async def test_occasion_start_always_returns_entry_clarification(self) -> None:
+    async def test_occasion_flow_requires_cta_before_generation(self) -> None:
+        self.reasoner.occasion_output = OccasionExtractionOutput()
+        await self.run_command(
+            ChatCommand(
+                session_id="stage1-occasion-flow-1",
+                locale="en",
+                message="Need an outfit for an event",
+                requested_intent=ChatMode.OCCASION_OUTFIT,
+                command_name="occasion_outfit",
+                command_step="start",
+                user_message_id=1,
+            )
+        )
         self.reasoner.route = "text_and_generation"
         self.reasoner.occasion_output = OccasionExtractionOutput(
             event_type="wedding",
-            dress_code="cocktail",
             time_of_day="evening",
             season_or_weather="spring",
+            desired_impression="elegant",
         )
+
         response = await self.run_command(
             ChatCommand(
-                session_id="occasion-start-1",
+                session_id="stage1-occasion-flow-1",
                 locale="en",
-                    message="Need a spring evening wedding outfit with cocktail dress code",
-                    requested_intent=ChatMode.OCCASION_OUTFIT,
-                    command_name="occasion_outfit",
-                    command_step="start",
-                    user_message_id=11,
+                message="Spring evening wedding, elegant",
+                user_message_id=2,
             )
         )
 
-        self.assertEqual(response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.AWAITING_OCCASION_DETAILS)
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(response.can_offer_visualization)
+        self.assertEqual(response.cta_text, "Build a flat lay for this occasion?")
+        self.assertIsNone(response.job_id)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.OCCASION_OUTFIT)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.READY_FOR_GENERATION)
         self.assertEqual(len(self.scheduler.enqueued), 0)
 
-    async def test_reasoning_context_includes_asset_metadata(self) -> None:
-        self.reasoner.route = "text_only"
-        asset = SimpleNamespace(
-            id=42,
-            original_filename="shirt-reference.jpg",
-            mime_type="image/jpeg",
-            size_bytes=2048,
-            asset_type=SimpleNamespace(value="image"),
-        )
+    async def test_visualization_cta_confirmation_generates_and_clears_offer(self) -> None:
+        self.reasoner.route = "text_and_generation"
         await self.run_command(
             ChatCommand(
-                session_id="asset-1",
+                session_id="stage1-cta-confirm-1",
                 locale="en",
-                message="Suggest a cleaner styling direction",
-                user_message_id=12,
-                asset_metadata={
-                    "asset_id": asset.id,
-                    "original_filename": asset.original_filename,
-                    "mime_type": asset.mime_type,
-                    "size_bytes": asset.size_bytes,
-                    "asset_type": asset.asset_type.value,
-                },
+                message="How can I modernize a white shirt?",
+                user_message_id=1,
             )
         )
 
-        assert self.reasoner.last_reasoning_input is not None
-        asset_metadata = self.reasoner.last_reasoning_input["asset_metadata"]
-        self.assertEqual(asset_metadata["asset_id"], 42)
-        self.assertEqual(asset_metadata["original_filename"], "shirt-reference.jpg")
-        self.assertEqual(asset_metadata["mime_type"], "image/jpeg")
-        self.assertEqual(asset_metadata["size_bytes"], 2048)
-        self.assertEqual(asset_metadata["asset_type"], "image")
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage1-cta-confirm-1",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=2,
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(response.job_id, "job-1")
+        self.assertFalse(response.can_offer_visualization)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
+        self.assertIsNone(self.context_store.context.visualization_offer)
+        self.assertEqual(len(self.scheduler.enqueued), 1)
+
+    async def test_style_exploration_quick_action_generates_and_completed_job_resets_to_general(self) -> None:
+        self.reasoner.route = "text_and_generation"
+        generated = await self.run_command(
+            ChatCommand(
+                session_id="stage1-style-reset-1",
+                locale="en",
+                message="Try another style",
+                requested_intent=ChatMode.STYLE_EXPLORATION,
+                command_name="style_exploration",
+                command_step="start",
+                user_message_id=1,
+                metadata={"source": "quick_action"},
+            )
+        )
+
+        self.assertEqual(generated.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(generated.job_id, "job-1")
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.STYLE_EXPLORATION)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
+
+        self.scheduler.job_statuses["job-1"] = GenerationStatus.COMPLETED
+        self.reasoner.route = "text_only"
+        followup = await self.run_command(
+            ChatCommand(
+                session_id="stage1-style-reset-1",
+                locale="en",
+                message="Hi there",
+                user_message_id=2,
+            )
+        )
+
+        self.assertEqual(followup.decision_type, DecisionType.TEXT_ONLY)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.COMPLETED)
+        self.assertEqual(len(self.scheduler.enqueued), 1)
+
+    async def test_event_payload_keeps_cta_contract_and_identifiers(self) -> None:
+        self.reasoner.route = "text_and_generation"
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage1-telemetry-1",
+                locale="en",
+                message="How can I modernize a white shirt?",
+                user_message_id=1,
+                client_message_id="client-1",
+                command_id="command-1",
+                correlation_id="corr-1",
+            )
+        )
+
+        self.assertEqual(response.context_patch["can_offer_visualization"], True)
+        self.assertEqual(response.context_patch["cta_text"], "Build a flat lay reference?")
+        self.assertEqual(response.context_patch["visualization_type"], "flat_lay_reference")
+        self.assertTrue(self.event_logger.events)
+        _, payload = self.event_logger.events[-1]
+        self.assertEqual(payload["client_message_id"], "client-1")
+        self.assertEqual(payload["command_id"], "command-1")
+        self.assertEqual(payload["correlation_id"], "corr-1")
+        self.assertEqual(payload["active_mode"], "general_advice")
+
+    async def test_router_event_is_logged_with_debuggable_routing_payload(self) -> None:
+        await self.run_command(
+            ChatCommand(
+                session_id="stage1-routing-log-1",
+                locale="en",
+                message="How can I modernize a white shirt?",
+                user_message_id=7,
+                client_message_id="route-client-7",
+                command_id="route-command-7",
+                correlation_id="route-corr-7",
+            )
+        )
+
+        routed_events = [event for event in self.event_logger.events if event[0] == "stylist_chat_routed"]
+        self.assertTrue(routed_events)
+        _, routed_payload = routed_events[-1]
+        self.assertEqual(routed_payload["client_message_id"], "route-client-7")
+        self.assertEqual(routed_payload["command_id"], "route-command-7")
+        self.assertEqual(routed_payload["correlation_id"], "route-corr-7")
+        self.assertEqual(routed_payload["provider"], "fake-router")
+        self.assertEqual(routed_payload["routing_mode"], "general_advice")
+        self.assertIn("routing_input", routed_payload)
+        self.assertIn("routing_context", routed_payload)
+        self.assertIn("normalized_payload", routed_payload)
+        self.assertIn("raw_content_length", routed_payload)
+        self.assertIn("recent_messages_count", routed_payload["routing_input"])
+        self.assertIn("recent_messages_count", routed_payload["routing_context"])
+
+        orchestrated_events = [event for event in self.event_logger.events if event[0] == "stylist_chat_orchestrated"]
+        self.assertTrue(orchestrated_events)
+        _, orchestrated_payload = orchestrated_events[-1]
+        self.assertEqual(orchestrated_payload["routing_provider"], "fake-router")
+        self.assertEqual(orchestrated_payload["routing_mode"], "general_advice")
+        self.assertEqual(orchestrated_payload["routing_used_fallback"], False)

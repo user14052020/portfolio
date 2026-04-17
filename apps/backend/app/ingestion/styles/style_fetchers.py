@@ -4,10 +4,10 @@ import asyncio
 import json
 import random
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote, unquote, urlparse
-from urllib.robotparser import RobotFileParser
 
 import httpx
 
@@ -17,12 +17,13 @@ from app.ingestion.styles.contracts import (
     ScrapedStylePage,
     StyleSourceRegistryEntry,
 )
+from app.ingestion.styles.errors import DonorApiError, DonorPayloadError
 from app.ingestion.styles.source_fetch_log_service import SourceFetchLogService
 from app.ingestion.styles.source_fetch_state_service import SourceFetchStateService
 
 
 JSON_ACCEPT_HEADER = "application/json,text/javascript,*/*;q=0.8"
-ROBOTS_ACCEPT_HEADER = "text/plain,text/html,*/*;q=0.8"
+StyleFetchEventReporter = Callable[[str, dict[str, object]], None]
 
 
 def _resolve_mediawiki_title_from_url(url: str) -> str:
@@ -73,15 +74,28 @@ def _chunked(items: tuple[DiscoveredStyleCandidate, ...], chunk_size: int) -> tu
 
 
 class PoliteHTTPTransport:
-    def __init__(self, *, timeout_seconds: float = 30.0, session_factory: object | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 30.0,
+        session_factory: object | None = None,
+        event_reporter: StyleFetchEventReporter | None = None,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
         self.session_factory = session_factory
+        self.event_reporter = event_reporter
         self._last_request_at_by_source: dict[str, datetime] = {}
         self._locks_by_source: dict[str, asyncio.Lock] = {}
-        self._robots_parser_by_source: dict[str, RobotFileParser | None] = {}
-        self._robots_crawl_delay_by_source: dict[str, float | None] = {}
         self._fetch_log_service = SourceFetchLogService()
         self._fetch_state_service = SourceFetchStateService()
+
+    def _emit_event(self, event_name: str, **payload: object) -> None:
+        if self.event_reporter is None:
+            return
+        try:
+            self.event_reporter(event_name, dict(payload))
+        except Exception:
+            return
 
     async def fetch_json(
         self,
@@ -93,27 +107,88 @@ class PoliteHTTPTransport:
         fetch_mode: str = "api",
     ) -> dict[str, object]:
         response = await self._send_get(source=source, url=url, params=params, accept=accept, fetch_mode=fetch_mode)
+        latency_ms = int(response.extensions.get("style_latency_ms", 0))
         if not response.content.strip():
+            self._emit_event(
+                "api_request_failed",
+                source_name=source.source_name,
+                fetch_mode=fetch_mode,
+                request_method=response.request.method,
+                request_url=str(response.request.url),
+                response_status=response.status_code,
+                latency_ms=latency_ms,
+                error_class="empty_response_body",
+            )
             await self._mark_empty_body(source=source, http_status=response.status_code)
-            raise ValueError(f"Empty JSON response body returned for {url!r}")
+            raise DonorPayloadError(
+                source_name=source.source_name,
+                fetch_mode=fetch_mode,
+                request_url=url,
+                reason="empty_response_body",
+                status_code=response.status_code,
+                detail="Donor API returned an empty body for a JSON request",
+            )
         try:
             payload = response.json()
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             content_type = response.headers.get("Content-Type")
             content_encoding = response.headers.get("Content-Encoding")
-            error = ValueError(
-                f"Expected JSON response from {url!r}, got undecodable body; "
-                f"content_type={content_type!r}, content_encoding={content_encoding!r}"
+            error = DonorPayloadError(
+                source_name=source.source_name,
+                fetch_mode=fetch_mode,
+                request_url=url,
+                reason="invalid_json_response",
+                status_code=response.status_code,
+                detail=(
+                    f"Expected JSON response, got undecodable body; "
+                    f"content_type={content_type!r}, content_encoding={content_encoding!r}"
+                ),
             )
-            await self._mark_error(
-                source=source,
-                error=error,
-                error_class="invalid_json_response",
-                http_status=response.status_code,
+            self._emit_event(
+                "api_request_failed",
+                source_name=source.source_name,
+                fetch_mode=fetch_mode,
+                request_method=response.request.method,
+                request_url=str(response.request.url),
+                response_status=response.status_code,
+                latency_ms=latency_ms,
+                error_class=error.reason,
+                error_message=error.detail,
             )
+            await self._mark_error(source=source, error=error, http_status=response.status_code)
             raise error from exc
         if not isinstance(payload, dict):
-            raise ValueError(f"Expected JSON object from {url!r}, got {type(payload).__name__}")
+            error = DonorPayloadError(
+                source_name=source.source_name,
+                fetch_mode=fetch_mode,
+                request_url=url,
+                reason="invalid_json_object",
+                status_code=response.status_code,
+                detail=f"Expected JSON object, got {type(payload).__name__}",
+            )
+            self._emit_event(
+                "api_request_failed",
+                source_name=source.source_name,
+                fetch_mode=fetch_mode,
+                request_method=response.request.method,
+                request_url=str(response.request.url),
+                response_status=response.status_code,
+                latency_ms=latency_ms,
+                error_class=error.reason,
+                error_message=error.detail,
+            )
+            await self._mark_error(source=source, error=error, http_status=response.status_code)
+            raise error
+        await self._mark_success(source=source, http_status=response.status_code)
+        self._emit_event(
+            "api_request_succeeded",
+            source_name=source.source_name,
+            fetch_mode=fetch_mode,
+            request_method=response.request.method,
+            request_url=str(response.request.url),
+            response_status=response.status_code,
+            latency_ms=latency_ms,
+        )
         return payload
 
     async def _send_get(
@@ -131,9 +206,17 @@ class PoliteHTTPTransport:
             max_attempts = max(source.crawl_policy.max_retries, 1)
 
             for attempt in range(1, max_attempts + 1):
-                await self._ensure_allowed_by_robots(source=source, url=url)
-                await self._wait_for_turn(source)
+                await self._wait_for_turn(source=source, fetch_mode=fetch_mode)
                 started = time.perf_counter()
+                self._emit_event(
+                    "api_request_started",
+                    source_name=source.source_name,
+                    fetch_mode=fetch_mode,
+                    request_method="GET",
+                    request_url=url,
+                    request_params=params or {},
+                    attempt=attempt,
+                )
                 try:
                     async with httpx.AsyncClient(
                         timeout=self.timeout_seconds,
@@ -149,12 +232,29 @@ class PoliteHTTPTransport:
                         error_class=None,
                     )
                     if response.status_code == 429 or 500 <= response.status_code < 600:
+                        self._emit_event(
+                            "api_request_failed",
+                            source_name=source.source_name,
+                            fetch_mode=fetch_mode,
+                            request_method=response.request.method,
+                            request_url=str(response.request.url),
+                            response_status=response.status_code,
+                            latency_ms=self._calculate_latency_ms(started),
+                            error_class="retryable_http_status",
+                            attempt=attempt,
+                        )
                         await self._mark_error(
                             source=source,
                             error_class="retryable_http_status",
                             http_status=response.status_code,
                         )
-                        await self._handle_retryable_response(source, response, attempt=attempt, max_attempts=max_attempts)
+                        await self._handle_retryable_response(
+                            source,
+                            response,
+                            attempt=attempt,
+                            fetch_mode=fetch_mode,
+                            max_attempts=max_attempts,
+                        )
                         last_error = httpx.HTTPStatusError(
                             f"Retryable HTTP status: {response.status_code}",
                             request=response.request,
@@ -162,7 +262,7 @@ class PoliteHTTPTransport:
                         )
                         continue
                     response.raise_for_status()
-                    await self._mark_success(source=source, http_status=response.status_code)
+                    response.extensions["style_latency_ms"] = self._calculate_latency_ms(started)
                     return response
                 except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.HTTPStatusError) as exc:
                     await self._persist_error_log(
@@ -173,25 +273,50 @@ class PoliteHTTPTransport:
                         error=exc,
                     )
                     last_error = exc
+                    response = exc.response if isinstance(exc, httpx.HTTPStatusError) else None
+                    request = exc.request if isinstance(exc, httpx.RequestError | httpx.HTTPStatusError) else None
+                    self._emit_event(
+                        "api_request_failed",
+                        source_name=source.source_name,
+                        fetch_mode=fetch_mode,
+                        request_method=request.method if request is not None else "GET",
+                        request_url=str(request.url) if request is not None else url,
+                        response_status=response.status_code if response is not None else None,
+                        latency_ms=self._calculate_latency_ms(started),
+                        error_class=exc.__class__.__name__,
+                        error_message=str(exc),
+                        attempt=attempt,
+                    )
                     await self._mark_error(source=source, error=exc)
                     if attempt >= max_attempts:
-                        break
-                    await self._sleep_with_backoff(source, attempt=attempt, retry_after_seconds=None)
+                        raise self._build_donor_api_error(
+                            source=source,
+                            fetch_mode=fetch_mode,
+                            request_url=url,
+                            error=exc,
+                        ) from exc
+                    await self._sleep_with_backoff(
+                        source,
+                        attempt=attempt,
+                        fetch_mode=fetch_mode,
+                        retry_after_seconds=None,
+                    )
 
             assert last_error is not None
-            raise last_error
+            raise self._build_donor_api_error(
+                source=source,
+                fetch_mode=fetch_mode,
+                request_url=url,
+                error=last_error,
+            ) from last_error
 
-    async def _wait_for_turn(self, source: StyleSourceRegistryEntry) -> None:
-        await self._wait_for_state_gate(source)
+    async def _wait_for_turn(self, *, source: StyleSourceRegistryEntry, fetch_mode: str) -> None:
+        await self._wait_for_state_gate(source=source, fetch_mode=fetch_mode)
         now = datetime.now(UTC)
         last_request_at = self._last_request_at_by_source.get(source.source_name)
         if last_request_at is not None:
-            crawl_delay = self._robots_crawl_delay_by_source.get(source.source_name)
             min_delay = float(source.crawl_policy.min_delay_seconds)
             max_delay = float(source.crawl_policy.max_delay_seconds)
-            if crawl_delay is not None and crawl_delay > 0:
-                min_delay = max(min_delay, crawl_delay)
-                max_delay = max(max_delay, crawl_delay)
             state_interval = await self._load_state_interval(source)
             if state_interval is not None and state_interval > 0:
                 jitter_ratio = max(float(source.crawl_policy.jitter_ratio), 0.0)
@@ -203,15 +328,29 @@ class PoliteHTTPTransport:
             elapsed = (now - last_request_at).total_seconds()
             remaining = target_delay - elapsed
             if remaining > 0:
+                self._emit_event(
+                    "api_waiting",
+                    source_name=source.source_name,
+                    fetch_mode=fetch_mode,
+                    wait_reason="throttle_window",
+                    wait_seconds=round(remaining, 3),
+                )
                 await asyncio.sleep(remaining)
         self._last_request_at_by_source[source.source_name] = datetime.now(UTC)
 
-    async def _wait_for_state_gate(self, source: StyleSourceRegistryEntry) -> None:
+    async def _wait_for_state_gate(self, *, source: StyleSourceRegistryEntry, fetch_mode: str) -> None:
         if self.session_factory is None:
             return
         async with self.session_factory() as session:
             state = await self._fetch_state_service.get_or_create(session, source=source)
             if state.mode == "blocked_suspected":
+                self._emit_event(
+                    "api_access_blocked",
+                    source_name=source.source_name,
+                    fetch_mode=fetch_mode,
+                    wait_reason="blocked_suspected",
+                    error_class="blocked_suspected",
+                )
                 raise RuntimeError(
                     f"Source {source.source_name!r} is in blocked_suspected mode and requires manual review"
                 )
@@ -221,6 +360,13 @@ class PoliteHTTPTransport:
             return
         wait_seconds = (next_allowed_at - datetime.now(UTC)).total_seconds()
         if wait_seconds > 0:
+            self._emit_event(
+                "api_waiting",
+                source_name=source.source_name,
+                fetch_mode=fetch_mode,
+                wait_reason="source_state_gate",
+                wait_seconds=round(wait_seconds, 3),
+            )
             await asyncio.sleep(wait_seconds)
 
     async def _load_state_interval(self, source: StyleSourceRegistryEntry) -> float | None:
@@ -238,25 +384,42 @@ class PoliteHTTPTransport:
         response: httpx.Response,
         *,
         attempt: int,
+        fetch_mode: str,
         max_attempts: int,
     ) -> None:
         if attempt >= max_attempts:
             return
         retry_after_seconds = self._parse_retry_after(response.headers.get("Retry-After"))
-        await self._sleep_with_backoff(source, attempt=attempt, retry_after_seconds=retry_after_seconds)
+        await self._sleep_with_backoff(
+            source,
+            attempt=attempt,
+            fetch_mode=fetch_mode,
+            retry_after_seconds=retry_after_seconds,
+        )
 
     async def _sleep_with_backoff(
         self,
         source: StyleSourceRegistryEntry,
         *,
         attempt: int,
+        fetch_mode: str = "api",
         retry_after_seconds: float | None,
     ) -> None:
         if retry_after_seconds is not None and retry_after_seconds > 0:
             delay_seconds = retry_after_seconds
+            wait_reason = "retry_after"
         else:
             delay_seconds = source.crawl_policy.retry_backoff_seconds * attempt
-            delay_seconds += random.uniform(0.0, 1.0)
+            delay_seconds += random.uniform(0.0, max(float(source.crawl_policy.retry_backoff_jitter_seconds), 0.0))
+            wait_reason = "retry_backoff"
+        self._emit_event(
+            "api_waiting",
+            source_name=source.source_name,
+            fetch_mode=fetch_mode,
+            wait_reason=wait_reason,
+            wait_seconds=round(delay_seconds, 3),
+            attempt=attempt,
+        )
         await asyncio.sleep(delay_seconds)
 
     def _parse_retry_after(self, value: str | None) -> float | None:
@@ -275,116 +438,46 @@ class PoliteHTTPTransport:
             return None
         return max((parsed - datetime.now(parsed.tzinfo or UTC)).total_seconds(), 0.0)
 
-    async def _ensure_allowed_by_robots(self, *, source: StyleSourceRegistryEntry, url: str) -> None:
-        if not source.crawl_policy.respect_robots_txt:
-            return
-
-        parser = self._robots_parser_by_source.get(source.source_name)
-        if parser is None and source.source_name not in self._robots_parser_by_source:
-            parser = await self._load_robots_parser(source)
-            self._robots_parser_by_source[source.source_name] = parser
-
-        if parser is None:
-            return
-
-        if not parser.can_fetch(source.crawl_policy.user_agent, url):
-            raise PermissionError(
-                f"Robots policy forbids fetching {url!r} for source {source.source_name!r}"
-            )
-
-    async def _load_robots_parser(self, source: StyleSourceRegistryEntry) -> RobotFileParser | None:
-        robots_url = source.crawl_policy.robots_txt_url or self._build_robots_url(source)
-        last_error: Exception | None = None
-        max_attempts = max(source.crawl_policy.max_retries, 1)
-
-        for attempt in range(1, max_attempts + 1):
-            await self._wait_for_turn(source)
-            started = time.perf_counter()
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.timeout_seconds,
-                    follow_redirects=True,
-                    headers=self._build_headers(source=source, accept=ROBOTS_ACCEPT_HEADER),
-                ) as client:
-                    response = await client.get(robots_url)
-                await self._persist_response_log(
-                    source=source,
-                    response=response,
-                    fetch_mode="robots_txt",
-                    latency_ms=self._calculate_latency_ms(started),
-                    error_class=None,
-                )
-            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
-                await self._persist_error_log(
-                    source=source,
-                    request_url=robots_url,
-                    fetch_mode="robots_txt",
-                    latency_ms=self._calculate_latency_ms(started),
-                    error=exc,
-                )
-                await self._mark_error(
-                    source=source,
-                    error_class=exc.__class__.__name__,
-                    http_status=None,
-                )
-                last_error = exc
-                if attempt >= max_attempts:
-                    return None
-                await self._sleep_with_backoff(source, attempt=attempt, retry_after_seconds=None)
-                continue
-
-            if response.status_code == 404:
-                return None
-
-            if response.status_code == 429 or 500 <= response.status_code < 600:
-                await self._mark_error(
-                    source=source,
-                    error_class="robots_retryable_http_status",
-                    http_status=response.status_code,
-                )
-                last_error = httpx.HTTPStatusError(
-                    f"Retryable robots HTTP status: {response.status_code}",
-                    request=response.request,
-                    response=response,
-                )
-                if attempt >= max_attempts:
-                    break
-                retry_after_seconds = self._parse_retry_after(response.headers.get("Retry-After"))
-                await self._sleep_with_backoff(
-                    source,
-                    attempt=attempt,
-                    retry_after_seconds=retry_after_seconds,
-                )
-                continue
-
-            if response.status_code in {401, 403}:
-                await self._mark_error(
-                    source=source,
-                    error_class="robots_policy_unavailable",
-                    http_status=response.status_code,
-                )
-                raise PermissionError(
-                    f"Robots policy is unavailable for source {source.source_name!r}: "
-                    f"HTTP {response.status_code} at {robots_url}"
-                )
-
-            response.raise_for_status()
-            await self._mark_success(source=source, http_status=response.status_code)
-
-            parser = RobotFileParser()
-            parser.set_url(robots_url)
-            parser.parse(response.text.splitlines())
-            self._robots_crawl_delay_by_source[source.source_name] = parser.crawl_delay(
-                source.crawl_policy.user_agent
-            )
-            return parser
-
-        if isinstance(last_error, httpx.HTTPStatusError):
-            raise last_error
-        return None
-
     def _calculate_latency_ms(self, started: float) -> int:
         return max(int((time.perf_counter() - started) * 1000), 0)
+
+    def _build_donor_api_error(
+        self,
+        *,
+        source: StyleSourceRegistryEntry,
+        fetch_mode: str,
+        request_url: str,
+        error: Exception,
+    ) -> DonorApiError:
+        if isinstance(error, DonorApiError):
+            return error
+        if isinstance(error, httpx.TimeoutException):
+            reason = "request_timeout"
+            status_code = None
+        elif isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)):
+            reason = "network_error"
+            status_code = None
+        elif isinstance(error, httpx.HTTPStatusError):
+            status_code = error.response.status_code
+            if status_code == 429:
+                reason = "rate_limited"
+            elif 500 <= status_code < 600:
+                reason = "upstream_server_error"
+            elif status_code in {401, 403}:
+                reason = "access_denied"
+            else:
+                reason = "unexpected_http_status"
+        else:
+            reason = error.__class__.__name__
+            status_code = None
+        return DonorApiError(
+            source_name=source.source_name,
+            fetch_mode=fetch_mode,
+            request_url=request_url,
+            reason=reason,
+            status_code=status_code,
+            detail=str(error),
+        )
 
     async def _persist_response_log(
         self,
@@ -478,6 +571,8 @@ class PoliteHTTPTransport:
         resolved_http_status = http_status
         if resolved_http_status is None and isinstance(error, httpx.HTTPStatusError):
             resolved_http_status = error.response.status_code
+        if resolved_http_status is None and isinstance(error, DonorApiError):
+            resolved_http_status = error.status_code
         async with self.session_factory() as session:
             await self._fetch_state_service.mark_error(
                 session,
@@ -486,10 +581,6 @@ class PoliteHTTPTransport:
                 http_status=resolved_http_status,
             )
             await session.commit()
-
-    def _build_robots_url(self, source: StyleSourceRegistryEntry) -> str:
-        parsed = urlparse(source.index_url)
-        return f"{parsed.scheme}://{parsed.netloc}/robots.txt"
 
     def _build_headers(self, *, source: StyleSourceRegistryEntry, accept: str) -> dict[str, str]:
         return {
@@ -538,8 +629,12 @@ class MediaWikiApiFetcher:
             )
             parse_node = payload.get("parse")
             if not isinstance(parse_node, dict):
-                raise ValueError(
-                    f"MediaWiki discovery payload for page {page_title!r} does not contain parse object"
+                raise DonorPayloadError(
+                    source_name=source.source_name,
+                    fetch_mode="api_discovery_parse",
+                    request_url=source.api_endpoint_url,
+                    reason="missing_parse_object",
+                    detail=f"MediaWiki discovery payload for page {page_title!r} does not contain parse object",
                 )
             resolved_title = parse_node.get("title")
             if not isinstance(resolved_title, str) or not resolved_title.strip():
@@ -643,11 +738,23 @@ class MediaWikiApiFetcher:
 
         parse_node = parse_payload.get("parse")
         if not isinstance(parse_node, dict):
-            raise ValueError(f"MediaWiki parse payload for {candidate.source_url!r} does not contain parse object")
+            raise DonorPayloadError(
+                source_name=source.source_name,
+                fetch_mode="api_parse",
+                request_url=source.api_endpoint_url,
+                reason="missing_parse_object",
+                detail=f"MediaWiki parse payload for {candidate.source_url!r} does not contain parse object",
+            )
 
         raw_html = parse_node.get("text")
         if not isinstance(raw_html, str) or not raw_html.strip():
-            raise ValueError(f"MediaWiki parse payload for {candidate.source_url!r} returned empty HTML")
+            raise DonorPayloadError(
+                source_name=source.source_name,
+                fetch_mode="api_parse",
+                request_url=source.api_endpoint_url,
+                reason="empty_parse_html",
+                detail=f"MediaWiki parse payload for {candidate.source_url!r} returned empty HTML",
+            )
 
         page_node = self._extract_query_page(revision_payload, candidate)
         raw_wikitext = self._extract_raw_wikitext(page_node)
@@ -678,13 +785,31 @@ class MediaWikiApiFetcher:
     ) -> dict[str, object]:
         query = payload.get("query")
         if not isinstance(query, dict):
-            raise ValueError(f"MediaWiki query payload for {candidate.source_url!r} does not contain query object")
+            raise DonorPayloadError(
+                source_name=candidate.source_name,
+                fetch_mode="api_revisions",
+                request_url=candidate.source_url,
+                reason="missing_query_object",
+                detail=f"MediaWiki query payload for {candidate.source_url!r} does not contain query object",
+            )
         pages = query.get("pages")
         if not isinstance(pages, list) or not pages:
-            raise ValueError(f"MediaWiki query payload for {candidate.source_url!r} does not contain pages")
+            raise DonorPayloadError(
+                source_name=candidate.source_name,
+                fetch_mode="api_revisions",
+                request_url=candidate.source_url,
+                reason="missing_query_pages",
+                detail=f"MediaWiki query payload for {candidate.source_url!r} does not contain pages",
+            )
         page = pages[0]
         if not isinstance(page, dict):
-            raise ValueError(f"MediaWiki query payload for {candidate.source_url!r} has invalid page structure")
+            raise DonorPayloadError(
+                source_name=candidate.source_name,
+                fetch_mode="api_revisions",
+                request_url=candidate.source_url,
+                reason="invalid_query_page_structure",
+                detail=f"MediaWiki query payload for {candidate.source_url!r} has invalid page structure",
+            )
         return page
 
     def _extract_raw_wikitext(self, page_node: dict[str, object]) -> str | None:
@@ -715,13 +840,21 @@ class MediaWikiApiFetcher:
     ) -> dict[str, CandidateRemoteState]:
         query = payload.get("query")
         if not isinstance(query, dict):
-            raise ValueError(
-                f"MediaWiki metadata payload for source {source.source_name!r} does not contain query object"
+            raise DonorPayloadError(
+                source_name=source.source_name,
+                fetch_mode="api_query_revision_ids",
+                request_url=source.api_endpoint_url or source.index_url,
+                reason="missing_query_object",
+                detail=f"MediaWiki metadata payload for source {source.source_name!r} does not contain query object",
             )
         pages = query.get("pages")
         if not isinstance(pages, list):
-            raise ValueError(
-                f"MediaWiki metadata payload for source {source.source_name!r} does not contain pages array"
+            raise DonorPayloadError(
+                source_name=source.source_name,
+                fetch_mode="api_query_revision_ids",
+                request_url=source.api_endpoint_url or source.index_url,
+                reason="missing_query_pages",
+                detail=f"MediaWiki metadata payload for source {source.source_name!r} does not contain pages array",
             )
 
         candidate_by_title_key = {

@@ -292,6 +292,7 @@ class KnowledgeLayerE2ETests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=1,
                 client_message_id="stage8-style-1-start",
                 command_id="stage8-style-1-start",
+                metadata={"source": "quick_action"},
             )
         )
 
@@ -326,6 +327,20 @@ class KnowledgeLayerE2ETests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=2,
                 client_message_id="stage8-garment-1-followup",
                 command_id="stage8-garment-1-followup",
+            )
+        )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(response.can_offer_visualization)
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage8-garment-1",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                client_message_id="stage8-garment-1-confirm",
+                command_id="stage8-garment-1-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
             )
         )
 
@@ -367,6 +382,20 @@ class KnowledgeLayerE2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(response.can_offer_visualization)
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage8-occasion-1",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                client_message_id="stage8-occasion-1-confirm",
+                command_id="stage8-occasion-1-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
         bundle = self.reasoner.last_reasoning_input["knowledge_bundle"]
         self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
         self.assertEqual(bundle["style_cards"][0]["style_id"], "gallery-smart-casual")
@@ -388,6 +417,7 @@ class KnowledgeLayerE2ETests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=1,
                 client_message_id="stage8-fallback-1-start",
                 command_id="stage8-fallback-1-start",
+                metadata={"source": "quick_action"},
             )
         )
 
@@ -412,6 +442,7 @@ class KnowledgeLayerE2ETests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=1,
                 client_message_id="stage8-style-repeat-1",
                 command_id="stage8-style-repeat-1",
+                metadata={"source": "quick_action"},
             )
         )
         second = await self.run_command(
@@ -425,6 +456,7 @@ class KnowledgeLayerE2ETests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=2,
                 client_message_id="stage8-style-repeat-2",
                 command_id="stage8-style-repeat-2",
+                metadata={"source": "quick_action"},
             )
         )
 

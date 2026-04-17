@@ -10,76 +10,19 @@ import { buildFollowupMessagePayload } from "@/features/send-chat-message/model/
 import {
   createDefaultScenarioContext,
   getComposerMessageSource,
-  getScenarioPlaceholder,
   shouldRenderPendingGeneration,
 } from "@/processes/stylist-chat/model/lib";
 import type { StylistMessageResponse } from "@/shared/api/types";
 
-test("quick action builds a typed garment_matching command payload", () => {
-  const action = getQuickActionDefinitions("ru").find((item) => item.id === "garment_matching");
-  assert.ok(action);
+test("quick actions keep only style_exploration after stage 1", () => {
+  const actions = getQuickActionDefinitions("ru");
 
-  const payload = buildQuickActionCommandPayload({
-    sessionId: "session-1",
-    locale: "ru",
-    action,
-  });
-
-  assert.equal(payload.requestedIntent, "garment_matching");
-  assert.equal(payload.commandName, "garment_matching");
-  assert.equal(payload.commandStep, "start");
-  assert.equal(payload.message, null);
-  assert.equal(payload.assetId, null);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0]?.id, "style_exploration");
 });
 
-test("follow-up payload keeps source metadata and does not override mode locally", () => {
-  const payload = buildFollowupMessagePayload({
-    sessionId: "session-2",
-    locale: "ru",
-    message: "Да, речь про тёмно-синий пиджак",
-    assetId: null,
-  });
-
-  assert.equal(payload.metadata?.source, "followup");
-  assert.equal(payload.requestedIntent, undefined);
-});
-
-test("garment command does not require asset to enter the mode", () => {
-  const action = getQuickActionDefinitions("en").find((item) => item.id === "garment_matching");
-  assert.ok(action);
-
-  const payload = buildQuickActionCommandPayload({
-    sessionId: "session-3",
-    locale: "en",
-    action,
-    assetId: null,
-  });
-
-  assert.equal(payload.assetId, null);
-  assert.equal(payload.requestedIntent, "garment_matching");
-});
-
-test("quick action builds a typed occasion_outfit command payload", () => {
-  const action = getQuickActionDefinitions("en").find((item) => item.id === "occasion_outfit");
-  assert.ok(action);
-
-  const payload = buildQuickActionCommandPayload({
-    sessionId: "session-occ-1",
-    locale: "en",
-    action,
-    assetId: "asset-77",
-  });
-
-  assert.equal(payload.requestedIntent, "occasion_outfit");
-  assert.equal(payload.commandName, "occasion_outfit");
-  assert.equal(payload.commandStep, "start");
-  assert.equal(payload.message, null);
-  assert.equal(payload.assetId, null);
-});
-
-test("quick action builds a typed style_exploration command payload without asset coupling", () => {
-  const action = getQuickActionDefinitions("en").find((item) => item.id === "style_exploration");
-  assert.ok(action);
+test("style quick action builds a typed payload without asset coupling", () => {
+  const action = getQuickActionDefinitions("en")[0];
 
   const payload = buildQuickActionCommandPayload({
     sessionId: "session-style-1",
@@ -95,43 +38,20 @@ test("quick action builds a typed style_exploration command payload without asse
   assert.equal(payload.assetId, null);
 });
 
-test("garment flow placeholder shows an example-style hint after stage 4", () => {
-  const context = createDefaultScenarioContext();
-  context.activeMode = "garment_matching";
+test("follow-up payload keeps source metadata and does not override mode locally", () => {
+  const payload = buildFollowupMessagePayload({
+    sessionId: "session-2",
+    locale: "ru",
+    message: "Да, давай уточним детали",
+    assetId: null,
+  });
 
-  const placeholder = getScenarioPlaceholder(context, "ru");
-
-  assert.equal(placeholder, "Например: тёмно-синяя джинсовая рубашка oversize");
-});
-
-test("occasion flow placeholder shows an event-specific example after stage 5", () => {
-  const context = createDefaultScenarioContext();
-  context.activeMode = "occasion_outfit";
-
-  const placeholder = getScenarioPlaceholder(context, "en");
-
-  assert.equal(
-    placeholder,
-    "For example: an evening contemporary art exhibition in autumn, I want to look thoughtful and a little bold"
-  );
-});
-
-test("style exploration placeholder shows a diversity-aware hint after stage 6", () => {
-  const context = createDefaultScenarioContext();
-  context.activeMode = "style_exploration";
-
-  const placeholder = getScenarioPlaceholder(context, "en");
-
-  assert.equal(
-    placeholder,
-    "For example: something softer and warmer, with a different palette and silhouette"
-  );
+  assert.equal(payload.metadata?.source, "followup");
+  assert.equal(payload.requestedIntent, undefined);
 });
 
 test("composer uses follow-up mode only while a clarification is pending", () => {
   const context = createDefaultScenarioContext();
-  context.activeMode = "style_exploration";
-  context.commandName = "style_exploration";
   context.pendingClarification = false;
 
   assert.equal(getComposerMessageSource(context), "chat_input");
@@ -140,7 +60,90 @@ test("composer uses follow-up mode only while a clarification is pending", () =>
   assert.equal(getComposerMessageSource(context), "followup");
 });
 
-test("text_and_generate response adapts to text plus pending image lifecycle", () => {
+test("text response adapts CTA fields for visualization offer", () => {
+  const response: StylistMessageResponse = {
+    session_id: "session-cta-1",
+    recommendation_text: "Для выставки я бы собрал вытянутый образ с мягким верхом.",
+    prompt: "",
+    assistant_message: {
+      id: 10,
+      session_id: "session-cta-1",
+      role: "assistant",
+      locale: "ru",
+      content: "Для выставки я бы собрал вытянутый образ с мягким верхом.",
+      generation_job_id: null,
+      generation_job: null,
+      uploaded_asset: null,
+      payload: {
+        can_offer_visualization: true,
+        cta_text: "Собрать flat lay референс?",
+        visualization_type: "flat_lay_reference",
+      },
+      created_at: "2026-04-12T00:00:00Z",
+      updated_at: "2026-04-12T00:00:00Z",
+    },
+    generation_job: null,
+    timestamp: "2026-04-12T00:00:00Z",
+    decision: {
+      decision_type: "text_only",
+      active_mode: "general_advice",
+      flow_state: "ready_for_generation",
+      text_reply: "Для выставки я бы собрал вытянутый образ с мягким верхом.",
+      generation_payload: null,
+      job_id: null,
+      context_patch: {},
+      telemetry: {},
+      error_code: null,
+      visualization_offer: {
+        can_offer_visualization: true,
+        cta_text: "Собрать flat lay референс?",
+        visualization_type: "flat_lay_reference",
+      },
+      can_offer_visualization: true,
+      cta_text: "Собрать flat lay референс?",
+      visualization_type: "flat_lay_reference",
+    },
+    session_context: {
+      version: 1,
+      active_mode: "general_advice",
+      requested_intent: null,
+      flow_state: "ready_for_generation",
+      pending_clarification: null,
+      clarification_kind: null,
+      clarification_attempts: 0,
+      should_auto_generate: false,
+      anchor_garment: null,
+      occasion_context: null,
+      style_history: [],
+      last_generation_prompt: null,
+      last_generated_outfit_summary: "Для выставки я бы собрал вытянутый образ с мягким верхом.",
+      conversation_memory: [],
+      command_context: null,
+      current_style_id: null,
+      current_style_name: null,
+      current_job_id: null,
+      last_generation_request_key: null,
+      last_decision_type: "text_only",
+      generation_intent: null,
+      visualization_offer: {
+        can_offer_visualization: true,
+        cta_text: "Собрать flat lay референс?",
+        visualization_type: "flat_lay_reference",
+      },
+      updated_at: "2026-04-12T00:00:00Z",
+      updated_by_message_id: 10,
+    },
+  };
+
+  const adapted = adaptChatResponse(response);
+
+  assert.equal(adapted.decisionType, "text_only");
+  assert.equal(adapted.visualizationOffer.canOfferVisualization, true);
+  assert.equal(adapted.visualizationOffer.ctaText, "Собрать flat lay референс?");
+  assert.equal(adapted.visualizationOffer.visualizationType, "flat_lay_reference");
+});
+
+test("text_and_generate response still renders pending generation", () => {
   const response: StylistMessageResponse = {
     session_id: "session-4",
     recommendation_text: "Here is the outfit direction.",
@@ -203,7 +206,7 @@ test("text_and_generate response adapts to text plus pending image lifecycle", (
         generation_intent: {
           mode: "style_exploration",
           trigger: "style_exploration",
-          reason: "new_style_direction_selected",
+          reason: "style_exploration_quick_action",
           must_generate: true,
           job_priority: "normal",
           source_message_id: 9,
@@ -211,7 +214,12 @@ test("text_and_generate response adapts to text plus pending image lifecycle", (
       },
       job_id: "job-1",
       context_patch: {},
+      telemetry: {},
       error_code: null,
+      visualization_offer: null,
+      can_offer_visualization: false,
+      cta_text: null,
+      visualization_type: null,
     },
     session_context: {
       version: 1,
@@ -221,7 +229,7 @@ test("text_and_generate response adapts to text plus pending image lifecycle", (
       pending_clarification: null,
       clarification_kind: null,
       clarification_attempts: 0,
-      should_auto_generate: true,
+      should_auto_generate: false,
       anchor_garment: null,
       occasion_context: null,
       style_history: [],
@@ -236,15 +244,17 @@ test("text_and_generate response adapts to text plus pending image lifecycle", (
       current_style_id: "soft-retro-prep",
       current_style_name: "Soft Retro Prep",
       current_job_id: "job-1",
+      last_generation_request_key: null,
       last_decision_type: "text_and_generate",
       generation_intent: {
         mode: "style_exploration",
         trigger: "style_exploration",
-        reason: "new_style_direction_selected",
+        reason: "style_exploration_quick_action",
         must_generate: true,
         job_priority: "normal",
         source_message_id: 9,
       },
+      visualization_offer: null,
       updated_at: "2026-04-09T00:00:00Z",
       updated_by_message_id: 9,
     },
@@ -253,8 +263,5 @@ test("text_and_generate response adapts to text plus pending image lifecycle", (
   const adapted = adaptChatResponse(response);
 
   assert.equal(adapted.decisionType, "text_and_generate");
-  assert.equal(adapted.replyText, "Here is the outfit direction.");
-  assert.equal(adapted.jobId, "job-1");
-  assert.equal(adapted.generationJob?.public_id, "job-1");
   assert.equal(shouldRenderPendingGeneration(adapted), true);
 });

@@ -1,26 +1,27 @@
 import Image from "next/image";
 import { Loader } from "@mantine/core";
 
+import { GenerationStyleExplanation } from "@/entities/generation-job/ui/GenerationStyleExplanation";
 import type { GenerationJob, Locale } from "@/shared/api/types";
 
 function getStatusLabel(locale: Locale, job: GenerationJob | null, isPreparing: boolean) {
   if (isPreparing && !job) {
-    return locale === "ru" ? "Подготавливаю" : "Preparing";
+    return locale === "ru" ? "РџРѕРґРіРѕС‚Р°РІР»РёРІР°СЋ" : "Preparing";
   }
 
   switch (job?.status) {
     case "pending":
-      return locale === "ru" ? "Ожидание" : "Pending";
+      return locale === "ru" ? "РћР¶РёРґР°РЅРёРµ" : "Pending";
     case "queued":
-      return locale === "ru" ? "В очереди" : "Queued";
+      return locale === "ru" ? "Р’ РѕС‡РµСЂРµРґРё" : "Queued";
     case "running":
-      return locale === "ru" ? "Генерирую" : "Generating";
+      return locale === "ru" ? "Р“РµРЅРµСЂРёСЂСѓСЋ" : "Generating";
     case "completed":
-      return locale === "ru" ? "Готово" : "Done";
+      return locale === "ru" ? "Р“РѕС‚РѕРІРѕ" : "Done";
     case "failed":
-      return locale === "ru" ? "Ошибка" : "Failed";
+      return locale === "ru" ? "РћС€РёР±РєР°" : "Failed";
     default:
-      return locale === "ru" ? "Подготавливаю" : "Preparing";
+      return locale === "ru" ? "РџРѕРґРіРѕС‚Р°РІР»РёРІР°СЋ" : "Preparing";
   }
 }
 
@@ -51,10 +52,10 @@ export function GenerationResultCard({
   const recommendation = job ? (locale === "ru" ? job.recommendation_ru : job.recommendation_en) : null;
   const waitingText = isPreparing
     ? locale === "ru"
-      ? "Отправляю запрос на сервер и подготавливаю генерацию образа."
+      ? "РћС‚РїСЂР°РІР»СЏСЋ Р·Р°РїСЂРѕСЃ РЅР° СЃРµСЂРІРµСЂ Рё РїРѕРґРіРѕС‚Р°РІР»РёРІР°СЋ РіРµРЅРµСЂР°С†РёСЋ РѕР±СЂР°Р·Р°."
       : "Sending the request to the server and preparing the outfit generation."
     : locale === "ru"
-      ? "Изображение появится здесь, как только backend получит первый результат от генератора."
+      ? "РР·РѕР±СЂР°Р¶РµРЅРёРµ РїРѕСЏРІРёС‚СЃСЏ Р·РґРµСЃСЊ, РєР°Рє С‚РѕР»СЊРєРѕ backend РїРѕР»СѓС‡РёС‚ РїРµСЂРІС‹Р№ СЂРµР·СѓР»СЊС‚Р°С‚ РѕС‚ РіРµРЅРµСЂР°С‚РѕСЂР°."
       : "The image will appear here as soon as the backend receives the first result from the generator.";
 
   return (
@@ -63,7 +64,7 @@ export function GenerationResultCard({
       <div className="w-full max-w-[620px] border border-slate-200 bg-slate-50 p-3">
         <div className="mb-3 flex items-center justify-between gap-3">
           <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
-            {locale === "ru" ? "Генерация образа" : "Outfit generation"}
+            {locale === "ru" ? "Р“РµРЅРµСЂР°С†РёСЏ РѕР±СЂР°Р·Р°" : "Outfit generation"}
           </p>
           <p className="text-xs text-slate-500">{statusLabel}</p>
         </div>
@@ -72,7 +73,7 @@ export function GenerationResultCard({
           <div className="overflow-hidden border border-slate-200 bg-white">
             <Image
               src={job.result_url}
-              alt={locale === "ru" ? "Сгенерированный образ" : "Generated outfit"}
+              alt={locale === "ru" ? "РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ РѕР±СЂР°Р·" : "Generated outfit"}
               width={1024}
               height={1024}
               className="h-auto w-full object-cover"
@@ -89,6 +90,12 @@ export function GenerationResultCard({
           </div>
         )}
 
+        {job?.result_url ? (
+          <div className="mt-3">
+            <GenerationStyleExplanation job={job} locale={locale} />
+          </div>
+        ) : null}
+
         <div className="mt-3 h-1.5 overflow-hidden bg-slate-200">
           <div
             className="h-full bg-gradient-to-r from-[#d0a46d] to-[#8fae98] transition-all duration-500"
@@ -99,7 +106,7 @@ export function GenerationResultCard({
         <div className="mt-3 space-y-2">
           {recommendation ? (
             <p className="text-sm leading-6 text-slate-600">
-              {locale === "ru" ? "Рекомендация:" : "Recommendation:"} {recommendation}
+              {locale === "ru" ? "Р РµРєРѕРјРµРЅРґР°С†РёСЏ:" : "Recommendation:"} {recommendation}
             </p>
           ) : null}
           {job?.error_message ? <p className="text-sm leading-6 text-rose-600">{job.error_message}</p> : null}

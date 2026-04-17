@@ -1,5 +1,6 @@
 import unittest
 
+from app.application.product_behavior.services.generation_policy_service import GenerationPolicyService
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import KnowledgeResult, ReasoningOutput
 from app.application.stylist_chat.handlers.garment_matching_handler import GarmentMatchingHandler
@@ -55,19 +56,7 @@ class FakeKnowledgeProvider:
         return KnowledgeResult(items=[], source="unused", query=query)
 
 
-class FakeGenerationScheduler:
-    async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
-        return context
-
-    async def enqueue(self, request):
-        return type(
-            "ScheduleResult",
-            (),
-            {"job_id": "job-1", "status": "pending", "job": None, "blocked_by_active_job": False},
-        )()
-
-
-class GarmentHandlerPromptBuilder:
+class FakePromptBuilder:
     async def build(self, *, brief: dict[str, object]) -> dict[str, object]:
         garment_outfit_brief = brief.get("garment_outfit_brief") or {}
         return {
@@ -75,6 +64,7 @@ class GarmentHandlerPromptBuilder:
             "image_brief_en": brief.get("image_brief_en", ""),
             "recommendation_text": brief.get("recommendation_text", ""),
             "input_asset_id": brief.get("asset_id"),
+            "metadata": {"workflow_name": "garment_matching_variation"},
         }
 
 
@@ -96,12 +86,14 @@ class GarmentMatchingHandlerLogicTests(unittest.IsolatedAsyncioTestCase):
                 outfit_brief_builder=garment_brief_compiler,
                 garment_brief_compiler=garment_brief_compiler,
             ),
-            generation_scheduler=FakeGenerationScheduler(),
             reasoner=reasoner,
             fallback_reasoner=FakeFallbackReasoner(),
             knowledge_provider=FakeKnowledgeProvider(),
             reasoning_context_builder=ReasoningContextBuilder(),
-            generation_request_builder=GenerationRequestBuilder(prompt_builder=GarmentHandlerPromptBuilder()),
+            generation_request_builder=GenerationRequestBuilder(
+                prompt_builder=FakePromptBuilder(),
+                generation_policy_service=GenerationPolicyService(),
+            ),
         )
         return handler, reasoner
 
@@ -141,26 +133,85 @@ class GarmentMatchingHandlerLogicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.flow_state, FlowState.AWAITING_ANCHOR_GARMENT_CLARIFICATION)
         self.assertEqual(decision.telemetry["knowledge_provider_used"], "clarification_policy")
 
-    async def test_sufficient_followup_builds_structured_brief_and_requires_generation(self) -> None:
+    async def test_sufficient_followup_returns_text_only_with_cta(self) -> None:
         handler, reasoner = self.build_handler()
         context = ChatModeContext(active_mode=ChatMode.GARMENT_MATCHING)
         context.flow_state = FlowState.AWAITING_ANCHOR_GARMENT
 
         decision = await handler.handle(
             command=ChatCommand(
-                session_id="garment-handler-generate",
+                session_id="garment-handler-cta",
                 locale="en",
                 message="black leather jacket",
-                command_id="garment-handler-generate",
+                command_id="garment-handler-cta",
+            ),
+            context=context,
+        )
+
+        self.assertEqual(decision.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(decision.can_offer_visualization)
+        self.assertEqual(decision.cta_text, "Build a flat lay around this garment?")
+        self.assertTrue(context.anchor_garment.is_sufficient_for_generation)
+        self.assertEqual(context.flow_state, FlowState.READY_FOR_GENERATION)
+        assert reasoner.last_input is not None
+        self.assertIn("garment_outfit_brief", reasoner.last_input)
+        self.assertEqual(reasoner.last_input["garment_outfit_brief"]["brief_type"], "garment_matching")
+
+    async def test_cta_confirmation_reuses_anchor_and_generates(self) -> None:
+        handler, _ = self.build_handler()
+        context = ChatModeContext(active_mode=ChatMode.GARMENT_MATCHING)
+        context.flow_state = FlowState.AWAITING_ANCHOR_GARMENT
+
+        await handler.handle(
+            command=ChatCommand(
+                session_id="garment-handler-confirm",
+                locale="en",
+                message="black leather jacket",
+                command_id="garment-handler-confirm-1",
+            ),
+            context=context,
+        )
+
+        decision = await handler.handle(
+            command=ChatCommand(
+                session_id="garment-handler-confirm",
+                locale="en",
+                message="Confirm the visualization",
+                command_id="garment-handler-confirm-2",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
             ),
             context=context,
         )
 
         self.assertEqual(decision.decision_type, DecisionType.TEXT_AND_GENERATE)
-        assert reasoner.last_input is not None
-        self.assertIn("garment_outfit_brief", reasoner.last_input)
-        self.assertEqual(
-            reasoner.last_input["garment_outfit_brief"]["brief_type"],
-            "garment_matching",
+        self.assertFalse(decision.can_offer_visualization)
+        self.assertIsNotNone(decision.generation_payload)
+
+    async def test_explicit_visual_request_reuses_anchor_and_generates(self) -> None:
+        handler, _ = self.build_handler()
+        context = ChatModeContext(active_mode=ChatMode.GARMENT_MATCHING)
+        context.flow_state = FlowState.AWAITING_ANCHOR_GARMENT
+
+        await handler.handle(
+            command=ChatCommand(
+                session_id="garment-handler-explicit",
+                locale="en",
+                message="black leather jacket",
+                command_id="garment-handler-explicit-1",
+            ),
+            context=context,
         )
-        self.assertTrue(context.anchor_garment.is_sufficient_for_generation)
+
+        decision = await handler.handle(
+            command=ChatCommand(
+                session_id="garment-handler-explicit",
+                locale="en",
+                message="Visualize it as a flat lay",
+                command_id="garment-handler-explicit-2",
+                metadata={"source": "explicit_visual_request"},
+            ),
+            context=context,
+        )
+
+        self.assertEqual(decision.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertIsNotNone(decision.generation_payload)

@@ -7,12 +7,22 @@ from app.ingestion.styles.contracts import (
     StyleScraper,
     StyleSourceRegistryEntry,
 )
-from app.ingestion.styles.style_fetchers import MediaWikiApiFetcher, PoliteHTTPTransport
+from app.ingestion.styles.style_fetchers import MediaWikiApiFetcher, PoliteHTTPTransport, StyleFetchEventReporter
 
 
 class HTTPStyleScraper(StyleScraper):
-    def __init__(self, *, timeout_seconds: float = 30.0, session_factory: object | None = None) -> None:
-        transport = PoliteHTTPTransport(timeout_seconds=timeout_seconds, session_factory=session_factory)
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 30.0,
+        session_factory: object | None = None,
+        event_reporter: StyleFetchEventReporter | None = None,
+    ) -> None:
+        transport = PoliteHTTPTransport(
+            timeout_seconds=timeout_seconds,
+            session_factory=session_factory,
+            event_reporter=event_reporter,
+        )
         self.mediawiki_api_fetcher = MediaWikiApiFetcher(transport=transport)
 
     async def fetch_discovery_payload(self, source: StyleSourceRegistryEntry) -> object:

@@ -1,9 +1,11 @@
 from time import perf_counter
 from typing import Any
 
+from app.application.product_behavior.services.post_action_conversation_policy import PostActionConversationPolicy
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import (
     ChatContextStorePort,
+    ConversationRoutingResult,
     EventLogger,
     GenerationJobScheduler,
     MetricsRecorder,
@@ -29,6 +31,7 @@ class StylistChatOrchestrator:
         command_dispatcher: CommandDispatcher,
         mode_router: ModeRouter,
         generation_request_builder: GenerationRequestBuilder,
+        post_action_conversation_policy: PostActionConversationPolicy,
     ) -> None:
         self.context_store = context_store
         self.generation_scheduler = generation_scheduler
@@ -37,16 +40,26 @@ class StylistChatOrchestrator:
         self.command_dispatcher = command_dispatcher
         self.mode_router = mode_router
         self.generation_request_builder = generation_request_builder
+        self.post_action_conversation_policy = post_action_conversation_policy
 
     async def handle(self, *, command: ChatCommand) -> DecisionResult:
         started_at = perf_counter()
         session_state_record, context = await self.context_store.load(command.session_id)
         context = await self.generation_scheduler.sync_context(context)
+        active_mode_before = context.active_mode
         flow_state_before = context.flow_state
         clarification_kind_before = context.clarification_kind
 
-        dispatch = self.command_dispatcher.dispatch(command=command, context=context)
+        dispatch = await self.command_dispatcher.dispatch(command=command, context=context)
         context = dispatch.context
+        await self._emit_routing_event(
+            command=command,
+            routing=dispatch.routing,
+            active_mode_before=active_mode_before,
+            flow_state_before=flow_state_before,
+            active_mode_after=context.active_mode,
+            flow_state_after=context.flow_state,
+        )
         session_state_record = await self.context_store.save(
             session_id=command.session_id,
             context=context,
@@ -59,6 +72,11 @@ class StylistChatOrchestrator:
         if decision.decision_type == DecisionType.ERROR_RECOVERABLE:
             context.flow_state = FlowState.RECOVERABLE_ERROR
 
+        context.visualization_offer = decision.visualization_offer
+        context = self.post_action_conversation_policy.apply(
+            context=context,
+            decision=decision,
+        )
         context.last_decision_type = decision.decision_type.value
         context.touch(message_id=command.user_message_id)
         session_state_record = await self.context_store.save(
@@ -109,6 +127,7 @@ class StylistChatOrchestrator:
                     if decision.generation_payload is not None:
                         context.generation_intent = decision.generation_payload.generation_intent
                         context.last_generation_prompt = decision.generation_payload.prompt
+                    context.visualization_offer = None
                     context.last_generated_outfit_summary = decision.text_reply
                     context.flow_state = self._flow_state_from_generation_status(schedule_result.status)
                     decision.job_id = schedule_result.job_id
@@ -146,6 +165,22 @@ class StylistChatOrchestrator:
                 "requested_intent": command.requested_intent.value if command.requested_intent else None,
                 "active_mode": context.active_mode.value,
                 "resolved_mode": context.active_mode.value,
+                "routing_provider": dispatch.routing.provider,
+                "routing_mode": dispatch.routing.decision.mode.value,
+                "routing_confidence": dispatch.routing.decision.confidence,
+                "routing_needs_clarification": dispatch.routing.decision.needs_clarification,
+                "routing_missing_slots": list(dispatch.routing.decision.missing_slots),
+                "routing_generation_intent": dispatch.routing.decision.generation_intent,
+                "routing_continue_existing_flow": dispatch.routing.decision.continue_existing_flow,
+                "routing_should_reset_to_general": dispatch.routing.decision.should_reset_to_general,
+                "routing_reasoning_depth": dispatch.routing.decision.reasoning_depth.value,
+                "routing_used_fallback": dispatch.routing.used_fallback,
+                "routing_failure_reason": (
+                    dispatch.routing.failure_reason.value if dispatch.routing.failure_reason else None
+                ),
+                "routing_fallback_rule": dispatch.routing.fallback_rule,
+                "routing_validation_errors_count": len(dispatch.routing.validation_errors),
+                "routing_stripped_fields_count": len(dispatch.routing.stripped_fields),
                 "flow_state_before": flow_state_before.value,
                 "flow_state_after": context.flow_state.value,
                 "decision_type": decision.decision_type.value,
@@ -196,6 +231,66 @@ class StylistChatOrchestrator:
             },
         )
         return decision
+
+    async def _emit_routing_event(
+        self,
+        *,
+        command: ChatCommand,
+        routing: ConversationRoutingResult,
+        active_mode_before: ChatMode,
+        flow_state_before: FlowState,
+        active_mode_after: ChatMode,
+        flow_state_after: FlowState,
+    ) -> None:
+        routing_input_payload = routing.routing_input.model_dump(
+            mode="json",
+            exclude={"user_message", "recent_messages"},
+        )
+        routing_input_payload["recent_messages_count"] = len(routing.routing_input.recent_messages)
+        routing_context_payload = routing.routing_context.model_dump(
+            mode="json",
+            exclude={"recent_messages"},
+        )
+        routing_context_payload["recent_messages_count"] = len(routing.routing_context.recent_messages)
+
+        await self.event_logger.emit(
+            "stylist_chat_routed",
+            {
+                "session_id": command.session_id,
+                "message_id": command.user_message_id,
+                "client_message_id": command.client_message_id,
+                "command_id": command.command_id,
+                "correlation_id": command.correlation_id,
+                "requested_intent": command.requested_intent.value if command.requested_intent else None,
+                "active_mode_before": active_mode_before.value,
+                "flow_state_before": flow_state_before.value,
+                "active_mode_after": active_mode_after.value,
+                "flow_state_after": flow_state_after.value,
+                "provider": routing.provider,
+                "routing_mode": routing.decision.mode.value,
+                "confidence": routing.decision.confidence,
+                "needs_clarification": routing.decision.needs_clarification,
+                "missing_slots": list(routing.decision.missing_slots),
+                "generation_intent": routing.decision.generation_intent,
+                "continue_existing_flow": routing.decision.continue_existing_flow,
+                "should_reset_to_general": routing.decision.should_reset_to_general,
+                "reasoning_depth": routing.decision.reasoning_depth.value,
+                "requires_style_retrieval": routing.decision.requires_style_retrieval,
+                "requires_historical_layer": routing.decision.requires_historical_layer,
+                "requires_stylist_guidance": routing.decision.requires_stylist_guidance,
+                "notes": routing.decision.notes,
+                "used_fallback": routing.used_fallback,
+                "failure_reason": routing.failure_reason.value if routing.failure_reason else None,
+                "fallback_rule": routing.fallback_rule,
+                "validation_errors": list(routing.validation_errors),
+                "stripped_fields": list(routing.stripped_fields),
+                "normalized_payload": dict(routing.normalized_payload),
+                "raw_content_present": bool(routing.raw_content),
+                "raw_content_length": len(routing.raw_content or ""),
+                "routing_input": routing_input_payload,
+                "routing_context": routing_context_payload,
+            },
+        )
 
     async def _record_metrics(
         self,
@@ -325,6 +420,9 @@ class StylistChatOrchestrator:
         context: ChatModeContext,
         decision: DecisionResult,
     ):
+        if decision.generation_payload is not None and decision.generation_payload.generation_intent is not None:
+            context.generation_intent = decision.generation_payload.generation_intent
+            return decision.generation_payload.generation_intent
         intent_config = {
             ChatMode.GENERAL_ADVICE: ("general_advice", "reasoning_requested_generation", False),
             ChatMode.GARMENT_MATCHING: ("garment_matching", "anchor_garment_is_sufficient_for_generation", True),
@@ -354,6 +452,9 @@ class StylistChatOrchestrator:
             "last_decision_type": context.last_decision_type,
             "should_auto_generate": context.should_auto_generate,
             "current_job_id": context.current_job_id,
+            "can_offer_visualization": context.visualization_offer.can_offer_visualization
+            if context.visualization_offer is not None
+            else False,
         }
         if context.clarification_kind is not None:
             patch["clarification_kind"] = context.clarification_kind.value
@@ -371,6 +472,10 @@ class StylistChatOrchestrator:
             patch["last_retrieved_knowledge_refs"] = [dict(item) for item in context.last_retrieved_knowledge_refs]
         if context.last_generation_request_key:
             patch["last_generation_request_key"] = context.last_generation_request_key
+        if context.visualization_offer is not None:
+            patch["visualization_offer"] = context.visualization_offer.model_dump(mode="json", exclude_none=True)
+            patch["cta_text"] = context.visualization_offer.cta_text
+            patch["visualization_type"] = context.visualization_offer.visualization_type
         return patch
 
     def _flow_state_from_generation_status(self, status: str) -> FlowState:

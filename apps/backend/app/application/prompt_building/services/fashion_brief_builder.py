@@ -244,6 +244,9 @@ class FashionBriefBuilder:
         materials = list(brief.materials)
         garment_list = list(brief.garment_list)
         palette = list(brief.palette)
+        footwear = list(brief.footwear)
+        accessories = list(brief.accessories)
+        styling_notes = list(brief.styling_notes)
         composition_rules = list(brief.composition_rules)
         negative_constraints = list(brief.negative_constraints)
         metadata = dict(brief.metadata)
@@ -256,7 +259,24 @@ class FashionBriefBuilder:
                     metadata["style_id"] = primary_style.style_id
                 if not metadata.get("source_style_id"):
                     metadata["source_style_id"] = primary_style.style_id
-                metadata["style_catalog_summary"] = primary_style.summary
+                if self._optional_text(primary_style.summary) and not self._optional_text(metadata.get("style_catalog_summary")):
+                    metadata["style_catalog_summary"] = primary_style.summary
+                if self._optional_text(primary_style.body) and not self._optional_text(metadata.get("style_catalog_body")):
+                    metadata["style_catalog_body"] = primary_style.body
+                presentation_short = self._optional_text(primary_style.metadata.get("presentation_short_explanation"))
+                if presentation_short and not self._optional_text(metadata.get("presentation_short_explanation")):
+                    metadata["presentation_short_explanation"] = presentation_short
+                presentation_sentence = self._optional_text(
+                    primary_style.metadata.get("presentation_one_sentence_description")
+                )
+                if presentation_sentence and not self._optional_text(metadata.get("presentation_one_sentence_description")):
+                    metadata["presentation_one_sentence_description"] = presentation_sentence
+                if not metadata.get("what_makes_it_distinct") and primary_style.metadata.get("what_makes_it_distinct"):
+                    metadata["what_makes_it_distinct"] = list(primary_style.metadata.get("what_makes_it_distinct") or [])
+                for metadata_key in ("core_definition", "visual_summary", "fashion_summary"):
+                    candidate = self._optional_text(primary_style.metadata.get(metadata_key))
+                    if candidate and not self._optional_text(metadata.get(metadata_key)):
+                        metadata[metadata_key] = candidate
                 if not style_identity or style_identity in {"Style Direction", "Stylist Direction"}:
                     style_identity = primary_style.title
                 if style_family is None:
@@ -267,7 +287,71 @@ class FashionBriefBuilder:
                 for item in primary_style.metadata.get("hero_garments", []):
                     if self._optional_text(item) and item not in garment_list:
                         garment_list.append(item)
+                for item in primary_style.metadata.get("secondary_garments", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in garment_list:
+                        garment_list.append(cleaned)
+                for item in primary_style.metadata.get("statement_pieces", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in garment_list:
+                        garment_list.append(cleaned)
+                for item in primary_style.metadata.get("materials", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in materials:
+                        materials.append(cleaned)
+                for item in primary_style.metadata.get("shoes", []) or primary_style.metadata.get("footwear", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in footwear:
+                        footwear.append(cleaned)
+                for item in primary_style.metadata.get("core_accessories", []) or primary_style.metadata.get("accessories", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in accessories:
+                        accessories.append(cleaned)
+                for item in primary_style.metadata.get("core_style_logic", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in tailoring_logic:
+                        tailoring_logic.append(cleaned)
+                for item in primary_style.metadata.get("styling_rules", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in tailoring_logic:
+                        tailoring_logic.append(cleaned)
+                for item in primary_style.metadata.get("casual_adaptations", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in tailoring_logic:
+                        tailoring_logic.append(cleaned)
+                for item in primary_style.metadata.get("historical_notes", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in historical_reference:
+                        historical_reference.append(cleaned)
+                for item in primary_style.metadata.get("overlap_context", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in historical_reference:
+                        historical_reference.append(cleaned)
+                for item in primary_style.metadata.get("signature_details", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in styling_notes:
+                        styling_notes.append(cleaned)
+                for item in primary_style.metadata.get("visual_motifs", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in styling_notes:
+                        styling_notes.append(cleaned)
+                for item in primary_style.metadata.get("lighting_mood", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in composition_rules:
+                        composition_rules.append(cleaned)
+                for item in primary_style.metadata.get("photo_treatment", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in composition_rules:
+                        composition_rules.append(cleaned)
+                for item in primary_style.metadata.get("composition_cues", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in composition_rules:
+                        composition_rules.append(cleaned)
                 for item in primary_style.metadata.get("negative_constraints", []):
+                    cleaned = self._optional_text(item)
+                    if cleaned and cleaned not in negative_constraints:
+                        negative_constraints.append(cleaned)
+                for item in primary_style.metadata.get("negative_guidance", []):
                     cleaned = self._optional_text(item)
                     if cleaned and cleaned not in negative_constraints:
                         negative_constraints.append(cleaned)
@@ -303,6 +387,9 @@ class FashionBriefBuilder:
                 "garment_list": garment_list[:8],
                 "palette": palette[:6],
                 "materials": materials[:6],
+                "footwear": footwear[:5],
+                "accessories": accessories[:5],
+                "styling_notes": styling_notes[:6],
                 "composition_rules": composition_rules[:6],
                 "negative_constraints": negative_constraints[:8],
                 "metadata": metadata,

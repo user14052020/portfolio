@@ -18,7 +18,7 @@ class StateMachineTests(unittest.TestCase):
         self.assertEqual(context.flow_state, FlowState.AWAITING_ANCHOR_GARMENT)
         self.assertEqual(context.pending_clarification, "Describe the garment")
         self.assertEqual(context.clarification_kind, ClarificationKind.ANCHOR_GARMENT_DESCRIPTION)
-        self.assertTrue(context.should_auto_generate)
+        self.assertFalse(context.should_auto_generate)
 
     def test_garment_matching_consume_incomplete_anchor_requests_clarification(self) -> None:
         context = ChatModeContext()
@@ -63,7 +63,7 @@ class StateMachineTests(unittest.TestCase):
         self.assertEqual(context.flow_state, FlowState.AWAITING_OCCASION_DETAILS)
         self.assertEqual(context.pending_clarification, "Tell me about the event")
         self.assertEqual(context.clarification_kind, ClarificationKind.OCCASION_MISSING_MULTIPLE_SLOTS)
-        self.assertTrue(context.should_auto_generate)
+        self.assertFalse(context.should_auto_generate)
 
     def test_occasion_outfit_consume_incomplete_context_requests_clarification(self) -> None:
         context = ChatModeContext()

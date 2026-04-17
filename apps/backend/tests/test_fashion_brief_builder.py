@@ -2,6 +2,8 @@ import unittest
 
 from app.application.prompt_building.services.fashion_brief_builder import FashionBriefBuilder
 from app.application.prompt_building.services.fashion_reasoning_service import FashionReasoningInput
+from app.domain.knowledge.entities import KnowledgeBundle, KnowledgeCard
+from app.domain.knowledge.enums import KnowledgeType
 
 
 class FashionBriefBuilderTests(unittest.IsolatedAsyncioTestCase):
@@ -75,3 +77,57 @@ class FashionBriefBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("anchor garment centrality high", brief.composition_rules)
         self.assertIn("black", brief.palette)
         self.assertIn("jacket", brief.garment_list)
+
+    async def test_build_general_advice_brief_injects_enriched_style_metadata_from_knowledge_bundle(self) -> None:
+        builder = FashionBriefBuilder()
+        bundle = KnowledgeBundle(
+            style_cards=[
+                KnowledgeCard(
+                    id="style_catalog:soft-retro-prep",
+                    knowledge_type=KnowledgeType.STYLE_CATALOG,
+                    title="Soft Retro Prep",
+                    summary="Soft collegiate style with warmth.",
+                    style_id="soft-retro-prep",
+                    metadata={
+                        "canonical_name": "soft retro prep",
+                        "palette": ["camel", "cream"],
+                        "hero_garments": ["camel blazer"],
+                        "secondary_garments": ["pleated chinos"],
+                        "materials": ["cotton", "tweed"],
+                        "shoes": ["loafers"],
+                        "core_accessories": ["belt"],
+                        "core_style_logic": ["Blend prep structure with softer warmth."],
+                        "styling_rules": ["Keep the palette edited and relaxed."],
+                        "casual_adaptations": ["Swap stiff shirting for softer knit layers."],
+                        "historical_notes": ["References collegiate heritage."],
+                        "overlap_context": ["Sits between prep and soft retro casual."],
+                        "signature_details": ["soft blazer shoulder"],
+                        "visual_motifs": ["relaxed layering"],
+                        "lighting_mood": ["soft daylight"],
+                        "photo_treatment": ["editorial grain"],
+                        "composition_cues": ["leave breathing room between garments"],
+                        "negative_guidance": ["Avoid neon accents."],
+                    },
+                )
+            ]
+        )
+
+        brief = await builder.build(
+            reasoning_input=FashionReasoningInput(
+                mode="general_advice",
+                recommendation_text="Let's build a warm retro-prep outfit.",
+                knowledge_bundle=bundle.model_dump(mode="json"),
+            )
+        )
+
+        self.assertEqual(brief.style_identity, "Let's build a warm retro-prep outfit")
+        self.assertIn("camel", brief.palette)
+        self.assertIn("camel blazer", brief.garment_list)
+        self.assertIn("cotton", brief.materials)
+        self.assertIn("loafers", brief.footwear)
+        self.assertIn("belt", brief.accessories)
+        self.assertIn("soft blazer shoulder", brief.styling_notes)
+        self.assertIn("References collegiate heritage.", brief.historical_reference)
+        self.assertIn("Blend prep structure with softer warmth.", brief.tailoring_logic)
+        self.assertIn("leave breathing room between garments", brief.composition_rules)
+        self.assertIn("Avoid neon accents.", brief.negative_constraints)

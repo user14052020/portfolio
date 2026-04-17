@@ -2,13 +2,13 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.product_behavior.services.session_flow_state_service import SessionFlowStateService
 from app.application.stylist_chat.contracts.ports import (
     GenerationJobScheduler,
     GenerationScheduleRequest,
     GenerationScheduleResult,
 )
 from app.domain.chat_context import ChatModeContext
-from app.domain.chat_modes import FlowState
 from app.models.enums import GenerationStatus
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.schemas.generation_job import GenerationJobCreate
@@ -18,6 +18,7 @@ from app.services.generation import generation_service
 class DefaultGenerationJobScheduler(GenerationJobScheduler):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self.session_flow_state_service = SessionFlowStateService()
 
     async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
         if not context.current_job_id:
@@ -25,8 +26,10 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
         generation_job = await generation_jobs_repository.get_by_public_id(self.session, context.current_job_id)
         if generation_job is None:
             return context
-        context.flow_state = self._flow_state_from_generation_status(generation_job.status)
-        return context
+        return self.session_flow_state_service.sync_generation_status(
+            context=context,
+            generation_status=generation_job.status,
+        )
 
     async def enqueue(self, request: GenerationScheduleRequest) -> GenerationScheduleResult:
         existing_job = await generation_jobs_repository.get_latest_active_by_session(self.session, request.session_id)
@@ -81,15 +84,6 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
             status=generation_job.status.value,
             job=generation_job,
         )
-
-    def _flow_state_from_generation_status(self, status: GenerationStatus) -> FlowState:
-        if status == GenerationStatus.PENDING:
-            return FlowState.GENERATION_QUEUED
-        if status in {GenerationStatus.QUEUED, GenerationStatus.RUNNING}:
-            return FlowState.GENERATION_IN_PROGRESS
-        if status == GenerationStatus.COMPLETED:
-            return FlowState.COMPLETED
-        return FlowState.RECOVERABLE_ERROR
 
     def _coerce_int(self, value: Any) -> int | None:
         if isinstance(value, bool):

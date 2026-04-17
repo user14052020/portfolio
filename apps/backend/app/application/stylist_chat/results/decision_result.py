@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.chat_context import GenerationIntent
 from app.domain.chat_modes import ChatMode, FlowState
+from app.domain.product_behavior.entities.visualization_offer import VisualizationOffer
 
 
 class DecisionType(str, Enum):
@@ -39,9 +40,19 @@ class DecisionResult(BaseModel):
     context_patch: dict[str, Any] = Field(default_factory=dict)
     telemetry: dict[str, Any] = Field(default_factory=dict)
     error_code: str | None = None
+    visualization_offer: VisualizationOffer | None = None
+    can_offer_visualization: bool = False
+    cta_text: str | None = None
+    visualization_type: str | None = None
 
     def requires_generation(self) -> bool:
         return self.decision_type in {
             DecisionType.TEXT_AND_GENERATE,
             DecisionType.GENERATION_ONLY,
         }
+
+    def apply_visualization_offer(self, offer: VisualizationOffer | None) -> None:
+        self.visualization_offer = offer
+        self.can_offer_visualization = bool(offer and offer.can_offer_visualization)
+        self.cta_text = offer.cta_text if offer is not None else None
+        self.visualization_type = offer.visualization_type if offer is not None else None

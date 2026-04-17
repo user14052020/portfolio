@@ -9,9 +9,25 @@ class DatabaseFlatlayPatternsRepository(DerivedStyleKnowledgeRepository):
         style_cards = await self.resolve_style_cards(query=query, context_style_cards=context_style_cards)
         cards: list[KnowledgeCard] = []
         for style_card in style_cards[: max(query.limit, 4)]:
-            prompt_notes = style_card.metadata.get("image_prompt_notes") or []
-            patterns = style_card.metadata.get("patterns_textures") or []
-            body_bits = [str(item).strip() for item in [*prompt_notes[:3], *patterns[:2]] if str(item).strip()]
+            metadata = style_card.metadata or {}
+            prompt_notes = metadata.get("image_prompt_notes") or []
+            composition_cues = metadata.get("composition_cues") or []
+            visual_motifs = metadata.get("visual_motifs") or []
+            lighting_mood = metadata.get("lighting_mood") or []
+            photo_treatment = metadata.get("photo_treatment") or []
+            patterns = metadata.get("patterns_textures") or []
+            body_bits = [
+                str(item).strip()
+                for item in [
+                    *composition_cues[:3],
+                    *prompt_notes[:2],
+                    *visual_motifs[:2],
+                    *lighting_mood[:1],
+                    *photo_treatment[:1],
+                    *patterns[:2],
+                ]
+                if str(item).strip()
+            ]
             if not body_bits:
                 continue
             cards.append(
@@ -26,7 +42,12 @@ class DatabaseFlatlayPatternsRepository(DerivedStyleKnowledgeRepository):
                     source_ref=style_card.source_ref,
                     confidence=style_card.confidence,
                     freshness=style_card.freshness,
-                    metadata={"image_prompt_notes": list(prompt_notes), "style_id": style_card.style_id},
+                    metadata={
+                        "image_prompt_notes": list(prompt_notes),
+                        "composition_cues": list(composition_cues),
+                        "visual_motifs": list(visual_motifs),
+                        "style_id": style_card.style_id,
+                    },
                 )
             )
         return cards

@@ -28,6 +28,9 @@ class GenerationMetadata(BaseModel):
     palette_tags: list[str] = Field(default_factory=list)
     garments_tags: list[str] = Field(default_factory=list)
     materials_tags: list[str] = Field(default_factory=list)
+    style_explanation_short: str | None = None
+    style_explanation_supporting_text: str | None = None
+    style_explanation_distinct_points: list[str] = Field(default_factory=list)
     diversity_constraints: dict[str, Any] = Field(default_factory=dict)
     knowledge_refs: list[dict[str, Any]] = Field(default_factory=list)
 

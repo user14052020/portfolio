@@ -10,6 +10,13 @@ from app.models.style_ingest_change import StyleIngestChange
 from app.models.style_ingest_attempt import StyleIngestAttempt
 from app.models.style_ingest_job import StyleIngestJob
 from app.models.style_ingest_run import StyleIngestRun
+from app.models.style_ingestion_runtime_settings import StyleIngestionRuntimeSettings
+from app.models.style_fashion_item_facets import StyleFashionItemFacet
+from app.models.style_image_facets import StyleImageFacet
+from app.models.style_knowledge_facets import StyleKnowledgeFacet
+from app.models.style_llm_enrichments import StyleLlmEnrichment
+from app.models.style_presentation_facets import StylePresentationFacet
+from app.models.style_relation_facets import StyleRelationFacet
 from app.models.style import Style
 from app.models.style_alias import StyleAlias
 from app.models.style_direction import StyleDirection
@@ -30,6 +37,7 @@ from app.models.style_source_section import StyleSourceSection
 from app.models.style_taxonomy_link import StyleTaxonomyLink
 from app.models.style_taxonomy_node import StyleTaxonomyNode
 from app.models.style_trait import StyleTrait
+from app.models.style_visual_facets import StyleVisualFacet
 from app.models.stylist_session_state import StylistSessionState
 from app.models.stylist_style_exposure import StylistStyleExposure
 from app.models.uploaded_asset import UploadedAsset
@@ -47,7 +55,15 @@ __all__ = [
     "StyleIngestAttempt",
     "StyleIngestRun",
     "StyleIngestJob",
+    "StyleIngestionRuntimeSettings",
     "StyleIngestChange",
+    "StyleLlmEnrichment",
+    "StyleKnowledgeFacet",
+    "StyleVisualFacet",
+    "StyleFashionItemFacet",
+    "StyleImageFacet",
+    "StyleRelationFacet",
+    "StylePresentationFacet",
     "GenerationJob",
     "UploadedAsset",
     "ChatMessage",

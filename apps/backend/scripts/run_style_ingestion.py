@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TextIO
 
 from sqlalchemy import select
 
@@ -16,7 +17,9 @@ from app.db.session import SessionLocal
 from app.ingestion.styles.batch_runner import DEFAULT_BATCH_LIMIT, StyleBatchIngestionRunner
 from app.ingestion.styles.contracts import CandidateBatchSelection, DiscoveredStyleCandidate, StyleSourceRegistryEntry
 from app.ingestion.styles.job_pipeline import StyleIngestJobPipeline
+from app.ingestion.styles.runtime_settings_service import StyleIngestionRuntimeSettingsService
 from app.ingestion.styles.runner import StyleIngestionRunner
+from app.ingestion.styles.structured_logging import StructuredIngestionLogger
 from app.ingestion.styles.style_db_writer import SQLAlchemyStyleDBWriter
 from app.ingestion.styles.style_enricher import DefaultStyleEnricher
 from app.ingestion.styles.style_matcher import StyleDirectionMatcher
@@ -34,6 +37,16 @@ from app.models.style_ingest_run import StyleIngestRun
 
 
 RESUMABLE_BATCH_STATUSES = {"failed", "aborted", "completed_with_failures"}
+SOURCE_REGISTRY = AestheticsWikiSourceRegistry()
+RUNTIME_SETTINGS_SERVICE = StyleIngestionRuntimeSettingsService(registry=SOURCE_REGISTRY)
+
+
+def build_cli_ingestion_logger(*, stream: TextIO | None = None) -> StructuredIngestionLogger:
+    return StructuredIngestionLogger(mirror_stream=stream or sys.stderr)
+
+
+def build_cli_progress_reporter(*, stream: TextIO | None = None):
+    return build_cli_ingestion_logger(stream=stream).as_reporter()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,8 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--worker-idle-seconds",
         type=float,
-        default=5.0,
-        help="Sleep interval between idle polls in run-worker mode.",
+        default=None,
+        help="Optional override for sleep interval between idle polls in run-worker mode.",
     )
     parser.add_argument(
         "--worker-stop-when-idle",
@@ -124,7 +137,7 @@ def validate_args(args: argparse.Namespace) -> None:
             raise ValueError("run-worker does not support --dry-run")
         if args.worker_max_jobs is not None and args.worker_max_jobs <= 0:
             raise ValueError("--worker-max-jobs must be greater than 0")
-        if args.worker_idle_seconds <= 0:
+        if args.worker_idle_seconds is not None and args.worker_idle_seconds <= 0:
             raise ValueError("--worker-idle-seconds must be greater than 0")
 
     if args.mode == "review-list" and args.review_limit <= 0:
@@ -156,9 +169,11 @@ def validate_args(args: argparse.Namespace) -> None:
             raise ValueError("batch resume does not support --dry-run")
 
 
-def resolve_source(source_name: str) -> StyleSourceRegistryEntry:
-    registry = AestheticsWikiSourceRegistry()
-    return registry.get_source(source_name)
+async def resolve_source(source_name: str) -> StyleSourceRegistryEntry:
+    async with SessionLocal() as session:
+        resolved = await RUNTIME_SETTINGS_SERVICE.resolve_source(session, source_name=source_name)
+        await session.commit()
+    return resolved.source
 
 
 def build_candidate(args: argparse.Namespace, source: StyleSourceRegistryEntry) -> DiscoveredStyleCandidate:
@@ -263,12 +278,13 @@ def build_single_runner(*, timeout_seconds: float, writer: SQLAlchemyStyleDBWrit
 def build_batch_runner(*, timeout_seconds: float) -> StyleBatchIngestionRunner:
     scraper = HTTPStyleScraper(timeout_seconds=timeout_seconds, session_factory=SessionLocal)
     return StyleBatchIngestionRunner(
-        registry=AestheticsWikiSourceRegistry(),
+        registry=SOURCE_REGISTRY,
         scraper=scraper,
         normalizer=DefaultStyleNormalizer(),
         enricher=DefaultStyleEnricher(),
         validator=DefaultStyleValidator(),
         session_factory=SessionLocal,
+        runtime_settings_service=RUNTIME_SETTINGS_SERVICE,
     )
 
 
@@ -405,7 +421,8 @@ async def load_batch_checkpoint(run_id: int) -> tuple[StyleIngestRun, CandidateB
             raise ValueError(f"style_ingest_run {run_id} does not contain a batch checkpoint")
 
         source_name = checkpoint.get("source_name") or run.source_name
-        source = resolve_source(source_name)
+        resolved = await RUNTIME_SETTINGS_SERVICE.resolve_source(session, source_name=source_name)
+        source = resolved.source
         serialized_candidates = checkpoint.get("candidates") or []
         candidates = tuple(
             DiscoveredStyleCandidate(
@@ -447,77 +464,125 @@ async def load_batch_checkpoint(run_id: int) -> tuple[StyleIngestRun, CandidateB
 
 
 async def run_single_mode(args: argparse.Namespace) -> int:
-    source = resolve_source(args.source_name)
-    candidate = build_candidate(args, source)
-
-    if args.dry_run:
-        runner = build_single_runner(timeout_seconds=args.timeout_seconds)
-        document = await runner.process_candidate(source=source, candidate=candidate)
-        print(
-            json.dumps(
-                {
-                    "mode": "single-dry-run",
-                    "is_valid": document.is_valid,
-                    "warnings": list(document.warnings),
-                    "errors": list(document.errors),
-                    "canonical_name": document.enriched.canonical_name,
-                    "slug": document.enriched.slug,
-                    "source_url": candidate.source_url,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        return 0 if document.is_valid else 1
-
-    run_id = await create_ingest_run(source=source, source_url=candidate.source_url, run_mode="single")
+    ingestion_logger = build_cli_ingestion_logger()
+    ingestion_logger.emit(
+        "command_started",
+        {
+            "mode": "single",
+            "source_name": args.source_name,
+            "style_title": args.style_title,
+            "style_url": args.style_url,
+            "dry_run": bool(args.dry_run),
+        },
+    )
     try:
-        async with SessionLocal() as session:
-            writer = SQLAlchemyStyleDBWriter(session, run_id=run_id)
-            runner = build_single_runner(timeout_seconds=args.timeout_seconds, writer=writer)
-            document, result = await runner.process_and_persist(source=source, candidate=candidate)
-            await session.commit()
-
-        await finalize_ingest_run(
-            run_id,
-            source=source,
-            source_url=candidate.source_url,
-            run_status="completed",
-            styles_seen=1,
-            styles_matched=1,
-            styles_created=1 if result.was_style_created else 0,
-            styles_updated=1 if result.was_style_updated else 0,
-            styles_failed=0,
-        )
-        print(
-            json.dumps(
+        source = await resolve_source(args.source_name)
+        candidate = build_candidate(args, source)
+        if args.dry_run:
+            runner = build_single_runner(timeout_seconds=args.timeout_seconds)
+            document = await runner.process_candidate(source=source, candidate=candidate)
+            ingestion_logger.emit(
+                "command_finished",
                 {
-                    "mode": "single-persist",
+                    "mode": "single",
+                    "source_name": source.source_name,
+                    "dry_run": True,
+                    "is_valid": document.is_valid,
+                    "warnings_count": len(document.warnings),
+                    "errors_count": len(document.errors),
+                    "style_slug": document.enriched.slug,
+                },
+            )
+            print(
+                json.dumps(
+                    {
+                        "mode": "single-dry-run",
+                        "is_valid": document.is_valid,
+                        "warnings": list(document.warnings),
+                        "errors": list(document.errors),
+                        "canonical_name": document.enriched.canonical_name,
+                        "slug": document.enriched.slug,
+                        "source_url": candidate.source_url,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0 if document.is_valid else 1
+
+        run_id = await create_ingest_run(source=source, source_url=candidate.source_url, run_mode="single")
+        try:
+            async with SessionLocal() as session:
+                writer = SQLAlchemyStyleDBWriter(session, run_id=run_id)
+                runner = build_single_runner(timeout_seconds=args.timeout_seconds, writer=writer)
+                document, result = await runner.process_and_persist(source=source, candidate=candidate)
+                await session.commit()
+
+            await finalize_ingest_run(
+                run_id,
+                source=source,
+                source_url=candidate.source_url,
+                run_status="completed",
+                styles_seen=1,
+                styles_matched=1,
+                styles_created=1 if result.was_style_created else 0,
+                styles_updated=1 if result.was_style_updated else 0,
+                styles_failed=0,
+            )
+            ingestion_logger.emit(
+                "command_finished",
+                {
+                    "mode": "single",
+                    "source_name": source.source_name,
+                    "dry_run": False,
                     "run_id": run_id,
                     "style_id": result.style_id,
                     "style_slug": result.style_slug,
-                    "source_id": result.source_id,
-                    "warnings": list(document.warnings),
-                    "was_source_created": result.was_source_created,
-                    "was_style_created": result.was_style_created,
-                    "was_style_updated": result.was_style_updated,
+                    "created_styles_count": int(result.was_style_created),
+                    "updated_styles_count": int(result.was_style_updated),
+                    "failed_jobs_count": 0,
                 },
-                ensure_ascii=False,
-                indent=2,
             )
-        )
-        return 0
-    except Exception:
-        await finalize_ingest_run(
-            run_id,
-            source=source,
-            source_url=candidate.source_url,
-            run_status="failed",
-            styles_seen=1,
-            styles_matched=0,
-            styles_created=0,
-            styles_updated=0,
-            styles_failed=1,
+            print(
+                json.dumps(
+                    {
+                        "mode": "single-persist",
+                        "run_id": run_id,
+                        "style_id": result.style_id,
+                        "style_slug": result.style_slug,
+                        "source_id": result.source_id,
+                        "warnings": list(document.warnings),
+                        "was_source_created": result.was_source_created,
+                        "was_style_created": result.was_style_created,
+                        "was_style_updated": result.was_style_updated,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        except Exception:
+            await finalize_ingest_run(
+                run_id,
+                source=source,
+                source_url=candidate.source_url,
+                run_status="failed",
+                styles_seen=1,
+                styles_matched=0,
+                styles_created=0,
+                styles_updated=0,
+                styles_failed=1,
+            )
+            raise
+    except Exception as exc:
+        ingestion_logger.emit(
+            "command_failed",
+            {
+                "mode": "single",
+                "source_name": args.source_name,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
         )
         raise
 
@@ -533,7 +598,41 @@ async def build_selection(args: argparse.Namespace) -> CandidateBatchSelection:
 
 
 async def run_discover_mode(args: argparse.Namespace) -> int:
-    selection = await build_selection(args)
+    ingestion_logger = build_cli_ingestion_logger()
+    ingestion_logger.emit(
+        "command_started",
+        {
+            "mode": "discover",
+            "source_name": args.source_name,
+            "limit": args.limit,
+            "offset": args.offset,
+            "title_contains": args.title_contains,
+        },
+    )
+    try:
+        selection = await build_selection(args)
+    except Exception as exc:
+        ingestion_logger.emit(
+            "command_failed",
+            {
+                "mode": "discover",
+                "source_name": args.source_name,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
+        )
+        raise
+    ingestion_logger.emit(
+        "command_finished",
+        {
+            "mode": "discover",
+            "source_name": selection.source.source_name,
+            "discovered_count": selection.discovered_count,
+            "selected_count": selection.selected_count,
+            "limit": args.limit,
+            "offset": args.offset,
+        },
+    )
     print(
         json.dumps(
             {
@@ -560,12 +659,49 @@ async def run_discover_mode(args: argparse.Namespace) -> int:
 
 
 async def run_enqueue_jobs_mode(args: argparse.Namespace) -> int:
-    pipeline = StyleIngestJobPipeline(timeout_seconds=args.timeout_seconds)
-    report = await pipeline.enqueue_discovery_job(
-        source_name=args.source_name,
-        title_contains=args.title_contains,
-        offset=args.offset,
-        limit=args.limit,
+    ingestion_logger = build_cli_ingestion_logger()
+    ingestion_logger.emit(
+        "command_started",
+        {
+            "mode": "enqueue-jobs",
+            "source_name": args.source_name,
+            "limit": args.limit,
+            "offset": args.offset,
+            "title_contains": args.title_contains,
+        },
+    )
+    pipeline = StyleIngestJobPipeline(
+        timeout_seconds=args.timeout_seconds,
+        progress_reporter=ingestion_logger.as_reporter(),
+        runtime_settings_service=RUNTIME_SETTINGS_SERVICE,
+    )
+    try:
+        report = await pipeline.enqueue_discovery_job(
+            source_name=args.source_name,
+            title_contains=args.title_contains,
+            offset=args.offset,
+            limit=args.limit,
+        )
+    except Exception as exc:
+        ingestion_logger.emit(
+            "command_failed",
+            {
+                "mode": "enqueue-jobs",
+                "source_name": args.source_name,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
+        )
+        raise
+    ingestion_logger.emit(
+        "command_finished",
+        {
+            "mode": "enqueue-jobs",
+            "source_name": report.source_name,
+            "enqueued_count": report.enqueued_count,
+            "queued_job_id": report.queued_job_id,
+            "queued_job_type": report.queued_job_type,
+        },
     )
     print(
         json.dumps(
@@ -587,8 +723,49 @@ async def run_enqueue_jobs_mode(args: argparse.Namespace) -> int:
 
 
 async def run_process_next_job_mode(args: argparse.Namespace) -> int:
-    pipeline = StyleIngestJobPipeline(timeout_seconds=args.timeout_seconds)
-    stopped_reason, result = await pipeline.process_next_job_with_lease(source_name=args.source_name)
+    ingestion_logger = build_cli_ingestion_logger()
+    ingestion_logger.emit(
+        "command_started",
+        {
+            "mode": "process-next-job",
+            "source_name": args.source_name,
+        },
+    )
+    pipeline = StyleIngestJobPipeline(
+        timeout_seconds=args.timeout_seconds,
+        progress_reporter=ingestion_logger.as_reporter(),
+        runtime_settings_service=RUNTIME_SETTINGS_SERVICE,
+    )
+    try:
+        stopped_reason, result = await pipeline.process_next_job_with_lease(source_name=args.source_name)
+    except Exception as exc:
+        ingestion_logger.emit(
+            "command_failed",
+            {
+                "mode": "process-next-job",
+                "source_name": args.source_name,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
+        )
+        raise
+    ingestion_logger.emit(
+        "command_finished",
+        {
+            "mode": "process-next-job",
+            "source_name": args.source_name,
+            "stopped_reason": stopped_reason,
+            "processed_job_id": result.job_id if result is not None else None,
+            "processed_job_type": result.job_type if result is not None else None,
+            "processed_job_status": result.status if result is not None else None,
+            "failed_jobs_count": 0
+            if result is None
+            else int(result.status in {"soft_failed", "hard_failed", "cooldown_deferred", "requeued"}),
+            "created_styles_count": 0 if result is None else int(result.persist_outcome == "created"),
+            "updated_styles_count": 0 if result is None else int(result.persist_outcome == "updated"),
+            "skipped_styles_count": 0 if result is None else int(result.persist_outcome == "skipped"),
+        },
+    )
     if result is None:
         print(
             json.dumps(
@@ -631,6 +808,9 @@ async def run_process_next_job_mode(args: argparse.Namespace) -> int:
                     "selected_count": result.selected_count,
                     "enqueued_count": result.enqueued_count,
                     "reused_count": result.reused_count,
+                    "persist_outcome": result.persist_outcome,
+                    "was_style_created": result.was_style_created,
+                    "was_style_updated": result.was_style_updated,
                 },
             },
             ensure_ascii=False,
@@ -641,12 +821,58 @@ async def run_process_next_job_mode(args: argparse.Namespace) -> int:
 
 
 async def run_worker_mode(args: argparse.Namespace) -> int:
-    pipeline = StyleIngestJobPipeline(timeout_seconds=args.timeout_seconds)
-    report = await pipeline.run_worker(
-        source_name=args.source_name,
-        idle_sleep_seconds=args.worker_idle_seconds,
-        max_jobs=args.worker_max_jobs,
-        stop_when_idle=args.worker_stop_when_idle,
+    ingestion_logger = build_cli_ingestion_logger()
+    ingestion_logger.emit(
+        "command_started",
+        {
+            "mode": "run-worker",
+            "source_name": args.source_name,
+            "worker_max_jobs": args.worker_max_jobs,
+            "worker_idle_seconds": args.worker_idle_seconds,
+            "worker_stop_when_idle": bool(args.worker_stop_when_idle),
+        },
+    )
+    pipeline = StyleIngestJobPipeline(
+        timeout_seconds=args.timeout_seconds,
+        progress_reporter=ingestion_logger.as_reporter(),
+        runtime_settings_service=RUNTIME_SETTINGS_SERVICE,
+    )
+    try:
+        report = await pipeline.run_worker(
+            source_name=args.source_name,
+            idle_sleep_seconds=args.worker_idle_seconds,
+            max_jobs=args.worker_max_jobs,
+            stop_when_idle=args.worker_stop_when_idle,
+        )
+    except Exception as exc:
+        ingestion_logger.emit(
+            "command_failed",
+            {
+                "mode": "run-worker",
+                "source_name": args.source_name,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
+        )
+        raise
+    ingestion_logger.emit(
+        "command_finished",
+        {
+            "mode": "run-worker",
+            "source_name": report.source_name,
+            "processed_jobs": report.processed_jobs,
+            "failed_jobs_count": report.soft_failed_jobs + report.hard_failed_jobs + report.cooldown_deferred_jobs,
+            "succeeded_jobs": report.succeeded_jobs,
+            "requeued_jobs": report.requeued_jobs,
+            "cooldown_deferred_jobs": report.cooldown_deferred_jobs,
+            "soft_failed_jobs": report.soft_failed_jobs,
+            "hard_failed_jobs": report.hard_failed_jobs,
+            "created_styles_count": report.created_styles_count,
+            "updated_styles_count": report.updated_styles_count,
+            "skipped_styles_count": report.skipped_styles_count,
+            "idle_polls": report.idle_polls,
+            "stopped_reason": report.stopped_reason,
+        },
     )
     print(
         json.dumps(
@@ -659,6 +885,10 @@ async def run_worker_mode(args: argparse.Namespace) -> int:
                 "cooldown_deferred_jobs": report.cooldown_deferred_jobs,
                 "soft_failed_jobs": report.soft_failed_jobs,
                 "hard_failed_jobs": report.hard_failed_jobs,
+                "failed_jobs_count": report.soft_failed_jobs + report.hard_failed_jobs + report.cooldown_deferred_jobs,
+                "created_styles_count": report.created_styles_count,
+                "updated_styles_count": report.updated_styles_count,
+                "skipped_styles_count": report.skipped_styles_count,
                 "idle_polls": report.idle_polls,
                 "stopped_reason": report.stopped_reason,
                 "last_job_id": report.last_job_id,
@@ -673,8 +903,47 @@ async def run_worker_mode(args: argparse.Namespace) -> int:
 
 
 async def run_batch_mode(args: argparse.Namespace) -> int:
+    ingestion_logger = build_cli_ingestion_logger()
+    ingestion_logger.emit(
+        "command_started",
+        {
+            "mode": "batch",
+            "source_name": args.source_name,
+            "limit": args.limit,
+            "offset": args.offset,
+            "title_contains": args.title_contains,
+            "dry_run": bool(args.dry_run),
+            "resume_run_id": args.resume_run_id,
+        },
+    )
     if args.dry_run:
-        selection = await build_selection(args)
+        try:
+            selection = await build_selection(args)
+        except Exception as exc:
+            ingestion_logger.emit(
+                "command_failed",
+                {
+                    "mode": "batch",
+                    "source_name": args.source_name,
+                    "error_class": exc.__class__.__name__,
+                    "error_message": str(exc),
+                },
+            )
+            raise
+        ingestion_logger.emit(
+            "command_finished",
+            {
+                "mode": "batch",
+                "source_name": selection.source.source_name,
+                "dry_run": True,
+                "discovered_count": selection.discovered_count,
+                "selected_count": selection.selected_count,
+                "processed_count": 0,
+                "created_styles_count": 0,
+                "updated_styles_count": 0,
+                "failed_jobs_count": 0,
+            },
+        )
         print(
             json.dumps(
                 {
@@ -699,28 +968,40 @@ async def run_batch_mode(args: argparse.Namespace) -> int:
         )
         return 0
 
-    resumed_from_index = 0
-    if args.resume_run_id is not None:
-        run, selection, resumed_from_index, counters = await load_batch_checkpoint(args.resume_run_id)
-        run_id = run.id
-        source = selection.source
-        await ensure_no_other_active_batch_runs(source_name=source.source_name, current_run_id=run_id)
-    else:
-        selection = await build_selection(args)
-        await ensure_no_other_active_batch_runs(source_name=selection.source.source_name)
-        run_id = await create_ingest_run(
-            source=selection.source,
-            source_url=selection.source.index_url,
-            run_mode="batch",
+    try:
+        resumed_from_index = 0
+        if args.resume_run_id is not None:
+            run, selection, resumed_from_index, counters = await load_batch_checkpoint(args.resume_run_id)
+            run_id = run.id
+            source = selection.source
+            await ensure_no_other_active_batch_runs(source_name=source.source_name, current_run_id=run_id)
+        else:
+            selection = await build_selection(args)
+            await ensure_no_other_active_batch_runs(source_name=selection.source.source_name)
+            run_id = await create_ingest_run(
+                source=selection.source,
+                source_url=selection.source.index_url,
+                run_mode="batch",
+            )
+            await initialize_batch_checkpoint(run_id, selection)
+            counters = {
+                "processed_count": 0,
+                "created_count": 0,
+                "updated_count": 0,
+                "failed_count": 0,
+            }
+            source = selection.source
+    except Exception as exc:
+        ingestion_logger.emit(
+            "command_failed",
+            {
+                "mode": "batch",
+                "source_name": args.source_name,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
         )
-        await initialize_batch_checkpoint(run_id, selection)
-        counters = {
-            "processed_count": 0,
-            "created_count": 0,
-            "updated_count": 0,
-            "failed_count": 0,
-        }
-        source = selection.source
+        raise
 
     try:
         batch_runner = build_batch_runner(timeout_seconds=args.timeout_seconds)
@@ -745,6 +1026,22 @@ async def run_batch_mode(args: argparse.Namespace) -> int:
             styles_created=report.created_count,
             styles_updated=report.updated_count,
             styles_failed=report.failed_count,
+        )
+        ingestion_logger.emit(
+            "command_finished",
+            {
+                "mode": "batch",
+                "source_name": report.source_name,
+                "dry_run": False,
+                "run_id": run_id,
+                "discovered_count": report.discovered_count,
+                "selected_count": report.selected_count,
+                "processed_count": report.processed_count,
+                "created_styles_count": report.created_count,
+                "updated_styles_count": report.updated_count,
+                "failed_jobs_count": report.failed_count,
+                "resumed_from_index": resumed_from_index,
+            },
         )
         print(
             json.dumps(
@@ -790,6 +1087,15 @@ async def run_batch_mode(args: argparse.Namespace) -> int:
             styles_created=checkpoint_counters.get("created_count", 0),
             styles_updated=checkpoint_counters.get("updated_count", 0),
             styles_failed=max(checkpoint_counters.get("failed_count", 0), 1),
+        )
+        ingestion_logger.emit(
+            "command_failed",
+            {
+                "mode": "batch",
+                "source_name": args.source_name,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
         )
         raise
 

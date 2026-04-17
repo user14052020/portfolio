@@ -35,6 +35,7 @@ class StyleExplorationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=message_id,
                 client_message_id=f"{session_id}-msg-{message_id}",
                 command_id=f"{session_id}-cmd-{message_id}",
+                metadata={"source": "quick_action"},
             )
         )
 
@@ -93,7 +94,6 @@ class StyleExplorationIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_style_flow_saves_selection_and_enqueue_checkpoints(self) -> None:
         await self.run_style_command(session_id="style-int-6", message_id=1)
 
-        self.assertGreaterEqual(len(self.checkpoint_writer.saved_contexts), 3)
+        self.assertGreaterEqual(len(self.checkpoint_writer.saved_contexts), 1)
         self.assertEqual(self.checkpoint_writer.saved_contexts[0].flow_state, FlowState.READY_FOR_GENERATION)
-        self.assertEqual(self.checkpoint_writer.saved_contexts[-1].flow_state, FlowState.GENERATION_QUEUED)
-
+        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)

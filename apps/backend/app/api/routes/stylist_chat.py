@@ -28,6 +28,7 @@ from app.schemas.stylist import (
     PromptPipelinePreviewResponse,
     StylistMessageRequest,
     StylistMessageResponse,
+    StylistVisualizationRequest,
 )
 from app.services.stylist_conversational import stylist_service
 
@@ -41,6 +42,16 @@ async def send_stylist_message(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> StylistMessageResponse:
     result = await stylist_service.process_message(session, payload)
+    await session.commit()
+    return StylistMessageResponse.model_validate(result)
+
+
+@router.post("/visualize", response_model=StylistMessageResponse)
+async def request_stylist_visualization(
+    payload: StylistVisualizationRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> StylistMessageResponse:
+    result = await stylist_service.request_visualization(session, payload)
     await session.commit()
     return StylistMessageResponse.model_validate(result)
 

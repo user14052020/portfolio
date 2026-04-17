@@ -5,26 +5,20 @@ import { IconArrowUp } from "@tabler/icons-react";
 import { useLayoutEffect, useRef } from "react";
 
 import { UploadArea } from "@/features/chat/ui/UploadArea";
-import { getScenarioPlaceholder } from "@/processes/stylist-chat/lib";
+import { GenerationStatusRail } from "@/features/chat/ui/GenerationStatusRail";
+import { getQuickActionDefinitions } from "@/features/run-chat-command/model/runChatCommand";
+import { getScenarioPlaceholder } from "@/processes/stylist-chat/model/lib";
 import { useStylistChatProcess } from "@/processes/stylist-chat/model/useStylistChatProcess";
 import type { SiteSettings } from "@/shared/api/types";
 import { useI18n } from "@/shared/i18n/I18nProvider";
 import { ChatThread } from "@/widgets/chat-thread/ui/ChatThread";
-import { GarmentGenerationStatus } from "@/widgets/garment-generation-status/ui/GarmentGenerationStatus";
-import { GarmentMatchingEntry } from "@/widgets/garment-matching-entry/ui/GarmentMatchingEntry";
-import { GarmentMatchingFollowup } from "@/widgets/garment-matching-followup/ui/GarmentMatchingFollowup";
-import { OccasionEntry } from "@/widgets/occasion-entry/ui/OccasionEntry";
-import { OccasionFollowup } from "@/widgets/occasion-followup/ui/OccasionFollowup";
-import { OccasionGenerationStatus } from "@/widgets/occasion-generation-status/ui/OccasionGenerationStatus";
-import { StyleExplorationEntry } from "@/widgets/style-exploration-entry/ui/StyleExplorationEntry";
-import { StyleGenerationStatus } from "@/widgets/style-generation-status/ui/StyleGenerationStatus";
 
 const RU_ASSISTANT_FALLBACK = "Валентин";
 const RU_ONLINE = "онлайн";
 const RU_GENERATING = "генерация";
 const RU_OFFLINE = "офлайн";
 const RU_CHAT_SUBTITLE =
-  "Тонкий UI сценарного стилиста: команда, follow-up и генерация управляются backend-контекстом.";
+  "Text-first стилист: визуализация запускается только по кнопке, явному запросу или подтверждённому CTA.";
 const TOP_HISTORY_LOAD_THRESHOLD_PX = 48;
 
 function isGenerationActive(status: string | undefined) {
@@ -57,6 +51,7 @@ function getStatusBadge(locale: "ru" | "en", availability: "online" | "offline",
 export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
   const { locale } = useI18n();
   const chat = useStylistChatProcess(locale);
+  const quickActions = getQuickActionDefinitions(locale);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const prependScrollStateRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
@@ -67,26 +62,16 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
   const assistantName =
     (locale === "ru" ? settings.assistant_name_ru : settings.assistant_name_en) ||
     (locale === "ru" ? RU_ASSISTANT_FALLBACK : "Jose");
-  const assistantLabel = assistantName;
   const chatSubtitle =
     locale === "ru"
       ? RU_CHAT_SUBTITLE
-      : "Thin UI for a scenario-driven stylist: commands, follow-ups, and generation are all backend-driven.";
+      : "Text-first stylist: generation only starts from the style button, an explicit visual request, or a confirmed CTA.";
   const chatWelcome =
     locale === "ru"
-      ? "Начните с quick action или отправьте обычное сообщение. Frontend не угадывает сценарий сам: он только передаёт команду, сообщение и прикреплённый asset."
-      : "Start with a quick action or send a regular message. The frontend does not guess the scenario: it only passes the command, the message, and the attached asset.";
+      ? "Начните с кнопки «Попробовать другой стиль» или просто опишите вещь, событие или вопрос по стилю. Если визуализация уместна, я предложу её отдельной CTA-кнопкой."
+      : "Start with “Try another style” or just describe the garment, occasion, or styling question. If visualization makes sense, I will offer it as a separate CTA.";
   const chatPlaceholder = getScenarioPlaceholder(chat.scenarioContext, locale);
   const statusBadge = getStatusBadge(locale, chat.chatAvailability, isGenerationActive(chat.activeJob?.status));
-  const scenarioLabel =
-    chat.scenarioContext.commandName ??
-    (chat.scenarioContext.activeMode === "general_advice" ? null : chat.scenarioContext.activeMode);
-  const isStyleScenario =
-    chat.scenarioContext.activeMode === "style_exploration" ||
-    chat.scenarioContext.commandName === "style_exploration";
-  const isOccasionScenario =
-    chat.scenarioContext.activeMode === "occasion_outfit" ||
-    chat.scenarioContext.commandName === "occasion_outfit";
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -161,7 +146,7 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
           <ChatThread
             messages={chat.messages}
             locale={locale}
-            assistantLabel={assistantLabel}
+            assistantLabel={assistantName}
             welcomeText={chatWelcome}
             errorMessage={chat.errorMessage}
             isLoadingOlderHistory={chat.isLoadingOlderHistory}
@@ -170,80 +155,44 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
         </div>
 
         <div className="border-t border-slate-200 px-4 py-4">
-          {isOccasionScenario ? (
-            <OccasionGenerationStatus
-              job={chat.activeJob}
-              locale={locale}
-              isRefreshing={chat.isRefreshingQueue}
-              queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
-              onRefresh={() => void chat.refreshGenerationStatus()}
-            />
-          ) : isStyleScenario ? (
-            <StyleGenerationStatus
-              job={chat.activeJob}
-              locale={locale}
-              currentStyleName={chat.scenarioContext.currentStyleName}
-              styleHistorySize={chat.scenarioContext.styleHistory.length}
-              isRefreshing={chat.isRefreshingQueue}
-              queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
-              onRefresh={() => void chat.refreshGenerationStatus()}
-            />
-          ) : (
-            <GarmentGenerationStatus
-              job={chat.activeJob}
-              locale={locale}
-              isRefreshing={chat.isRefreshingQueue}
-              queueRefreshRemainingSeconds={chat.queueRefreshRemainingSeconds}
-              onRefresh={() => void chat.refreshGenerationStatus()}
-            />
-          )}
+          <GenerationStatusRail
+            job={chat.activeJob}
+            locale={locale}
+            isPreparing={chat.isSending && !chat.activeJob}
+          />
 
           <div className="mb-3 space-y-3">
-            {isOccasionScenario ? (
-              <OccasionEntry
-                locale={locale}
-                disabled={chat.isGenerationActionLocked}
-                activeCommandName={chat.scenarioContext.commandName}
-                onAction={(actionId) => void chat.runQuickAction(actionId)}
-              />
-            ) : isStyleScenario ? (
-              <StyleExplorationEntry
-                locale={locale}
-                disabled={chat.isGenerationActionLocked}
-                activeCommandName={chat.scenarioContext.commandName}
-                onAction={(actionId) => void chat.runQuickAction(actionId)}
-              />
-            ) : (
-              <GarmentMatchingEntry
-                locale={locale}
-                disabled={chat.isGenerationActionLocked}
-                activeCommandName={chat.scenarioContext.commandName}
-                onAction={(actionId) => void chat.runQuickAction(actionId)}
-              />
-            )}
+            <div className="flex flex-wrap gap-2">
+              {quickActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  onClick={() => void chat.runQuickAction(action.id)}
+                  disabled={chat.isGenerationActionLocked}
+                  className="border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-900 hover:text-slate-900 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
 
-            {chat.scenarioContext.pendingClarificationText &&
-            chat.scenarioContext.activeMode === "garment_matching" ? (
-              <GarmentMatchingFollowup
-                locale={locale}
-                pendingClarificationText={chat.scenarioContext.pendingClarificationText}
-              />
-            ) : chat.scenarioContext.pendingClarificationText &&
-              chat.scenarioContext.activeMode === "occasion_outfit" ? (
-              <OccasionFollowup
-                locale={locale}
-                pendingClarificationText={chat.scenarioContext.pendingClarificationText}
-              />
-            ) : scenarioLabel || chat.scenarioContext.pendingClarification ? (
+            {chat.canRequestVisualization ? (
+              <button
+                type="button"
+                onClick={() => void chat.requestVisualization()}
+                disabled={!chat.canRequestVisualization}
+                className="w-full border border-[#d0a46d] bg-[#fff7ec] px-4 py-3 text-left text-sm font-medium text-slate-800 transition hover:border-slate-900 hover:bg-[#fff1d9] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                {chat.visualizationOffer.ctaText ?? (locale === "ru" ? "Собрать flat lay референс?" : "Build a flat lay reference?")}
+              </button>
+            ) : null}
+
+            {chat.scenarioContext.pendingClarificationText ? (
               <div className="border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                {scenarioLabel ? (
-                  <p className="font-medium">
-                    {locale === "ru" ? "Активный сценарий" : "Active scenario"}: {scenarioLabel}
-                  </p>
-                ) : null}
-                {chat.scenarioContext.pendingClarificationText ? (
-                  <p className="mt-1 leading-6">{chat.scenarioContext.pendingClarificationText}</p>
-                ) : null}
+                <p className="font-medium">
+                  {locale === "ru" ? "Нужно уточнение" : "Need a follow-up"}
+                </p>
+                <p className="mt-1 leading-6">{chat.scenarioContext.pendingClarificationText}</p>
               </div>
             ) : null}
 

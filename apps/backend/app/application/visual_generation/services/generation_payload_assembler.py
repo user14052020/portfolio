@@ -14,6 +14,24 @@ class GenerationPayloadAssembler:
         workflow_selection: WorkflowSelection,
     ) -> tuple[VisualGenerationPlan, GenerationMetadata]:
         metadata = dict(fashion_brief.metadata)
+        style_explanation_short = self._optional_text(
+            metadata.get("presentation_short_explanation")
+            or metadata.get("core_definition")
+            or metadata.get("visual_summary")
+            or metadata.get("fashion_summary")
+            or metadata.get("style_catalog_summary")
+        )
+        style_explanation_supporting_text = self._optional_text(
+            metadata.get("presentation_one_sentence_description")
+            or metadata.get("style_catalog_body")
+            or metadata.get("style_catalog_summary")
+            or metadata.get("core_definition")
+            or metadata.get("visual_summary")
+            or metadata.get("fashion_summary")
+        )
+        if style_explanation_supporting_text == style_explanation_short:
+            style_explanation_supporting_text = None
+        style_explanation_distinct_points = self._string_list(metadata.get("what_makes_it_distinct"))[:3]
         plan = VisualGenerationPlan(
             mode=fashion_brief.brief_mode,
             style_id=metadata.get("style_id"),
@@ -75,8 +93,23 @@ class GenerationPayloadAssembler:
             palette_tags=list(plan.palette_tags),
             garments_tags=list(plan.garments_tags),
             materials_tags=list(plan.materials_tags),
+            style_explanation_short=style_explanation_short,
+            style_explanation_supporting_text=style_explanation_supporting_text,
+            style_explanation_distinct_points=style_explanation_distinct_points,
             diversity_constraints=dict(plan.diversity_profile),
             knowledge_refs=list(plan.knowledge_refs),
         )
         return plan, generation_metadata
 
+    def _optional_text(self, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        cleaned = value.strip()
+        return cleaned or None
+
+    def _string_list(self, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]

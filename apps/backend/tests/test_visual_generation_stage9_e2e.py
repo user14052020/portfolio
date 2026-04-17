@@ -43,6 +43,18 @@ class VisualGenerationStage9E2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+        self.assertTrue(response.can_offer_visualization)
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage9-garment-1",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                command_id="stage9-garment-1-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
         self.assertEqual(response.job_id, "job-1")
         request = self.scheduler.enqueued[-1]
         self.assertEqual(request.workflow_name, "garment_matching_variation")
@@ -61,6 +73,7 @@ class VisualGenerationStage9E2ETests(unittest.IsolatedAsyncioTestCase):
                 command_name="style_exploration",
                 command_step="start",
                 user_message_id=1,
+                metadata={"source": "quick_action"},
             )
         )
         self.assertEqual(first.job_id, "job-1")
@@ -78,6 +91,7 @@ class VisualGenerationStage9E2ETests(unittest.IsolatedAsyncioTestCase):
                 command_step="start",
                 user_message_id=2,
                 command_id="stage9-style-1-second",
+                metadata={"source": "quick_action"},
             )
         )
         self.assertEqual(second.job_id, "job-2")
@@ -119,6 +133,18 @@ class VisualGenerationStage9E2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+        self.assertTrue(response.can_offer_visualization)
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage9-occasion-1",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                command_id="stage9-occasion-1-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
         self.assertEqual(response.job_id, "job-1")
         request = self.scheduler.enqueued[-1]
         self.assertEqual(request.workflow_name, "occasion_outfit_variation")
@@ -137,6 +163,7 @@ class VisualGenerationStage9E2ETests(unittest.IsolatedAsyncioTestCase):
                 command_name="style_exploration",
                 command_step="start",
                 user_message_id=1,
+                metadata={"source": "quick_action"},
             )
         )
 
@@ -159,6 +186,7 @@ class VisualGenerationStage9E2ETests(unittest.IsolatedAsyncioTestCase):
                 command_name="style_exploration",
                 command_step="start",
                 user_message_id=1,
+                metadata={"source": "quick_action"},
             )
         )
 

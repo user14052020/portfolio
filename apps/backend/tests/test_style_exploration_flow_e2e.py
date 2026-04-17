@@ -35,6 +35,7 @@ class StyleExplorationFlowE2ETests(unittest.IsolatedAsyncioTestCase):
                 user_message_id=message_id,
                 client_message_id=f"{session_id}-msg-{message_id}",
                 command_id=f"{session_id}-cmd-{message_id}",
+                metadata={"source": "quick_action"},
             )
         )
 

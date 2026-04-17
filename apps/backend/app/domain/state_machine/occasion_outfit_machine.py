@@ -7,7 +7,7 @@ class OccasionOutfitStateMachine:
     def enter(context: ChatModeContext, *, prompt_text: str) -> ChatModeContext:
         context.active_mode = ChatMode.OCCASION_OUTFIT
         context.flow_state = FlowState.AWAITING_OCCASION_DETAILS
-        context.should_auto_generate = True
+        context.should_auto_generate = False
         context.pending_clarification = prompt_text
         context.clarification_kind = ClarificationKind.OCCASION_MISSING_MULTIPLE_SLOTS
         context.clarification_attempts = 0

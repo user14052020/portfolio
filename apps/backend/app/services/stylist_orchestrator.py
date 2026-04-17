@@ -1,5 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.product_behavior.services.conversation_state_policy import ConversationStatePolicy
+from app.application.product_behavior.services.generation_policy_service import GenerationPolicyService
+from app.application.product_behavior.services.post_action_conversation_policy import PostActionConversationPolicy
 from app.application.knowledge.services.knowledge_bundle_builder import KnowledgeBundleBuilder
 from app.application.knowledge.services.knowledge_ranker import KnowledgeRanker
 from app.application.knowledge.services.knowledge_retrieval_service import DefaultKnowledgeRetrievalService
@@ -15,7 +18,9 @@ from app.application.stylist_chat.orchestrator.mode_router import ModeRouter
 from app.application.stylist_chat.orchestrator.stylist_chat_orchestrator import StylistChatOrchestrator
 from app.application.stylist_chat.services.candidate_style_selector import CandidateStyleSelector
 from app.application.stylist_chat.services.clarification_message_builder import ClarificationMessageBuilder
+from app.application.stylist_chat.services.conversation_router import ConversationRouter
 from app.application.stylist_chat.services.diversity_constraints_builder import DiversityConstraintsBuilder
+from app.application.stylist_chat.services.fallback_router_policy import FallbackRouterPolicy
 from app.application.stylist_chat.services.fallback_reasoner import DeterministicFallbackReasoner
 from app.application.stylist_chat.services.garment_brief_compiler import GarmentBriefCompiler
 from app.application.stylist_chat.services.garment_clarification_service import GarmentClarificationService
@@ -25,6 +30,8 @@ from app.application.stylist_chat.services.occasion_brief_compiler import Occasi
 from app.application.stylist_chat.services.occasion_clarification_service import OccasionClarificationService
 from app.application.stylist_chat.services.occasion_context_builder import OccasionContextBuilder
 from app.application.stylist_chat.services.reasoning_context_builder import ReasoningContextBuilder
+from app.application.stylist_chat.services.routing_context_builder import RoutingContextBuilder
+from app.application.stylist_chat.services.routing_decision_validator import RoutingDecisionValidator
 from app.application.stylist_chat.services.semantic_diversity_service import SemanticDiversityService
 from app.application.stylist_chat.services.style_exploration_context_builder import StyleExplorationContextBuilder
 from app.application.stylist_chat.services.style_history_service import StyleHistoryService
@@ -62,6 +69,7 @@ from app.infrastructure.llm.llm_garment_extractor import LLMGarmentExtractorAdap
 from app.infrastructure.llm.llm_garment_reasoner import LLMGarmentReasonerAdapter
 from app.infrastructure.llm.llm_occasion_extractor import LLMOccasionExtractorAdapter
 from app.infrastructure.llm.llm_occasion_reasoner import LLMOccasionReasonerAdapter
+from app.infrastructure.llm.vllm_router_client import VllmRouterClient
 from app.infrastructure.llm.vllm_reasoner import VLLMReasonerAdapter
 from app.infrastructure.observability.structured_event_logger import StructuredEventLogger
 from app.infrastructure.observability.structured_metrics_recorder import StructuredMetricsRecorder
@@ -70,14 +78,16 @@ from app.infrastructure.persistence.style_history_provider import DatabaseStyleH
 from app.infrastructure.persistence.stylist_chat_context_store import SessionChatContextStore
 from app.infrastructure.queue.generation_job_scheduler import DefaultGenerationJobScheduler
 from app.infrastructure.search.static_knowledge_provider import StaticKnowledgeProvider
-from app.services.chat_mode_resolver import chat_mode_resolver
 
 
 def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchestrator:
     clarification_builder = ClarificationMessageBuilder()
     reasoning_context_builder = ReasoningContextBuilder()
     diversity_constraints_builder = DiversityConstraintsBuilder()
-    generation_request_builder = GenerationRequestBuilder()
+    generation_policy_service = GenerationPolicyService()
+    generation_request_builder = GenerationRequestBuilder(
+        generation_policy_service=generation_policy_service,
+    )
     garment_matching_context_builder = GarmentMatchingContextBuilder()
     garment_brief_compiler = GarmentBriefCompiler()
     occasion_context_builder = OccasionContextBuilder()
@@ -92,7 +102,17 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
 
     context_store = SessionChatContextStore(session)
     context_checkpoint_writer = SessionContextCheckpointWriter(context_store)
-    mode_resolver = chat_mode_resolver
+    routing_context_builder = RoutingContextBuilder()
+    fallback_router_policy = FallbackRouterPolicy()
+    routing_decision_validator = RoutingDecisionValidator(
+        fallback_policy=fallback_router_policy,
+    )
+    conversation_router = ConversationRouter(
+        router_client=VllmRouterClient(),
+        routing_context_builder=routing_context_builder,
+        decision_validator=routing_decision_validator,
+        fallback_policy=fallback_router_policy,
+    )
     reasoner = VLLMReasonerAdapter()
     garment_reasoner = LLMGarmentReasonerAdapter()
     occasion_reasoner = LLMOccasionReasonerAdapter()
@@ -135,6 +155,8 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
     generation_scheduler = DefaultGenerationJobScheduler(session)
     event_logger = StructuredEventLogger()
     metrics_recorder = StructuredMetricsRecorder()
+    conversation_state_policy = ConversationStatePolicy()
+    post_action_conversation_policy = PostActionConversationPolicy()
     start_garment_matching = StartGarmentMatchingUseCase(clarification_builder)
     start_occasion_outfit = StartOccasionOutfitUseCase(clarification_builder)
     continue_garment_matching = ContinueGarmentMatchingUseCase(
@@ -209,14 +231,12 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
             start_use_case=start_garment_matching,
             continue_use_case=continue_garment_matching,
             build_outfit_brief_use_case=build_garment_outfit_brief,
-            generation_scheduler=generation_scheduler,
             **garment_handler_kwargs,
         ),
         ChatMode.OCCASION_OUTFIT: OccasionOutfitHandler(
             start_use_case=start_occasion_outfit,
             continue_use_case=continue_occasion_outfit,
             build_outfit_brief_use_case=build_occasion_outfit_brief,
-            generation_scheduler=generation_scheduler,
             context_checkpoint_writer=context_checkpoint_writer,
             **occasion_handler_kwargs,
         ),
@@ -228,7 +248,6 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
             persist_style_direction_use_case=persist_style_direction,
             style_history_service=style_history_service,
             style_history_provider=style_history_provider,
-            generation_scheduler=generation_scheduler,
             context_checkpoint_writer=context_checkpoint_writer,
             **shared_handler_kwargs,
         ),
@@ -239,9 +258,13 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
         generation_scheduler=generation_scheduler,
         event_logger=event_logger,
         metrics_recorder=metrics_recorder,
-        command_dispatcher=CommandDispatcher(mode_resolver=mode_resolver),
+        command_dispatcher=CommandDispatcher(
+            conversation_router=conversation_router,
+            conversation_state_policy=conversation_state_policy,
+        ),
         mode_router=ModeRouter(handlers=handlers),
         generation_request_builder=generation_request_builder,
+        post_action_conversation_policy=post_action_conversation_policy,
     )
 
 

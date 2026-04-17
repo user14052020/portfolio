@@ -33,8 +33,6 @@ KNOWN_NON_STYLE_TITLES = {
 
 AESTHETICS_WIKI_API_CRAWL_POLICY = SourceCrawlPolicy(
     user_agent="PortfolioStyleIngestionBot/1.0 (+contact: internal-admin)",
-    respect_robots_txt=False,
-    robots_txt_url=None,
     min_delay_seconds=20.0,
     max_delay_seconds=40.0,
     jitter_ratio=0.3,
@@ -43,6 +41,7 @@ AESTHETICS_WIKI_API_CRAWL_POLICY = SourceCrawlPolicy(
     blocked_after_consecutive_empty=3,
     max_retries=3,
     retry_backoff_seconds=30.0,
+    retry_backoff_jitter_seconds=1.0,
     max_concurrency=1,
 )
 

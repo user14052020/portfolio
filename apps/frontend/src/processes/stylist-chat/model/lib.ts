@@ -1,8 +1,10 @@
 import type { ChatResponse } from "@/entities/chat-session/model/types";
 import type { ThreadMessage } from "@/entities/chat-message/model/types";
+import type { PresentationProfile } from "@/entities/profile/model/types";
 import { adaptFrontendScenarioContext } from "@/entities/stylist-context/model/adapters";
 import type { FrontendScenarioContext } from "@/entities/stylist-context/model/types";
 import type { GenerationJobState } from "@/entities/generation-job/model/types";
+import type { VisualizationOfferState } from "@/entities/visualization-offer/model/types";
 import type { ChatModeContext, Locale, UploadedAsset } from "@/shared/api/types";
 
 const SESSION_STORAGE_KEY = "portfolio-chat-session";
@@ -14,6 +16,11 @@ export type PersistedStylistChatUiState = {
   messages: ThreadMessage[];
   uploadedAsset: UploadedAsset | null;
   activeJob: GenerationJobState | null;
+  visualizationOffer: VisualizationOfferState;
+  lastUserActionType: string | null;
+  lastVisualCtaShown: string | null;
+  lastVisualCtaConfirmed: string | null;
+  presentationProfile: PresentationProfile;
 };
 
 function createUuidFallback() {
@@ -80,6 +87,16 @@ export function readPersistedStylistChatUiState(sessionId: string): PersistedSty
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
       uploadedAsset: parsed.uploadedAsset ?? null,
       activeJob: parsed.activeJob ?? null,
+      visualizationOffer: parsed.visualizationOffer ?? {
+        canOfferVisualization: false,
+        ctaText: null,
+        visualizationType: null,
+      },
+      lastUserActionType: typeof parsed.lastUserActionType === "string" ? parsed.lastUserActionType : null,
+      lastVisualCtaShown: typeof parsed.lastVisualCtaShown === "string" ? parsed.lastVisualCtaShown : null,
+      lastVisualCtaConfirmed:
+        typeof parsed.lastVisualCtaConfirmed === "string" ? parsed.lastVisualCtaConfirmed : null,
+      presentationProfile: parsed.presentationProfile ?? {},
     };
   } catch {
     return null;
@@ -110,6 +127,7 @@ export function createDefaultScenarioContext(): FrontendScenarioContext {
     should_auto_generate: false,
     style_history: [],
     conversation_memory: [],
+    visualization_offer: null,
     updated_at: new Date().toISOString(),
   };
   return adaptFrontendScenarioContext(rawContext);
@@ -207,6 +225,20 @@ export function getLatestGenerationJob(messages: ThreadMessage[]) {
       .reverse()
       .find((message) => message.role === "assistant" && message.generation_job)?.generation_job ?? null
   );
+}
+
+export function getLatestVisualizationOffer(messages: ThreadMessage[]): VisualizationOfferState {
+  const assistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
+  const rawPayload = assistantMessage?.payload ?? {};
+  const canOfferVisualization = rawPayload?.can_offer_visualization === true;
+  return {
+    canOfferVisualization,
+    ctaText: canOfferVisualization && typeof rawPayload?.cta_text === "string" ? rawPayload.cta_text : null,
+    visualizationType:
+      canOfferVisualization && typeof rawPayload?.visualization_type === "string"
+        ? rawPayload.visualization_type
+        : null,
+  };
 }
 
 export function isGenerationJobActive(job: GenerationJobState | null) {

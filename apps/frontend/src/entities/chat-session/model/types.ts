@@ -1,5 +1,6 @@
 import type { GenerationJobState } from "@/entities/generation-job/model/types";
 import type { FrontendScenarioContext } from "@/entities/stylist-context/model/types";
+import type { VisualizationOfferState } from "@/entities/visualization-offer/model/types";
 import type { ChatMessage, ChatMode, ClarificationKind, DecisionType, FlowState } from "@/shared/api/types";
 
 interface ChatResponseBase {
@@ -10,6 +11,7 @@ interface ChatResponseBase {
   activeMode: ChatMode;
   flowState: FlowState;
   context: FrontendScenarioContext;
+  visualizationOffer: VisualizationOfferState;
 }
 
 export type ChatResponse =

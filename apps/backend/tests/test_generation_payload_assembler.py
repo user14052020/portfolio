@@ -21,6 +21,9 @@ class GenerationPayloadAssemblerTests(unittest.IsolatedAsyncioTestCase):
                 diversity_constraints={"avoid_palette": ["chalk", "charcoal"]},
                 metadata={
                     "style_id": "soft-retro-prep",
+                    "presentation_short_explanation": "Soft Retro Prep softens collegiate dressing with warmer tones and gentler structure.",
+                    "presentation_one_sentence_description": "It keeps prep recognizable but less rigid and more approachable.",
+                    "what_makes_it_distinct": ["warmer palette", "softer structure", "retro collegiate references"],
                     "knowledge_refs": [{"id": "style_catalog:soft-retro-prep"}],
                 },
             ),
@@ -48,3 +51,15 @@ class GenerationPayloadAssemblerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan.materials_tags, ["cotton", "tweed"])
         self.assertEqual(metadata.style_id, "soft-retro-prep")
         self.assertEqual(metadata.visual_preset_id, "textured_surface")
+        self.assertEqual(
+            metadata.style_explanation_short,
+            "Soft Retro Prep softens collegiate dressing with warmer tones and gentler structure.",
+        )
+        self.assertEqual(
+            metadata.style_explanation_supporting_text,
+            "It keeps prep recognizable but less rigid and more approachable.",
+        )
+        self.assertEqual(
+            metadata.style_explanation_distinct_points,
+            ["warmer palette", "softer structure", "retro collegiate references"],
+        )

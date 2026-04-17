@@ -7,7 +7,7 @@ class StyleExplorationStateMachine:
     def enter(context: ChatModeContext) -> ChatModeContext:
         context.active_mode = ChatMode.STYLE_EXPLORATION
         context.flow_state = FlowState.READY_FOR_DECISION
-        context.should_auto_generate = True
+        context.should_auto_generate = False
         context.pending_clarification = None
         context.clarification_kind = None
         context.clarification_attempts = 0
@@ -36,4 +36,3 @@ class StyleExplorationStateMachine:
     def complete(context: ChatModeContext) -> ChatModeContext:
         context.flow_state = FlowState.COMPLETED
         return context
-

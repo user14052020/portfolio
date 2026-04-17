@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.enums import GenerationProvider, GenerationStatus
-from app.schemas.common import TimestampedRead
+from app.schemas.common import ORMModel, TimestampedRead
 from app.schemas.upload import UploadedAssetRead
 
 
@@ -24,6 +24,14 @@ class GenerationJobCreate(BaseModel):
     metadata: dict = {}
     idempotency_key: str | None = None
     provider: GenerationProvider = GenerationProvider.COMFYUI
+
+
+class StyleExplanationRead(ORMModel):
+    style_id: str | None = None
+    style_name: str | None = None
+    short_explanation: str | None = None
+    supporting_text: str | None = None
+    distinct_points: list[str] = Field(default_factory=list)
 
 
 class GenerationJobRead(TimestampedRead):
@@ -55,3 +63,4 @@ class GenerationJobRead(TimestampedRead):
     queue_refresh_retry_after_seconds: int | None = None
     visual_generation_plan: dict | None = None
     generation_metadata: dict | None = None
+    style_explanation: StyleExplanationRead | None = None

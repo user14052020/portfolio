@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.stylist_chat.contracts.command import ChatCommand
+from app.application.stylist_chat.services.constants import GENERATION_HINTS
 from app.domain.chat_context import ChatModeContext
 from app.domain.chat_modes import ChatMode, FlowState
 from app.models import UploadedAsset
@@ -14,7 +15,7 @@ from app.models.enums import ChatMessageRole
 from app.repositories.chat_messages import chat_messages_repository
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.repositories.uploads import uploads_repository
-from app.schemas.stylist import StylistMessageRequest
+from app.schemas.stylist import StylistMessageRequest, StylistVisualizationRequest
 from app.services.chat_context_store import chat_context_store
 from app.services.generation import generation_service
 from app.services.stylist_orchestrator import build_stylist_chat_orchestrator
@@ -26,6 +27,7 @@ class StylistService:
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
         context = await self._sync_context_generation_state(session, context)
         requested_intent = self._coerce_requested_intent(payload.requested_intent)
+        source = self._resolve_message_source(payload.metadata)
         resolved_client_message_id = payload.client_message_id
         if resolved_client_message_id is None:
             raw_value = payload.metadata.get("clientMessageId") or payload.metadata.get("client_message_id")
@@ -43,7 +45,12 @@ class StylistService:
         )
         user_message_text = self._resolve_user_message_text(locale=locale, message=payload.message, asset=asset)
 
-        if not self._should_skip_cooldown(context=context, requested_intent=requested_intent):
+        if not self._should_skip_cooldown(
+            context=context,
+            requested_intent=requested_intent,
+            source=source,
+            message=user_message_text,
+        ):
             await self._enforce_message_cooldown(session, payload.session_id, locale)
 
         user_message = await chat_messages_repository.create(
@@ -62,6 +69,7 @@ class StylistService:
                     "command_id": resolved_command_id,
                     "correlation_id": resolved_correlation_id,
                     "metadata": payload.metadata,
+                    "source": source,
                     "profile_gender": self._normalize_gender(payload.profile_gender),
                     "body_height_cm": payload.body_height_cm,
                     "body_weight_kg": payload.body_weight_kg,
@@ -116,6 +124,150 @@ class StylistService:
             "kind": decision.decision_type.value,
             "command_name": payload.command_name,
             "command_step": payload.command_step,
+            "can_offer_visualization": decision.can_offer_visualization,
+            "cta_text": decision.cta_text,
+            "visualization_type": decision.visualization_type,
+            "client_message_id": resolved_client_message_id,
+            "command_id": resolved_command_id,
+            "correlation_id": resolved_correlation_id,
+        }
+
+        assistant_message = await chat_messages_repository.create(
+            session,
+            {
+                "session_id": payload.session_id,
+                "role": ChatMessageRole.ASSISTANT,
+                "locale": locale,
+                "content": assistant_text,
+                "generation_job_id": generation_job.id if generation_job else None,
+                "payload": assistant_payload,
+            },
+        )
+        assistant_message = await chat_messages_repository.get_with_relations(session, assistant_message.id)
+        if assistant_message is None:
+            raise RuntimeError("Assistant message was not found after creation")
+        if assistant_message.generation_job is not None:
+            assistant_message.generation_job = await generation_service.enrich_job_runtime(
+                session,
+                assistant_message.generation_job,
+            )
+
+        context.remember(role="assistant", content=assistant_text)
+        context.touch(message_id=assistant_message.id)
+        session_state_record = await chat_context_store.save(
+            session,
+            session_id=payload.session_id,
+            context=context,
+            record=session_state_record,
+        )
+        await chat_messages_repository.trim_session(session, payload.session_id, keep_latest=50)
+
+        return {
+            "session_id": payload.session_id,
+            "recommendation_text": assistant_text,
+            "prompt": decision.generation_payload.prompt if decision.generation_payload else "",
+            "assistant_message": assistant_message,
+            "generation_job": generation_job,
+            "timestamp": datetime.now(timezone.utc),
+            "decision": decision,
+            "session_context": context,
+        }
+
+    async def request_visualization(self, session: AsyncSession, payload: StylistVisualizationRequest):
+        locale = "ru" if payload.locale == "ru" else "en"
+        session_state_record, context = await chat_context_store.load(session, payload.session_id)
+        context = await self._sync_context_generation_state(session, context)
+        source = "visualization_cta"
+        resolved_client_message_id = payload.client_message_id
+        resolved_command_id = payload.command_id or resolved_client_message_id
+        resolved_correlation_id = payload.correlation_id or resolved_command_id
+
+        recent_messages_before = await chat_messages_repository.list_by_session(session, payload.session_id, limit=20)
+        asset = await self._resolve_context_asset(
+            session=session,
+            payload=payload,
+            recent_messages=recent_messages_before,
+            context=context,
+        )
+        user_message_text = (payload.message or "").strip() or self._default_visualization_message(locale)
+        metadata = {
+            **payload.metadata,
+            "source": source,
+            "visualization_type": payload.visualization_type,
+        }
+
+        user_message = await chat_messages_repository.create(
+            session,
+            {
+                "session_id": payload.session_id,
+                "role": ChatMessageRole.USER,
+                "locale": locale,
+                "content": user_message_text,
+                "uploaded_asset_id": asset.id if asset else None,
+                "payload": {
+                    "requested_intent": None,
+                    "command_name": context.command_context.command_name if context.command_context else None,
+                    "command_step": "confirm_visualization",
+                    "client_message_id": resolved_client_message_id,
+                    "command_id": resolved_command_id,
+                    "correlation_id": resolved_correlation_id,
+                    "metadata": metadata,
+                    "source": source,
+                    "asset_id": payload.asset_id or payload.uploaded_asset_id,
+                    "visualization_type": payload.visualization_type,
+                },
+            },
+        )
+
+        recent_messages = await chat_messages_repository.list_by_session(session, payload.session_id, limit=20)
+        profile_context = self._collect_profile_context(
+            messages=recent_messages,
+            explicit_gender=None,
+            explicit_height_cm=None,
+            explicit_weight_kg=None,
+        )
+        command = ChatCommand(
+            session_id=payload.session_id,
+            locale=locale,
+            message=user_message_text,
+            requested_intent=None,
+            command_name=(context.command_context.command_name if context.command_context else None),
+            command_step="confirm_visualization",
+            asset_id=payload.asset_id or payload.uploaded_asset_id,
+            metadata=metadata,
+            client_message_id=resolved_client_message_id,
+            command_id=resolved_command_id,
+            correlation_id=resolved_correlation_id,
+            user_message_id=user_message.id,
+            profile_context=profile_context,
+            asset_metadata=self._serialize_asset_metadata(asset),
+            fallback_history=self._serialize_message_history(recent_messages),
+        )
+        orchestrator = build_stylist_chat_orchestrator(session)
+        decision = await orchestrator.handle(command=command)
+        session_state_record, context = await chat_context_store.load(session, payload.session_id)
+        generation_job = None
+        if decision.job_id:
+            generation_job = await generation_jobs_repository.get_by_public_id(session, decision.job_id)
+            if generation_job is not None:
+                generation_job = await generation_service.enrich_job_runtime(session, generation_job)
+
+        assistant_text = decision.text_reply or self._fallback_empty_reply(locale)
+        assistant_payload = {
+            "decision_type": decision.decision_type.value,
+            "active_mode": context.active_mode.value,
+            "flow_state": context.flow_state.value,
+            "clarification_kind": context.clarification_kind.value if context.clarification_kind else None,
+            "prompt": decision.generation_payload.prompt if decision.generation_payload else "",
+            "image_brief_en": decision.generation_payload.image_brief_en if decision.generation_payload else "",
+            "context_patch": decision.context_patch,
+            "telemetry": decision.telemetry,
+            "kind": decision.decision_type.value,
+            "command_name": context.command_context.command_name if context.command_context else None,
+            "command_step": "confirm_visualization",
+            "can_offer_visualization": decision.can_offer_visualization,
+            "cta_text": decision.cta_text,
+            "visualization_type": decision.visualization_type,
             "client_message_id": resolved_client_message_id,
             "command_id": resolved_command_id,
             "correlation_id": resolved_correlation_id,
@@ -286,8 +438,19 @@ class StylistService:
             return f"Фото вещи: {asset.original_filename}" if locale == "ru" else f"Item photo: {asset.original_filename}"
         return "Нужна рекомендация по образу" if locale == "ru" else "Need outfit guidance"
 
-    def _should_skip_cooldown(self, *, context: ChatModeContext, requested_intent: ChatMode | None) -> bool:
+    def _should_skip_cooldown(
+        self,
+        *,
+        context: ChatModeContext,
+        requested_intent: ChatMode | None,
+        source: str | None,
+        message: str | None,
+    ) -> bool:
         if requested_intent is not None:
+            return True
+        if source in {"visualization_cta", "explicit_visual_request"}:
+            return True
+        if self._message_requests_generation(message):
             return True
         return context.active_mode != ChatMode.GENERAL_ADVICE and context.flow_state != FlowState.IDLE
 
@@ -383,6 +546,22 @@ class StylistService:
         if isinstance(value, str) and value.strip().isdigit():
             return int(value.strip())
         return None
+
+    def _resolve_message_source(self, metadata: dict[str, Any]) -> str | None:
+        raw_value = metadata.get("source")
+        if isinstance(raw_value, str):
+            cleaned = raw_value.strip()
+            return cleaned or None
+        return None
+
+    def _message_requests_generation(self, message: str | None) -> bool:
+        lowered = (message or "").strip().lower()
+        if not lowered:
+            return False
+        return any(keyword in lowered for keyword in GENERATION_HINTS)
+
+    def _default_visualization_message(self, locale: str) -> str:
+        return "Подтверждаю визуализацию" if locale == "ru" else "Confirm the visualization"
 
 
 stylist_service = StylistService()

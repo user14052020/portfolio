@@ -7,7 +7,7 @@ class GarmentMatchingStateMachine:
     def enter(context: ChatModeContext, *, prompt_text: str) -> ChatModeContext:
         context.active_mode = ChatMode.GARMENT_MATCHING
         context.flow_state = FlowState.AWAITING_ANCHOR_GARMENT
-        context.should_auto_generate = True
+        context.should_auto_generate = False
         context.anchor_garment = None
         context.pending_clarification = prompt_text
         context.clarification_kind = ClarificationKind.ANCHOR_GARMENT_DESCRIPTION

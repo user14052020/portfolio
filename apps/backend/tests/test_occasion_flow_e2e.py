@@ -26,7 +26,7 @@ class OccasionFlowE2ETests(unittest.IsolatedAsyncioTestCase):
     async def run_command(self, command: ChatCommand):
         return await self.orchestrator.handle(command=command)
 
-    async def test_day_wedding_in_summer_goes_from_start_to_generation(self) -> None:
+    async def test_day_wedding_in_summer_goes_from_start_to_cta_then_generation(self) -> None:
         start = await self.run_command(
             ChatCommand(
                 session_id="occasion-e2e-1",
@@ -62,12 +62,29 @@ class OccasionFlowE2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual(followup.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(followup.job_id, "job-1")
+        self.assertEqual(followup.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(followup.can_offer_visualization)
+        self.assertIsNone(followup.job_id)
         self.assertEqual(self.context_store.context.active_mode, ChatMode.OCCASION_OUTFIT)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.READY_FOR_GENERATION)
+
+        confirmation = await self.run_command(
+            ChatCommand(
+                session_id="occasion-e2e-1",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                client_message_id="occasion-e2e-1-confirm",
+                command_id="occasion-e2e-1-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
+        self.assertEqual(confirmation.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(confirmation.job_id, "job-1")
         self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
 
-    async def test_exhibition_then_slot_specific_clarification_then_generation(self) -> None:
+    async def test_exhibition_then_slot_specific_clarification_then_cta_then_generation(self) -> None:
         await self.run_command(
             ChatCommand(
                 session_id="occasion-e2e-2",
@@ -112,12 +129,28 @@ class OccasionFlowE2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual(generation.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(generation.job_id, "job-1")
+        self.assertEqual(generation.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(generation.can_offer_visualization)
+        self.assertIsNone(generation.job_id)
         self.assertEqual(self.context_store.context.active_mode, ChatMode.OCCASION_OUTFIT)
         self.assertEqual(self.context_store.context.occasion_context.event_type, "exhibition")
 
-    async def test_precise_followup_stays_in_same_mode_and_generates(self) -> None:
+        confirmation = await self.run_command(
+            ChatCommand(
+                session_id="occasion-e2e-2",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=4,
+                client_message_id="occasion-e2e-2-confirm",
+                command_id="occasion-e2e-2-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
+        self.assertEqual(confirmation.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(confirmation.job_id, "job-1")
+
+    async def test_precise_followup_stays_in_same_mode_and_waits_for_cta(self) -> None:
         await self.run_command(
             ChatCommand(
                 session_id="occasion-e2e-3",
@@ -161,12 +194,12 @@ class OccasionFlowE2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual(followup.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(followup.job_id, "job-1")
+        self.assertEqual(followup.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(followup.can_offer_visualization)
         self.assertEqual(self.context_store.context.active_mode, ChatMode.OCCASION_OUTFIT)
         self.assertNotEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
 
-    async def test_repeated_followup_creates_only_one_job(self) -> None:
+    async def test_repeated_cta_confirmation_creates_only_one_job(self) -> None:
         await self.run_command(
             ChatCommand(
                 session_id="occasion-e2e-4",
@@ -209,8 +242,34 @@ class OccasionFlowE2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual(first.job_id, "job-1")
+        self.assertEqual(first.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(first.can_offer_visualization)
+
+        second = await self.run_command(
+            ChatCommand(
+                session_id="occasion-e2e-4",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                client_message_id="occasion-e2e-4-confirm",
+                command_id="occasion-e2e-4-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+        third = await self.run_command(
+            ChatCommand(
+                session_id="occasion-e2e-4",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                client_message_id="occasion-e2e-4-confirm",
+                command_id="occasion-e2e-4-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
         self.assertEqual(second.job_id, "job-1")
+        self.assertEqual(third.job_id, "job-1")
         self.assertEqual(len(self.scheduler.enqueued), 1)
 
     async def test_queue_failure_returns_recoverable_response(self) -> None:
@@ -227,7 +286,6 @@ class OccasionFlowE2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.scheduler.fail_next = True
         self.reasoner.route = "text_and_generation"
         self.reasoner.occasion_output = OccasionExtractionOutput(
             event_type="conference",
@@ -246,6 +304,22 @@ class OccasionFlowE2ETests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual(response.decision_type, DecisionType.ERROR_RECOVERABLE)
-        self.assertEqual(response.error_code, "generation_enqueue_failed")
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(response.can_offer_visualization)
+
+        self.scheduler.fail_next = True
+        confirmation = await self.run_command(
+            ChatCommand(
+                session_id="occasion-e2e-5",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=3,
+                client_message_id="occasion-e2e-5-confirm",
+                command_id="occasion-e2e-5-confirm",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            )
+        )
+
+        self.assertEqual(confirmation.decision_type, DecisionType.ERROR_RECOVERABLE)
+        self.assertEqual(confirmation.error_code, "generation_enqueue_failed")
         self.assertEqual(self.context_store.context.flow_state, FlowState.RECOVERABLE_ERROR)

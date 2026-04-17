@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from app.domain.chat_modes import ChatMode, ClarificationKind, FlowState
 from app.domain.garment_matching.entities.anchor_garment import AnchorGarment
 from app.domain.occasion_outfit.entities.occasion_context import OccasionContext
+from app.domain.product_behavior.entities.visualization_offer import VisualizationOffer
 from app.domain.style_exploration.entities.style_direction import StyleDirection
 
 
@@ -61,6 +62,7 @@ class ChatModeContext(BaseModel):
     last_generation_request_key: str | None = None
     last_decision_type: str | None = None
     generation_intent: GenerationIntent | None = None
+    visualization_offer: VisualizationOffer | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_by_message_id: int | None = None
 
@@ -102,12 +104,8 @@ class ChatModeContext(BaseModel):
             flow_state=FlowState.IDLE,
             should_auto_generate=should_auto_generate,
             style_history=[item.model_copy(deep=True) for item in self.style_history],
-            last_retrieved_knowledge_refs=[dict(item) for item in self.last_retrieved_knowledge_refs],
-            last_generation_prompt=self.last_generation_prompt,
-            last_generated_outfit_summary=self.last_generated_outfit_summary,
             conversation_memory=[item.model_copy(deep=True) for item in self.conversation_memory[-MAX_CONVERSATION_MEMORY:]],
             command_context=command_context,
-            current_style_id=self.current_style_id,
-            current_style_name=self.current_style_name,
+            visualization_offer=None,
             updated_at=datetime.now(timezone.utc),
         )

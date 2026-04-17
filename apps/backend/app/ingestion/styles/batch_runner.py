@@ -15,6 +15,7 @@ from app.ingestion.styles.contracts import (
     StyleSourceRegistry,
     StyleValidator,
 )
+from app.ingestion.styles.runtime_settings_service import StyleIngestionRuntimeSettingsService
 from app.ingestion.styles.runner import StyleIngestionRunner
 from app.ingestion.styles.style_db_writer import SQLAlchemyStyleDBWriter
 from app.models.style_ingest_run import StyleIngestRun
@@ -34,6 +35,7 @@ class StyleBatchIngestionRunner:
         enricher: StyleEnricher,
         validator: StyleValidator,
         session_factory: Callable[[], Any],
+        runtime_settings_service: StyleIngestionRuntimeSettingsService | None = None,
     ) -> None:
         self.registry = registry
         self.scraper = scraper
@@ -41,6 +43,7 @@ class StyleBatchIngestionRunner:
         self.enricher = enricher
         self.validator = validator
         self.session_factory = session_factory
+        self.runtime_settings_service = runtime_settings_service
 
     async def discover_candidates(
         self,
@@ -52,7 +55,7 @@ class StyleBatchIngestionRunner:
     ) -> CandidateBatchSelection:
         safe_limit = self._validate_limit(limit)
         safe_offset = max(offset, 0)
-        source = self.registry.get_source(source_name)
+        source = await self._resolve_source(source_name)
         discovery_payload = await self.scraper.fetch_discovery_payload(source)
         discovered = self.registry.discover_style_candidates(source=source, discovery_payload=discovery_payload)
         if not discovered:
@@ -73,6 +76,14 @@ class StyleBatchIngestionRunner:
             candidates=filtered,
             discovery_payload=discovery_payload,
         )
+
+    async def _resolve_source(self, source_name: str) -> StyleSourceRegistryEntry:
+        if self.runtime_settings_service is None:
+            return self.registry.get_source(source_name)
+        async with self.session_factory() as session:
+            resolved = await self.runtime_settings_service.resolve_source(session, source_name=source_name)
+            await session.commit()
+        return resolved.source
 
     async def run_batch(
         self,

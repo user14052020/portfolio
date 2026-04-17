@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.application.stylist_chat.contracts.command import ChatCommand
 from app.domain.chat_context import ChatModeContext, GenerationIntent, StyleDirectionContext
 from app.domain.garment_matching.entities.anchor_garment import AnchorGarment
 from app.domain.garment_matching.entities.garment_matching_outfit_brief import GarmentMatchingOutfitBrief
@@ -8,6 +9,7 @@ from app.domain.garment_matching.policies.garment_completeness_policy import Gar
 from app.domain.occasion_outfit.entities.occasion_context import OccasionContext
 from app.domain.occasion_outfit.entities.occasion_outfit_brief import OccasionOutfitBrief
 from app.domain.occasion_outfit.policies.occasion_completeness_policy import OccasionCompletenessAssessment
+from app.domain.routing import ConversationRouterContext, RouterFailureReason, RoutingDecision, RoutingInput
 from app.domain.style_exploration.entities.diversity_constraints import DiversityConstraints
 from app.domain.style_exploration.entities.style_direction import StyleDirection
 from app.domain.style_exploration.entities.style_exploration_brief import StyleExplorationBrief
@@ -19,6 +21,14 @@ class LLMReasonerError(RuntimeError):
 
 
 class LLMReasonerContextLimitError(LLMReasonerError):
+    pass
+
+
+class RouterClientError(RuntimeError):
+    pass
+
+
+class RouterClientTransportError(RouterClientError):
     pass
 
 
@@ -42,6 +52,35 @@ class OccasionExtractionOutput:
     desired_impression: str | None = None
     provider: str = "deterministic"
     raw_content: str = ""
+
+
+@dataclass(slots=True)
+class RouterClientOutput:
+    payload: dict[str, Any]
+    provider: str = "vllm"
+    raw_content: str = ""
+
+
+@dataclass(slots=True)
+class RouterSchemaValidationOutput:
+    payload: dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    stripped_fields: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ConversationRoutingResult:
+    decision: RoutingDecision
+    routing_input: RoutingInput
+    routing_context: ConversationRouterContext
+    provider: str = "router"
+    raw_content: str = ""
+    normalized_payload: dict[str, Any] = field(default_factory=dict)
+    validation_errors: list[str] = field(default_factory=list)
+    stripped_fields: list[str] = field(default_factory=list)
+    used_fallback: bool = False
+    failure_reason: RouterFailureReason | None = None
+    fallback_rule: str | None = None
 
 
 @dataclass(slots=True)
@@ -124,6 +163,26 @@ class LLMReasoner(Protocol):
         conversation_history: list[dict[str, str]],
         existing_slots: dict[str, str | None],
     ) -> OccasionExtractionOutput:
+        ...
+
+
+class ConversationRouterClient(Protocol):
+    async def route(self, *, routing_input: RoutingInput) -> RouterClientOutput:
+        ...
+
+
+class ConversationRouterPort(Protocol):
+    async def route(
+        self,
+        *,
+        command: ChatCommand,
+        context: ChatModeContext,
+    ) -> ConversationRoutingResult:
+        ...
+
+
+class RouterSchemaValidatorPort(Protocol):
+    def validate(self, *, payload: Any) -> RouterSchemaValidationOutput:
         ...
 
 

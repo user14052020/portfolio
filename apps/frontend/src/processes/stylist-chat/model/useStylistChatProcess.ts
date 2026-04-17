@@ -6,22 +6,16 @@ import type { CommandName } from "@/entities/command/model/types";
 import type { ThreadMessage } from "@/entities/chat-message/model/types";
 import type { FrontendScenarioContext } from "@/entities/stylist-context/model/types";
 import type { GenerationJobState } from "@/entities/generation-job/model/types";
+import type { VisualizationOfferState } from "@/entities/visualization-offer/model/types";
 import { attachGarmentAsset } from "@/features/attach-garment-asset/model/attachGarmentAsset";
+import { requestVisualization } from "@/features/chat-request-visualization/model/requestVisualization";
 import { submitFollowupClarification } from "@/features/followup-clarification/model/submitFollowupClarification";
-import {
-  buildQuickActionCommandPayload,
-  getQuickActionDefinitions,
-  runQuickActionCommand,
-} from "@/features/run-chat-command/model/runChatCommand";
-import { runGarmentMatchingCommand } from "@/features/run-garment-matching-command/model/runGarmentMatchingCommand";
-import { runOccasionCommand } from "@/features/run-occasion-command/model/runOccasionCommand";
+import { getQuickActionDefinitions } from "@/features/run-chat-command/model/runChatCommand";
 import { runStyleExplorationCommand } from "@/features/run-style-exploration-command/model/runStyleExplorationCommand";
 import {
   buildFreeformMessagePayload,
   sendFreeformMessage,
 } from "@/features/send-chat-message/model/sendChatMessage";
-import { sendGarmentFollowup } from "@/features/send-garment-followup/model/sendGarmentFollowup";
-import { sendOccasionFollowup } from "@/features/send-occasion-followup/model/sendOccasionFollowup";
 import { retryGeneration } from "@/features/retry-generation/model/retryGeneration";
 import { retryStyleExploration } from "@/features/retry-style-exploration/model/retryStyleExploration";
 import { chatGateway } from "@/shared/api/gateways/chatGateway";
@@ -38,6 +32,7 @@ import {
   getComposerMessageSource,
   getInitialVisibleMessages,
   getLatestGenerationJob,
+  getLatestVisualizationOffer,
   INITIAL_HISTORY_PAGE_SIZE,
   isGenerationJobActive,
   isGenerationJobQueued,
@@ -74,6 +69,14 @@ function getRemainingSeconds(endsAt: number | null, now: number) {
   return Math.max(0, Math.ceil((endsAt - now) / 1000));
 }
 
+function createEmptyVisualizationOffer(): VisualizationOfferState {
+  return {
+    canOfferVisualization: false,
+    ctaText: null,
+    visualizationType: null,
+  };
+}
+
 export function useStylistChatProcess(locale: Locale) {
   const [bootstrap] = useState(() => {
     const nextSessionId = createSessionId();
@@ -102,6 +105,22 @@ export function useStylistChatProcess(locale: Locale) {
   const [scenarioContext, setScenarioContext] = useState<FrontendScenarioContext>(
     createDefaultScenarioContext()
   );
+  const [visualizationOffer, setVisualizationOffer] = useState<VisualizationOfferState>(
+    () =>
+      persistedState?.visualizationOffer ??
+      getLatestVisualizationOffer(persistedState?.messages ?? []) ??
+      createEmptyVisualizationOffer()
+  );
+  const [lastUserActionType, setLastUserActionType] = useState<string | null>(
+    () => persistedState?.lastUserActionType ?? null
+  );
+  const [lastVisualCtaShown, setLastVisualCtaShown] = useState<string | null>(
+    () => persistedState?.lastVisualCtaShown ?? null
+  );
+  const [lastVisualCtaConfirmed, setLastVisualCtaConfirmed] = useState<string | null>(
+    () => persistedState?.lastVisualCtaConfirmed ?? null
+  );
+  const [presentationProfile] = useState(() => persistedState?.presentationProfile ?? {});
   const [isHistoryLoading, setIsHistoryLoading] = useState(messages.length === 0);
   const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
@@ -123,7 +142,9 @@ export function useStylistChatProcess(locale: Locale) {
   const isEditorLocked = isSending || isUploading;
   const canSubmitDraft = Boolean(input.trim() || uploadedAsset);
   const isSendLocked = isEditorLocked || !canSubmitDraft;
-  const isGenerationActionLocked = isSending || isUploading || isRefreshingQueue;
+  const isGenerationActionLocked = isSending || isUploading || isRefreshingQueue || hasActiveGenerationJob;
+  const canRequestVisualization =
+    visualizationOffer.canOfferVisualization && !scenarioContext.pendingClarification && !isGenerationActionLocked;
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -154,15 +175,23 @@ export function useStylistChatProcess(locale: Locale) {
 
         const mergedHistory = mergeHistoryIntoCurrent(messagesRef.current, historyPage.items as ThreadMessage[]);
         const latestJob = getLatestGenerationJob(mergedHistory);
+        const latestOffer = context.visualizationOffer.canOfferVisualization
+          ? context.visualizationOffer
+          : getLatestVisualizationOffer(mergedHistory);
 
         setMessages(mergedHistory);
         setScenarioContext(context);
+        setVisualizationOffer(latestOffer);
         setActiveJob(latestJob);
         setHasMoreHistory(historyPage.has_more);
         setNextHistoryCursor(historyPage.next_before_message_id ?? null);
         setBackendState("connected");
         setErrorMessage(null);
         setIsHistoryLoading(false);
+
+        if (latestOffer.canOfferVisualization) {
+          setLastVisualCtaShown(latestOffer.visualizationType ?? latestOffer.ctaText ?? "cta");
+        }
 
         if (!latestJob && context.currentJobId) {
           const currentJob = await generationGateway.getStatus(context.currentJobId);
@@ -200,8 +229,23 @@ export function useStylistChatProcess(locale: Locale) {
       messages,
       uploadedAsset,
       activeJob,
+      visualizationOffer,
+      lastUserActionType,
+      lastVisualCtaShown,
+      lastVisualCtaConfirmed,
+      presentationProfile,
     });
-  }, [sessionId, messages, uploadedAsset, activeJob]);
+  }, [
+    sessionId,
+    messages,
+    uploadedAsset,
+    activeJob,
+    visualizationOffer,
+    lastUserActionType,
+    lastVisualCtaShown,
+    lastVisualCtaConfirmed,
+    presentationProfile,
+  ]);
 
   useEffect(() => {
     if (
@@ -226,6 +270,19 @@ export function useStylistChatProcess(locale: Locale) {
         setErrorMessage(null);
         setActiveJob(mergedJob);
         setMessages((current) => syncGenerationJobInMessages(current, mergedJob));
+
+        if (
+          mergedJob.status === "completed" ||
+          mergedJob.status === "failed" ||
+          mergedJob.status === "cancelled"
+        ) {
+          const freshContext = await sessionContextGateway.getContext(sessionId);
+          if (isCancelled) {
+            return;
+          }
+          setScenarioContext(freshContext);
+          setVisualizationOffer(freshContext.visualizationOffer);
+        }
       } catch {
         if (isCancelled) {
           return;
@@ -248,7 +305,7 @@ export function useStylistChatProcess(locale: Locale) {
       isCancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeJob?.public_id, activeJob?.status, locale]);
+  }, [activeJob?.public_id, activeJob?.status, locale, sessionId]);
 
   const loadOlderHistory = async () => {
     if (isLoadingOlderHistory || !hasMoreHistory || !nextHistoryCursor) {
@@ -288,8 +345,12 @@ export function useStylistChatProcess(locale: Locale) {
     setBackendState("connected");
     setErrorMessage(null);
     setScenarioContext(response.context);
+    setVisualizationOffer(response.visualizationOffer);
     setMessages((current) => [...current, response.assistantMessage]);
     setActiveJob(response.generationJob ?? previousActiveJob);
+    if (response.visualizationOffer.canOfferVisualization) {
+      setLastVisualCtaShown(response.visualizationOffer.visualizationType ?? response.visualizationOffer.ctaText);
+    }
   };
 
   const runQuickAction = async (actionId: CommandName) => {
@@ -306,41 +367,15 @@ export function useStylistChatProcess(locale: Locale) {
     setIsSending(true);
     setBackendState("connecting");
     setErrorMessage(null);
+    setLastUserActionType("quick_action_style_exploration");
 
     try {
       const clientMessageId = createClientMessageId();
-      let response;
-      if (action.id === "garment_matching") {
-        response = await runGarmentMatchingCommand({
-          sessionId,
-          locale,
-          assetId: uploadedAsset?.id ?? null,
-          clientMessageId,
-        });
-      } else if (action.id === "style_exploration") {
-        response = await runStyleExplorationCommand({
-          sessionId,
-          locale,
-          clientMessageId,
-        });
-      } else if (action.id === "occasion_outfit") {
-        response = await runOccasionCommand({
-          sessionId,
-          locale,
-          assetId: uploadedAsset?.id ?? null,
-          clientMessageId,
-        });
-      } else {
-        response = await runQuickActionCommand(
-          buildQuickActionCommandPayload({
-            sessionId,
-            locale,
-            action,
-            assetId: uploadedAsset?.id ?? null,
-            clientMessageId,
-          })
-        );
-      }
+      const response = await runStyleExplorationCommand({
+        sessionId,
+        locale,
+        clientMessageId,
+      });
 
       setUploadedAsset(null);
       handleServerResponse({ response, previousActiveJob });
@@ -381,46 +416,27 @@ export function useStylistChatProcess(locale: Locale) {
     setIsSending(true);
     setBackendState("connecting");
     setErrorMessage(null);
+    setLastUserActionType(composerSource);
 
     try {
-      let response;
-      if (composerSource === "followup") {
-        if (scenarioContext.activeMode === "garment_matching") {
-          response = await sendGarmentFollowup({
-            sessionId,
-            locale,
-            message: draftInput.trim() || null,
-            assetId: draftUploadedAsset?.id ?? null,
-            clientMessageId,
-          });
-        } else if (scenarioContext.activeMode === "occasion_outfit") {
-          response = await sendOccasionFollowup({
-            sessionId,
-            locale,
-            message: draftInput.trim() || null,
-            assetId: draftUploadedAsset?.id ?? null,
-            clientMessageId,
-          });
-        } else {
-          response = await submitFollowupClarification({
-            sessionId,
-            locale,
-            message: draftInput.trim() || null,
-            assetId: draftUploadedAsset?.id ?? null,
-            clientMessageId,
-          });
-        }
-      } else {
-        response = await sendFreeformMessage(
-          buildFreeformMessagePayload({
-            sessionId,
-            locale,
-            message: draftInput.trim() || null,
-            assetId: draftUploadedAsset?.id ?? null,
-            clientMessageId,
-          })
-        );
-      }
+      const response =
+        composerSource === "followup"
+          ? await submitFollowupClarification({
+              sessionId,
+              locale,
+              message: draftInput.trim() || null,
+              assetId: draftUploadedAsset?.id ?? null,
+              clientMessageId,
+            })
+          : await sendFreeformMessage(
+              buildFreeformMessagePayload({
+                sessionId,
+                locale,
+                message: draftInput.trim() || null,
+                assetId: draftUploadedAsset?.id ?? null,
+                clientMessageId,
+              })
+            );
 
       handleServerResponse({ response, previousActiveJob });
     } catch (error) {
@@ -462,6 +478,45 @@ export function useStylistChatProcess(locale: Locale) {
       );
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const requestVisualizationFromCta = async () => {
+    if (!canRequestVisualization) {
+      return;
+    }
+
+    const previousActiveJob = activeJob;
+    setIsSending(true);
+    setBackendState("connecting");
+    setErrorMessage(null);
+    setLastUserActionType("visualization_cta");
+
+    try {
+      const clientMessageId = createClientMessageId();
+      const response = await requestVisualization({
+        sessionId,
+        locale,
+        visualizationOffer,
+        assetId: uploadedAsset?.id ?? null,
+        clientMessageId,
+      });
+      setLastVisualCtaConfirmed(
+        visualizationOffer.visualizationType ?? visualizationOffer.ctaText ?? "visualization_cta"
+      );
+      setUploadedAsset(null);
+      handleServerResponse({ response, previousActiveJob });
+    } catch (error) {
+      setBackendState("error");
+      setErrorMessage(
+        error instanceof Error && error.message
+          ? error.message
+          : locale === "ru"
+            ? "Не удалось запросить визуализацию."
+            : "Could not request the visualization."
+      );
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -517,6 +572,7 @@ export function useStylistChatProcess(locale: Locale) {
     uploadedAsset,
     clearUploadedAsset: () => setUploadedAsset(null),
     scenarioContext,
+    visualizationOffer,
     activeJob,
     isHistoryLoading,
     isLoadingOlderHistory,
@@ -533,10 +589,12 @@ export function useStylistChatProcess(locale: Locale) {
     backendState,
     chatAvailability,
     errorMessage,
+    canRequestVisualization,
     loadOlderHistory,
     runQuickAction,
     sendComposerMessage,
     handleAttachAsset,
+    requestVisualization: requestVisualizationFromCta,
     refreshGenerationStatus,
   };
 }

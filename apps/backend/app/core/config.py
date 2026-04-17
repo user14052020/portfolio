@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     comfyui_workflow_template: Path = Field(
         Path("app/integrations/workflows/fashion_flatlay.json"), alias="COMFYUI_WORKFLOW_TEMPLATE"
     )
+    openai_base_url: str = Field("https://api.openai.com/v1", alias="OPENAI_BASE_URL")
+    openai_api_key: str | None = Field(None, alias="OPENAI_API_KEY")
+    openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
+    openai_timeout_seconds: float = Field(45.0, alias="OPENAI_TIMEOUT_SECONDS")
     vllm_base_url: str = Field(..., alias="VLLM_BASE_URL")
     vllm_model: str = Field("Qwen/Qwen2.5-3B-Instruct", alias="VLLM_MODEL")
     vllm_api_key: str | None = Field(None, alias="VLLM_API_KEY")

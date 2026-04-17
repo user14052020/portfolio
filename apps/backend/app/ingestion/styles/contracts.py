@@ -10,8 +10,6 @@ StyleDetailFetchMode = Literal["mediawiki_action_api"]
 @dataclass(frozen=True)
 class SourceCrawlPolicy:
     user_agent: str
-    respect_robots_txt: bool = True
-    robots_txt_url: str | None = None
     min_delay_seconds: float = 2.0
     max_delay_seconds: float = 4.0
     jitter_ratio: float = 0.3
@@ -20,6 +18,7 @@ class SourceCrawlPolicy:
     blocked_after_consecutive_empty: int = 3
     max_retries: int = 3
     retry_backoff_seconds: float = 5.0
+    retry_backoff_jitter_seconds: float = 1.0
     max_concurrency: int = 1
 
 
@@ -331,6 +330,9 @@ class ProcessedIngestJobResult:
     selected_count: int | None = None
     enqueued_count: int | None = None
     reused_count: int | None = None
+    was_style_created: bool = False
+    was_style_updated: bool = False
+    persist_outcome: str | None = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +346,9 @@ class IngestWorkerRunReport:
     hard_failed_jobs: int
     idle_polls: int
     stopped_reason: str
+    created_styles_count: int = 0
+    updated_styles_count: int = 0
+    skipped_styles_count: int = 0
     last_job_id: int | None = None
     last_job_type: str | None = None
     last_status: str | None = None
@@ -369,6 +374,44 @@ class StyleIngestionCounters:
     styles_created: int = 0
     styles_updated: int = 0
     styles_failed: int = 0
+
+
+@dataclass(frozen=True)
+class StyleEnrichmentResult:
+    style_id: int
+    style_slug: str
+    source_page_id: int | None
+    provider: str
+    model_name: str
+    prompt_version: str
+    schema_version: str
+    status: str
+    attempts: int
+    did_write: bool
+    validation_errors: tuple[str, ...] = ()
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class StyleEnrichmentBatchItem:
+    style_id: int
+    style_slug: str | None
+    status: str
+    did_write: bool
+    error_message: str | None = None
+    source_page_id: int | None = None
+
+
+@dataclass(frozen=True)
+class BatchEnrichmentResult:
+    selected_count: int
+    processed_count: int
+    succeeded_count: int
+    failed_count: int
+    skipped_existing_count: int
+    dry_run: bool
+    overwrite_existing: bool
+    items: tuple[StyleEnrichmentBatchItem, ...] = ()
 
 
 class StyleSourceRegistry(Protocol):
@@ -435,4 +478,22 @@ class StyleValidator(Protocol):
 
 class StyleDBWriter(Protocol):
     async def persist(self, payload: StylePersistencePayload) -> StylePersistenceResult:
+        ...
+
+
+class StyleChatGptEnrichmentService(Protocol):
+    async def enrich_style(self, style_id: int) -> StyleEnrichmentResult:
+        ...
+
+
+class StyleChatGptEnrichmentBatchRunner(Protocol):
+    async def run(
+        self,
+        *,
+        style_ids: list[int] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        dry_run: bool = False,
+        overwrite_existing: bool = False,
+    ) -> BatchEnrichmentResult:
         ...

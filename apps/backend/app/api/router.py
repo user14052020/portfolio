@@ -8,6 +8,7 @@ from app.api.routes import (
     projects,
     site_settings,
     style_ingestion_admin,
+    style_ingestion_settings,
     stylist_chat,
     uploads,
     users,
@@ -22,6 +23,7 @@ api_router.include_router(blog_posts.router)
 api_router.include_router(contact_requests.router)
 api_router.include_router(site_settings.router)
 api_router.include_router(style_ingestion_admin.router)
+api_router.include_router(style_ingestion_settings.router)
 api_router.include_router(uploads.router)
 api_router.include_router(stylist_chat.router)
 api_router.include_router(generation_jobs.router)

@@ -5,6 +5,7 @@ from app.api.routes import (
     generation_jobs,
     projects,
     site_settings,
+    style_ingestion_settings,
     stylist_chat,
     uploads,
     users,
@@ -17,8 +18,8 @@ __all__ = [
     "blog_posts",
     "contact_requests",
     "site_settings",
+    "style_ingestion_settings",
     "uploads",
     "stylist_chat",
     "generation_jobs",
 ]
-

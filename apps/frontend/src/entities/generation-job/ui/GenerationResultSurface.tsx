@@ -1,5 +1,6 @@
 import Image from "next/image";
 
+import { GenerationStyleExplanation } from "@/entities/generation-job/ui/GenerationStyleExplanation";
 import type { GenerationJob, Locale } from "@/shared/api/types";
 
 export function GenerationResultSurface({
@@ -23,7 +24,7 @@ export function GenerationResultSurface({
         <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{assistantLabel}</p>
         <div className="w-full max-w-[620px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
           {job.error_message ||
-            (locale === "ru" ? "Не удалось сгенерировать изображение." : "Could not generate the image.")}
+            (locale === "ru" ? "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ." : "Could not generate the image.")}
         </div>
       </div>
     );
@@ -42,7 +43,7 @@ export function GenerationResultSurface({
         <div className="overflow-hidden border border-slate-200 bg-white">
           <Image
             src={job.result_url}
-            alt={locale === "ru" ? "Сгенерированный образ" : "Generated outfit"}
+            alt={locale === "ru" ? "РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ РѕР±СЂР°Р·" : "Generated outfit"}
             width={1024}
             height={1024}
             className="h-auto w-full object-cover"
@@ -50,9 +51,13 @@ export function GenerationResultSurface({
           />
         </div>
 
+        <div className="mt-3">
+          <GenerationStyleExplanation job={job} locale={locale} />
+        </div>
+
         {recommendation ? (
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            {locale === "ru" ? "Рекомендация:" : "Recommendation:"} {recommendation}
+            {locale === "ru" ? "Р РµРєРѕРјРµРЅРґР°С†РёСЏ:" : "Recommendation:"} {recommendation}
           </p>
         ) : null}
 
@@ -62,7 +67,7 @@ export function GenerationResultSurface({
           rel="noreferrer"
           className="mt-3 inline-flex text-sm font-medium text-slate-900 underline decoration-slate-300 underline-offset-4 transition hover:decoration-slate-600"
         >
-          {locale === "ru" ? "Открыть изображение" : "Open image"}
+          {locale === "ru" ? "РћС‚РєСЂС‹С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ" : "Open image"}
         </a>
       </div>
     </div>

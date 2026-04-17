@@ -3,7 +3,20 @@ from datetime import datetime, timezone
 
 from app.domain.knowledge.entities import KnowledgeQuery
 from app.infrastructure.knowledge.repositories.style_catalog_repository import DatabaseStyleCatalogRepository
-from app.models import Style, StyleAlias, StyleProfile, StyleRelation, StyleSource, StyleTrait
+from app.models import (
+    Style,
+    StyleAlias,
+    StyleFashionItemFacet,
+    StyleImageFacet,
+    StyleKnowledgeFacet,
+    StylePresentationFacet,
+    StyleProfile,
+    StyleRelation,
+    StyleRelationFacet,
+    StyleSource,
+    StyleTrait,
+    StyleVisualFacet,
+)
 
 
 class FakeScalarRows:
@@ -114,6 +127,72 @@ class StyleCatalogRepositoryTests(unittest.IsolatedAsyncioTestCase):
             reason="nearby style family",
             source_evidence_id=None,
         )
+        knowledge_facet = StyleKnowledgeFacet(
+            style_id=1,
+            facet_version="2026-04",
+            core_definition="A warmer and more relaxed collegiate style.",
+            core_style_logic_json=["Blend collegiate structure with softened warmth."],
+            styling_rules_json=["Keep prep elements edited and breathable."],
+            casual_adaptations_json=["Use softer knits instead of stiff layers."],
+            statement_pieces_json=["camel blazer"],
+            status_markers_json=["heritage loafers"],
+            overlap_context_json=["bridges prep and retro casual dressing"],
+            historical_notes_json=["References collegiate heritage with a softer, modern filter."],
+            negative_guidance_json=["Avoid neon accents."],
+        )
+        visual_facet = StyleVisualFacet(
+            style_id=1,
+            facet_version="2026-04",
+            palette_json=["camel", "cream", "navy"],
+            lighting_mood_json=["soft daylight"],
+            photo_treatment_json=["editorial grain"],
+            visual_motifs_json=["relaxed layering"],
+            patterns_textures_json=["tweed", "oxford cotton"],
+            platform_visual_cues_json=["quiet luxury editorial"],
+        )
+        fashion_facet = StyleFashionItemFacet(
+            style_id=1,
+            facet_version="2026-04",
+            tops_json=["oxford shirt"],
+            bottoms_json=["pleated chinos"],
+            shoes_json=["loafers"],
+            accessories_json=["belt"],
+            hair_makeup_json=[],
+            signature_details_json=["softly structured blazer"],
+        )
+        image_facet = StyleImageFacet(
+            style_id=1,
+            facet_version="2026-04",
+            hero_garments_json=["camel blazer", "oxford shirt"],
+            secondary_garments_json=["pleated chinos"],
+            core_accessories_json=["belt"],
+            props_json=["folded magazine"],
+            materials_json=["cotton", "tweed"],
+            composition_cues_json=["leave breathing room between garments"],
+            negative_constraints_json=["avoid neon"],
+            visual_motifs_json=["relaxed layering"],
+            lighting_mood_json=["soft daylight"],
+            photo_treatment_json=["editorial grain"],
+        )
+        relation_facet = StyleRelationFacet(
+            style_id=1,
+            facet_version="2026-04",
+            related_styles_json=["ivy style"],
+            overlap_styles_json=["retro prep"],
+            preceded_by_json=["classic prep"],
+            succeeded_by_json=["soft academia"],
+            brands_json=["Ralph Lauren"],
+            platforms_json=["editorial lookbook"],
+            origin_regions_json=["US campus style"],
+            era_json=["1980s revival"],
+        )
+        presentation_facet = StylePresentationFacet(
+            style_id=1,
+            facet_version="2026-04",
+            short_explanation="Soft Retro Prep reframes collegiate dressing through warmer colors and softer structure.",
+            one_sentence_description="A softened collegiate direction with warm neutrals and relaxed polish.",
+            what_makes_it_distinct_json=["Warm prep palette", "Relaxed but polished layering"],
+        )
         session = FakeAsyncSession(
             [
                 FakeExecuteResult([1]),
@@ -121,6 +200,12 @@ class StyleCatalogRepositoryTests(unittest.IsolatedAsyncioTestCase):
                 FakeExecuteResult([alias]),
                 FakeExecuteResult([trait]),
                 FakeExecuteResult([relation]),
+                FakeExecuteResult([knowledge_facet]),
+                FakeExecuteResult([visual_facet]),
+                FakeExecuteResult([fashion_facet]),
+                FakeExecuteResult([image_facet]),
+                FakeExecuteResult([relation_facet]),
+                FakeExecuteResult([presentation_facet]),
             ]
         )
 
@@ -133,6 +218,15 @@ class StyleCatalogRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card.style_id, "soft-retro-prep")
         self.assertEqual(card.source_ref, "https://example.com/soft-retro-prep")
         self.assertIn("retro prep", card.tags)
+        self.assertEqual(
+            card.summary,
+            "Soft Retro Prep reframes collegiate dressing through warmer colors and softer structure.",
+        )
         self.assertEqual(card.metadata["palette"], ["camel", "cream", "navy"])
-        self.assertEqual(card.metadata["hero_garments"], ["oxford shirt", "pleated chinos"])
-        self.assertEqual(card.metadata["historical_context"], "Draws from classic collegiate dressing.")
+        self.assertEqual(card.metadata["hero_garments"], ["camel blazer", "oxford shirt"])
+        self.assertEqual(card.metadata["core_style_logic"], ["Blend collegiate structure with softened warmth."])
+        self.assertEqual(
+            card.metadata["historical_context"],
+            "References collegiate heritage with a softer, modern filter.; Draws from classic collegiate dressing.",
+        )
+        self.assertTrue(card.metadata["has_enriched_facets"])

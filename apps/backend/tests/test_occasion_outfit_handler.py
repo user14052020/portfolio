@@ -1,9 +1,8 @@
 import unittest
 
+from app.application.product_behavior.services.generation_policy_service import GenerationPolicyService
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import (
-    GenerationScheduleRequest,
-    GenerationScheduleResult,
     KnowledgeItem,
     KnowledgeResult,
     OccasionExtractionOutput,
@@ -27,7 +26,6 @@ from app.domain.chat_modes import ChatMode, FlowState
 from app.domain.occasion_outfit.policies.occasion_clarification_policy import OccasionClarificationPolicy
 from app.domain.occasion_outfit.policies.occasion_completeness_policy import OccasionCompletenessPolicy
 from app.infrastructure.knowledge.occasion_knowledge_provider import StaticOccasionKnowledgeProvider
-from app.models.enums import GenerationStatus
 
 
 class FakeOccasionReasoner:
@@ -78,37 +76,11 @@ class FakePromptBuilder:
             "image_brief_en": brief.get("image_brief_en", ""),
             "recommendation_text": brief.get("recommendation_text", ""),
             "input_asset_id": brief.get("asset_id"),
+            "metadata": {"workflow_name": "occasion_outfit_variation"},
         }
 
 
-class FakeGenerationScheduler:
-    def __init__(self) -> None:
-        self.enqueued: list[GenerationScheduleRequest] = []
-
-    async def enqueue(self, request: GenerationScheduleRequest) -> GenerationScheduleResult:
-        self.enqueued.append(request)
-        return GenerationScheduleResult(
-            job_id="occasion-job-1",
-            status=GenerationStatus.PENDING.value,
-        )
-
-    async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
-        return context
-
-
-class FakeCheckpointWriter:
-    def __init__(self) -> None:
-        self.saved_contexts: list[ChatModeContext] = []
-
-    async def save_checkpoint(self, *, session_id: str, context: ChatModeContext) -> None:
-        self.saved_contexts.append(context.model_copy(deep=True))
-
-
-def build_handler(
-    reasoner: FakeOccasionReasoner,
-    scheduler: FakeGenerationScheduler,
-    checkpoint_writer: FakeCheckpointWriter | None = None,
-) -> OccasionOutfitHandler:
+def build_handler(reasoner: FakeOccasionReasoner) -> OccasionOutfitHandler:
     extraction_service = OccasionExtractionService(reasoner=reasoner)
     continue_use_case = ContinueOccasionOutfitUseCase(
         occasion_context_extractor=extraction_service,
@@ -127,21 +99,21 @@ def build_handler(
         start_use_case=StartOccasionOutfitUseCase(ClarificationMessageBuilder()),
         continue_use_case=continue_use_case,
         build_outfit_brief_use_case=build_outfit_brief,
-        generation_scheduler=scheduler,
-        context_checkpoint_writer=checkpoint_writer,
         reasoner=reasoner,
         fallback_reasoner=FakeFallbackReasoner(),
         knowledge_provider=FakeKnowledgeProvider(),
         reasoning_context_builder=ReasoningContextBuilder(),
-        generation_request_builder=GenerationRequestBuilder(prompt_builder=FakePromptBuilder()),
+        generation_request_builder=GenerationRequestBuilder(
+            prompt_builder=FakePromptBuilder(),
+            generation_policy_service=GenerationPolicyService(),
+        ),
     )
 
 
 class OccasionOutfitHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_command_enters_occasion_flow(self) -> None:
         reasoner = FakeOccasionReasoner()
-        scheduler = FakeGenerationScheduler()
-        handler = build_handler(reasoner, scheduler)
+        handler = build_handler(reasoner)
         context = ChatModeContext()
 
         response = await handler.handle(
@@ -162,8 +134,7 @@ class OccasionOutfitHandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_followup_with_missing_slots_returns_slot_specific_clarification(self) -> None:
         reasoner = FakeOccasionReasoner()
-        scheduler = FakeGenerationScheduler()
-        handler = build_handler(reasoner, scheduler)
+        handler = build_handler(reasoner)
         context = ChatModeContext(active_mode=ChatMode.OCCASION_OUTFIT)
         StartOccasionOutfitUseCase(ClarificationMessageBuilder()).execute(context=context, locale="en")
         reasoner.extraction = OccasionExtractionOutput(event_type="exhibition")
@@ -181,13 +152,10 @@ class OccasionOutfitHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
         self.assertEqual(context.flow_state, FlowState.AWAITING_OCCASION_CLARIFICATION)
         self.assertIn("time of day", (response.text_reply or "").lower())
-        self.assertEqual(len(scheduler.enqueued), 0)
 
-    async def test_followup_with_sufficient_slots_generates_job(self) -> None:
+    async def test_sufficient_slots_return_text_only_with_cta(self) -> None:
         reasoner = FakeOccasionReasoner()
-        scheduler = FakeGenerationScheduler()
-        checkpoint_writer = FakeCheckpointWriter()
-        handler = build_handler(reasoner, scheduler, checkpoint_writer)
+        handler = build_handler(reasoner)
         context = ChatModeContext(active_mode=ChatMode.OCCASION_OUTFIT)
         StartOccasionOutfitUseCase(ClarificationMessageBuilder()).execute(context=context, locale="en")
         reasoner.extraction = OccasionExtractionOutput(
@@ -208,14 +176,50 @@ class OccasionOutfitHandlerTests(unittest.IsolatedAsyncioTestCase):
             context=context,
         )
 
-        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(response.job_id, "occasion-job-1")
-        self.assertEqual(context.flow_state, FlowState.GENERATION_QUEUED)
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertTrue(response.can_offer_visualization)
+        self.assertEqual(response.cta_text, "Build a flat lay for this occasion?")
+        self.assertEqual(context.flow_state, FlowState.READY_FOR_GENERATION)
         self.assertEqual(context.occasion_context.event_type, "wedding")
         self.assertEqual(context.occasion_context.time_of_day, "day")
         self.assertEqual(context.occasion_context.season, "summer")
         self.assertEqual(context.occasion_context.desired_impression, "elegant")
-        self.assertEqual(len(scheduler.enqueued), 1)
-        self.assertEqual(len(checkpoint_writer.saved_contexts), 2)
-        self.assertEqual(checkpoint_writer.saved_contexts[0].flow_state, FlowState.READY_FOR_GENERATION)
-        self.assertEqual(checkpoint_writer.saved_contexts[1].flow_state, FlowState.GENERATION_QUEUED)
+
+    async def test_cta_confirmation_reuses_context_and_generates(self) -> None:
+        reasoner = FakeOccasionReasoner()
+        handler = build_handler(reasoner)
+        context = ChatModeContext(active_mode=ChatMode.OCCASION_OUTFIT)
+        StartOccasionOutfitUseCase(ClarificationMessageBuilder()).execute(context=context, locale="en")
+        reasoner.extraction = OccasionExtractionOutput(
+            event_type="wedding",
+            time_of_day="day",
+            season_or_weather="summer",
+            desired_impression="elegant",
+        )
+
+        await handler.handle(
+            command=ChatCommand(
+                session_id="occasion-handler-4",
+                locale="en",
+                message="Day wedding in summer, I want to look elegant",
+                user_message_id=4,
+                command_id="occasion-handler-4-a",
+            ),
+            context=context,
+        )
+
+        response = await handler.handle(
+            command=ChatCommand(
+                session_id="occasion-handler-4",
+                locale="en",
+                message="Confirm the visualization",
+                user_message_id=5,
+                command_id="occasion-handler-4-b",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
+            ),
+            context=context,
+        )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertFalse(response.can_offer_visualization)
+        self.assertIsNotNone(response.generation_payload)

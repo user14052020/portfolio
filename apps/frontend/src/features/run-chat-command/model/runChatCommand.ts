@@ -5,24 +5,16 @@ import type { Locale } from "@/shared/api/types";
 
 export interface QuickActionDefinition {
   id: CommandName;
-  kind: "pair" | "style" | "occasion";
+  kind: "style";
   label: string;
-  requestedIntent: CommandName;
-  commandName: CommandName;
+  requestedIntent: "style_exploration";
+  commandName: "style_exploration";
   commandStep: "start";
 }
 
 export function getQuickActionDefinitions(locale: Locale): QuickActionDefinition[] {
   if (locale === "ru") {
     return [
-      {
-        id: "garment_matching",
-        kind: "pair",
-        label: "Подобрать к вещи",
-        requestedIntent: "garment_matching",
-        commandName: "garment_matching",
-        commandStep: "start",
-      },
       {
         id: "style_exploration",
         kind: "style",
@@ -31,40 +23,16 @@ export function getQuickActionDefinitions(locale: Locale): QuickActionDefinition
         commandName: "style_exploration",
         commandStep: "start",
       },
-      {
-        id: "occasion_outfit",
-        kind: "occasion",
-        label: "Что надеть на событие",
-        requestedIntent: "occasion_outfit",
-        commandName: "occasion_outfit",
-        commandStep: "start",
-      },
     ];
   }
 
   return [
-    {
-      id: "garment_matching",
-      kind: "pair",
-      label: "Style a garment",
-      requestedIntent: "garment_matching",
-      commandName: "garment_matching",
-      commandStep: "start",
-    },
     {
       id: "style_exploration",
       kind: "style",
       label: "Try another style",
       requestedIntent: "style_exploration",
       commandName: "style_exploration",
-      commandStep: "start",
-    },
-    {
-      id: "occasion_outfit",
-      kind: "occasion",
-      label: "What should I wear?",
-      requestedIntent: "occasion_outfit",
-      commandName: "occasion_outfit",
       commandStep: "start",
     },
   ];
@@ -74,7 +42,6 @@ export function buildQuickActionCommandPayload({
   sessionId,
   locale,
   action,
-  assetId = null,
   clientMessageId,
 }: {
   sessionId: string;
@@ -83,8 +50,6 @@ export function buildQuickActionCommandPayload({
   assetId?: number | string | null;
   clientMessageId?: string;
 }): ChatCommandPayload {
-  const shouldSuppressAsset =
-    action.id === "occasion_outfit" || action.id === "style_exploration" || assetId == null;
   return {
     sessionId,
     locale,
@@ -92,7 +57,7 @@ export function buildQuickActionCommandPayload({
     commandName: action.commandName,
     commandStep: action.commandStep,
     message: null,
-    assetId: shouldSuppressAsset ? null : String(assetId),
+    assetId: null,
     metadata: {
       source: "quick_action",
       clientMessageId,

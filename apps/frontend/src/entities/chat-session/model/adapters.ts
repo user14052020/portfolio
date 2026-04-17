@@ -1,11 +1,17 @@
 import type { ChatResponse } from "@/entities/chat-session/model/types";
 import { adaptFrontendScenarioContext } from "@/entities/stylist-context/model/adapters";
+import type { VisualizationOfferState } from "@/entities/visualization-offer/model/types";
 import type { StylistMessageResponse } from "@/shared/api/types";
 
 export function adaptChatResponse(response: StylistMessageResponse): ChatResponse {
   const context = adaptFrontendScenarioContext(response.session_context);
   const replyText = response.decision.text_reply ?? response.recommendation_text ?? null;
   const jobId = response.decision.job_id ?? response.generation_job?.public_id ?? null;
+  const visualizationOffer: VisualizationOfferState = {
+    canOfferVisualization: Boolean(response.decision.can_offer_visualization),
+    ctaText: response.decision.cta_text ?? null,
+    visualizationType: response.decision.visualization_type ?? null,
+  };
   const base = {
     sessionId: response.session_id,
     assistantMessage: {
@@ -17,6 +23,7 @@ export function adaptChatResponse(response: StylistMessageResponse): ChatRespons
     activeMode: response.decision.active_mode,
     flowState: response.decision.flow_state,
     context,
+    visualizationOffer,
   } as const;
 
   switch (response.decision.decision_type) {

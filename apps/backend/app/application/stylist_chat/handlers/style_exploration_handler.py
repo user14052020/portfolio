@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.application.stylist_chat.contracts.command import ChatCommand
-from app.application.stylist_chat.contracts.ports import ContextCheckpointWriter, GenerationJobScheduler
+from app.application.stylist_chat.contracts.ports import ContextCheckpointWriter
 from app.application.stylist_chat.results.decision_result import DecisionResult
 from app.application.stylist_chat.use_cases.build_diversity_constraints import BuildDiversityConstraintsUseCase
 from app.application.stylist_chat.use_cases.build_style_exploration_brief import BuildStyleExplorationBriefUseCase
@@ -9,9 +9,7 @@ from app.application.stylist_chat.use_cases.persist_style_direction import Persi
 from app.application.stylist_chat.use_cases.select_candidate_style import SelectCandidateStyleUseCase
 from app.application.stylist_chat.use_cases.start_style_exploration import StartStyleExplorationUseCase
 from app.domain.chat_context import ChatModeContext
-from app.domain.chat_modes import FlowState
 from app.domain.state_machine.style_exploration_machine import StyleExplorationStateMachine
-from app.models.enums import GenerationStatus
 
 from .base import BaseChatModeHandler
 
@@ -27,7 +25,6 @@ class StyleExplorationHandler(BaseChatModeHandler):
         persist_style_direction_use_case: PersistStyleDirectionUseCase,
         style_history_service,
         style_history_provider,
-        generation_scheduler: GenerationJobScheduler,
         context_checkpoint_writer: ContextCheckpointWriter | None = None,
         **kwargs: Any,
     ) -> None:
@@ -39,7 +36,6 @@ class StyleExplorationHandler(BaseChatModeHandler):
         self.persist_style_direction_use_case = persist_style_direction_use_case
         self.style_history_service = style_history_service
         self.style_history_provider = style_history_provider
-        self.generation_scheduler = generation_scheduler
         self.context_checkpoint_writer = context_checkpoint_writer
 
     async def handle(
@@ -92,7 +88,7 @@ class StyleExplorationHandler(BaseChatModeHandler):
         decision = await self.run_reasoning(
             command=effective_command,
             context=context,
-            must_generate=True,
+            must_generate=False,
             style_seed=self.style_seed_from_context(selection.candidate_style),
             previous_style_directions=previous_style_directions,
             occasion_context=None,
@@ -116,60 +112,6 @@ class StyleExplorationHandler(BaseChatModeHandler):
         context.last_generated_outfit_summary = decision.text_reply
         if decision.generation_payload is not None:
             context.last_generation_prompt = decision.generation_payload.prompt
-            generation_intent = self.generation_request_builder.build_generation_intent(
-                mode=context.active_mode,
-                trigger="style_exploration",
-                reason="new_style_direction_selected",
-                must_generate=True,
-                source_message_id=command.user_message_id,
-            )
-            context.generation_intent = generation_intent
-            decision.generation_payload.generation_intent = generation_intent
-            schedule_request = self.generation_request_builder.build_schedule_request(
-                command=command,
-                context=context,
-                decision=decision,
-            )
-            if schedule_request is not None:
-                if context.last_generation_request_key == schedule_request.idempotency_key and context.current_job_id:
-                    decision.job_id = context.current_job_id
-                    context.flow_state = self._flow_state_from_generation_status(GenerationStatus.PENDING.value)
-                else:
-                    if self.context_checkpoint_writer is not None:
-                        await self.context_checkpoint_writer.save_checkpoint(
-                            session_id=command.session_id,
-                            context=context,
-                        )
-                    schedule_result = await self.generation_scheduler.enqueue(schedule_request)
-                    if schedule_result.blocked_by_active_job:
-                        original_telemetry = dict(decision.telemetry)
-                        context.current_job_id = schedule_result.job_id
-                        context.flow_state = self._flow_state_from_generation_status(schedule_result.status)
-                        decision = self.generation_request_builder.build_active_job_notice(
-                            context=context,
-                            locale=command.locale,
-                        )
-                        decision.telemetry.update(original_telemetry)
-                    elif self._flow_state_from_generation_status(schedule_result.status) == FlowState.RECOVERABLE_ERROR:
-                        original_telemetry = dict(decision.telemetry)
-                        decision = self.generation_request_builder.build_recoverable_error(
-                            context=context,
-                            locale=command.locale,
-                            error_code="generation_enqueue_failed",
-                        )
-                        context.current_job_id = None
-                        context.flow_state = FlowState.RECOVERABLE_ERROR
-                        decision.telemetry.update(original_telemetry)
-                    else:
-                        context.current_job_id = schedule_result.job_id
-                        context.last_generation_request_key = schedule_request.idempotency_key
-                        context.flow_state = self._flow_state_from_generation_status(schedule_result.status)
-                        decision.job_id = schedule_result.job_id
-                    if self.context_checkpoint_writer is not None:
-                        await self.context_checkpoint_writer.save_checkpoint(
-                            session_id=command.session_id,
-                            context=context,
-                        )
         decision.context_patch.update(style_context_patch)
         return decision
 
@@ -247,12 +189,3 @@ class StyleExplorationHandler(BaseChatModeHandler):
         if not current or not previous:
             return 0.0
         return round(len(current & previous) / len(current), 3)
-
-    def _flow_state_from_generation_status(self, status: str) -> FlowState:
-        if status == GenerationStatus.PENDING.value:
-            return FlowState.GENERATION_QUEUED
-        if status in {GenerationStatus.QUEUED.value, GenerationStatus.RUNNING.value}:
-            return FlowState.GENERATION_IN_PROGRESS
-        if status == GenerationStatus.COMPLETED.value:
-            return FlowState.COMPLETED
-        return FlowState.RECOVERABLE_ERROR

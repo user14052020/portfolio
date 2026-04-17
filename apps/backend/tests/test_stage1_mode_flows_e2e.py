@@ -3,6 +3,7 @@ import unittest
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.results.decision_result import DecisionType
 from app.domain.chat_modes import ChatMode, FlowState
+from app.models.enums import GenerationStatus
 
 try:
     from test_stylist_orchestrator import build_test_orchestrator
@@ -25,95 +26,119 @@ class Stage1ModeFlowsE2ETests(unittest.IsolatedAsyncioTestCase):
     async def run_command(self, command: ChatCommand):
         return await self.orchestrator.handle(command=command)
 
-    async def test_general_advice_followup_stays_in_general_mode(self) -> None:
+    async def test_hello_never_starts_generation(self) -> None:
         self.reasoner.route = "text_only"
+
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage1-e2e-hello",
+                locale="ru",
+                message="привет",
+                user_message_id=1,
+            )
+        )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_ONLY)
+        self.assertIsNone(response.job_id)
+        self.assertFalse(response.can_offer_visualization)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
+        self.assertEqual(len(self.scheduler.enqueued), 0)
+
+    async def test_style_button_is_a_valid_generation_trigger(self) -> None:
+        self.reasoner.route = "text_and_generation"
+
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage1-e2e-style-button",
+                locale="en",
+                message="Try another style",
+                requested_intent=ChatMode.STYLE_EXPLORATION,
+                command_name="style_exploration",
+                command_step="start",
+                user_message_id=1,
+                metadata={"source": "quick_action"},
+            )
+        )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(response.job_id, "job-1")
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.STYLE_EXPLORATION)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
+
+    async def test_post_style_generation_free_text_returns_to_general_dialog(self) -> None:
+        self.reasoner.route = "text_and_generation"
+        generated = await self.run_command(
+            ChatCommand(
+                session_id="stage1-e2e-reset",
+                locale="en",
+                message="Try another style",
+                requested_intent=ChatMode.STYLE_EXPLORATION,
+                command_name="style_exploration",
+                command_step="start",
+                user_message_id=1,
+                metadata={"source": "quick_action"},
+            )
+        )
+
+        self.assertEqual(generated.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.scheduler.job_statuses["job-1"] = GenerationStatus.COMPLETED
+        self.reasoner.route = "text_only"
+
+        followup = await self.run_command(
+            ChatCommand(
+                session_id="stage1-e2e-reset",
+                locale="en",
+                message="What shoes would work for everyday wear?",
+                user_message_id=2,
+            )
+        )
+
+        self.assertEqual(followup.decision_type, DecisionType.TEXT_ONLY)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.COMPLETED)
+        self.assertEqual(len(self.scheduler.enqueued), 1)
+
+    async def test_generation_can_start_from_confirmed_cta(self) -> None:
+        self.reasoner.route = "text_and_generation"
         first = await self.run_command(
             ChatCommand(
-                session_id="stage1-general-1",
+                session_id="stage1-e2e-cta",
                 locale="en",
                 message="How can I modernize a white shirt?",
                 user_message_id=1,
-                client_message_id="stage1-general-1-msg-1",
-            )
-        )
-        second = await self.run_command(
-            ChatCommand(
-                session_id="stage1-general-1",
-                locale="en",
-                message="And what shoes would work with it?",
-                user_message_id=2,
-                client_message_id="stage1-general-1-msg-2",
             )
         )
 
         self.assertEqual(first.decision_type, DecisionType.TEXT_ONLY)
-        self.assertEqual(second.decision_type, DecisionType.TEXT_ONLY)
-        self.assertEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.COMPLETED)
+        self.assertTrue(first.can_offer_visualization)
         self.assertEqual(len(self.scheduler.enqueued), 0)
 
-    async def test_general_advice_can_switch_explicitly_into_command_mode(self) -> None:
-        self.reasoner.route = "text_only"
-        await self.run_command(
-            ChatCommand(
-                session_id="stage1-transition-1",
-                locale="en",
-                message="How can I modernize a white shirt?",
-                user_message_id=1,
-                client_message_id="stage1-transition-1-msg-1",
-            )
-        )
-
-        command_response = await self.run_command(
-            ChatCommand(
-                session_id="stage1-transition-1",
-                locale="en",
-                message="Style around a garment",
-                requested_intent=ChatMode.GARMENT_MATCHING,
-                command_name="garment_matching",
-                command_step="start",
-                user_message_id=2,
-                client_message_id="stage1-transition-1-msg-2",
-            )
-        )
-
-        self.assertEqual(command_response.decision_type, DecisionType.CLARIFICATION_REQUIRED)
-        self.assertEqual(self.context_store.context.active_mode, ChatMode.GARMENT_MATCHING)
-        self.assertEqual(self.context_store.context.flow_state, FlowState.AWAITING_ANCHOR_GARMENT)
-
-    async def test_style_exploration_second_run_uses_history_and_does_not_fall_to_general_chat(self) -> None:
-        self.reasoner.route = "text_and_generation"
-        first = await self.run_command(
-            ChatCommand(
-                session_id="stage1-style-1",
-                locale="en",
-                message="Try another style",
-                requested_intent=ChatMode.STYLE_EXPLORATION,
-                command_name="style_exploration",
-                command_step="start",
-                user_message_id=1,
-                client_message_id="stage1-style-1-msg-1",
-            )
-        )
         second = await self.run_command(
             ChatCommand(
-                session_id="stage1-style-1",
+                session_id="stage1-e2e-cta",
                 locale="en",
-                message="Try another style",
-                requested_intent=ChatMode.STYLE_EXPLORATION,
-                command_name="style_exploration",
-                command_step="start",
+                message="Confirm the visualization",
                 user_message_id=2,
-                client_message_id="stage1-style-1-msg-2",
+                metadata={"source": "visualization_cta", "visualization_type": "flat_lay_reference"},
             )
         )
 
-        self.assertEqual(first.decision_type, DecisionType.TEXT_AND_GENERATE)
         self.assertEqual(second.decision_type, DecisionType.TEXT_AND_GENERATE)
-        self.assertEqual(self.context_store.context.active_mode, ChatMode.STYLE_EXPLORATION)
-        self.assertNotEqual(self.context_store.context.active_mode, ChatMode.GENERAL_ADVICE)
-        self.assertGreaterEqual(len(self.context_store.context.style_history), 2)
-        self.assertNotEqual(
-            self.context_store.context.style_history[-1].style_id,
-            self.context_store.context.style_history[-2].style_id,
+        self.assertEqual(second.job_id, "job-1")
+        self.assertEqual(len(self.scheduler.enqueued), 1)
+
+    async def test_generation_can_start_from_explicit_visual_text_request(self) -> None:
+        self.reasoner.route = "text_and_generation"
+
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage1-e2e-explicit",
+                locale="ru",
+                message="визуализируй мягкий интеллектуальный образ на вечернюю выставку",
+                user_message_id=1,
+            )
         )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(response.job_id, "job-1")
+        self.assertEqual(len(self.scheduler.enqueued), 1)

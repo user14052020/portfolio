@@ -107,10 +107,19 @@ class DatabaseStyleHistoryProvider(StyleHistoryProvider):
     def _style_context_from_card(self, card: KnowledgeCard) -> StyleDirectionContext:
         metadata = card.metadata or {}
         palette = [str(item).strip() for item in metadata.get("palette", []) if str(item).strip()]
-        garments = [str(item).strip() for item in metadata.get("hero_garments", []) if str(item).strip()]
+        garments = [
+            str(item).strip()
+            for item in (metadata.get("hero_garments") or metadata.get("garments") or [])
+            if str(item).strip()
+        ]
         materials = [str(item).strip() for item in metadata.get("materials", []) if str(item).strip()]
         silhouettes = [str(item).strip() for item in metadata.get("silhouettes", []) if str(item).strip()]
-        mood = [str(item).strip() for item in metadata.get("mood_keywords", []) if str(item).strip()]
+        mood = self._merge_unique_strings(
+            metadata.get("visual_motifs") or [],
+            metadata.get("lighting_mood") or [],
+            metadata.get("photo_treatment") or [],
+            metadata.get("mood_keywords") or [],
+        )
         return StyleDirectionContext(
             style_id=card.style_id,
             style_name=card.title,
@@ -118,8 +127,14 @@ class DatabaseStyleHistoryProvider(StyleHistoryProvider):
             palette=palette[:4],
             silhouette_family=(metadata.get("silhouette_family") or (silhouettes[0] if silhouettes else None)),
             hero_garments=garments[:4],
-            footwear=[str(item).strip() for item in metadata.get("footwear", []) if str(item).strip()][:3],
-            accessories=[str(item).strip() for item in metadata.get("accessories", []) if str(item).strip()][:3],
+            footwear=self._merge_unique_strings(
+                metadata.get("shoes") or [],
+                metadata.get("footwear") or [],
+            )[:3],
+            accessories=self._merge_unique_strings(
+                metadata.get("core_accessories") or [],
+                metadata.get("accessories") or [],
+            )[:3],
             materials=materials[:4],
             styling_mood=mood[:3],
             composition_type="editorial flat lay",
@@ -128,3 +143,18 @@ class DatabaseStyleHistoryProvider(StyleHistoryProvider):
             camera_distance="medium overhead",
             visual_preset="editorial_studio",
         )
+
+    def _merge_unique_strings(self, *values: object) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                cleaned = str(item).strip()
+                lowered = cleaned.lower()
+                if not cleaned or lowered in seen:
+                    continue
+                seen.add(lowered)
+                result.append(cleaned)
+        return result

@@ -2,8 +2,13 @@ import type { ChatMode, Locale } from "@/shared/api/types";
 
 export type CommandName = Exclude<ChatMode, "general_advice">;
 export type CommandStep = "start" | "followup" | "resume";
-export type CommandSource = "quick_action" | "chat_input" | "retry" | "system_resume";
-export type MessageSource = "chat_input" | "followup" | "system_retry";
+export type CommandSource =
+  | "quick_action"
+  | "chat_input"
+  | "retry"
+  | "system_resume"
+  | "visualization_cta";
+export type MessageSource = "chat_input" | "followup" | "system_retry" | "visualization_cta";
 
 export interface CommandMetadata {
   source: CommandSource;

@@ -15,9 +15,6 @@ class GeneralAdviceHandler(BaseChatModeHandler):
     ) -> DecisionResult:
         GeneralAdviceStateMachine.enter(context)
         GeneralAdviceStateMachine.accept_user_message(context)
-        context.should_auto_generate = self.generation_request_builder.explicitly_requests_generation(
-            command.normalized_message()
-        )
         decision = await self.run_reasoning(
             command=command,
             context=context,

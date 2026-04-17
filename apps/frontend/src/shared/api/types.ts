@@ -128,6 +128,12 @@ export interface GenerationPayload {
   generation_intent?: GenerationIntent | null;
 }
 
+export interface VisualizationOffer {
+  can_offer_visualization: boolean;
+  cta_text?: string | null;
+  visualization_type?: string | null;
+}
+
 export interface DecisionResult {
   decision_type: DecisionType;
   active_mode: ChatMode;
@@ -138,6 +144,10 @@ export interface DecisionResult {
   context_patch: Record<string, unknown>;
   telemetry: Record<string, unknown>;
   error_code?: string | null;
+  visualization_offer?: VisualizationOffer | null;
+  can_offer_visualization: boolean;
+  cta_text?: string | null;
+  visualization_type?: string | null;
 }
 
 export interface ChatModeContext {
@@ -162,6 +172,7 @@ export interface ChatModeContext {
   last_generation_request_key?: string | null;
   last_decision_type?: string | null;
   generation_intent?: GenerationIntent | null;
+  visualization_offer?: VisualizationOffer | null;
   updated_at: string;
   updated_by_message_id?: number | null;
 }
@@ -175,6 +186,14 @@ export interface GenerationJobOperation {
   action: string;
   actor: string;
   details: Record<string, unknown>;
+}
+
+export interface GenerationStyleExplanation {
+  style_id?: string | null;
+  style_name?: string | null;
+  short_explanation?: string | null;
+  supporting_text?: string | null;
+  distinct_points: string[];
 }
 
 export interface Role {
@@ -301,6 +320,23 @@ export interface SiteSettings {
   updated_at: string;
 }
 
+export interface StyleIngestionRuntimeSettings {
+  id: number;
+  source_name: string;
+  min_delay_seconds: number;
+  max_delay_seconds: number;
+  jitter_ratio: number;
+  empty_body_cooldown_min_seconds: number;
+  empty_body_cooldown_max_seconds: number;
+  retry_backoff_seconds: number;
+  retry_backoff_jitter_seconds: number;
+  worker_idle_sleep_seconds: number;
+  worker_lease_ttl_seconds: number;
+  worker_lease_heartbeat_interval_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GenerationJob {
   id: number;
   public_id: string;
@@ -328,6 +364,7 @@ export interface GenerationJob {
   queue_total?: number | null;
   queue_refresh_available_at?: string | null;
   queue_refresh_retry_after_seconds?: number | null;
+  style_explanation?: GenerationStyleExplanation | null;
   created_at: string;
   updated_at: string;
 }

@@ -19,6 +19,8 @@ export const fallbackSettings: SiteSettings = {
     github: "https://github.com/example"
   },
   skills: ["FastAPI", "Next.js", "ComfyUI", "React Three Fiber"],
+  message_cooldown_seconds: 60,
+  try_other_style_cooldown_seconds: 60,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString()
 };

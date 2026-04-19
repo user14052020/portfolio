@@ -14,7 +14,7 @@ export function AssistantPendingBubble({
   return (
     <div className="max-w-[620px]">
       <div
-        className="inline-flex items-center gap-1.5 py-1"
+        className="inline-flex items-center gap-1.5 rounded-[24px] rounded-tl-md border border-slate-200 bg-white/95 px-4 py-3 shadow-sm"
         role="status"
         aria-label={ariaLabel}
       >

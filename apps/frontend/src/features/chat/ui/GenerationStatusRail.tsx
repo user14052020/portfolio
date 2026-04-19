@@ -96,16 +96,16 @@ export function GenerationStatusRail({
   }
 
   return (
-    <div className="mb-3 border border-slate-200 bg-slate-50 px-4 py-3">
+    <div className="mb-4 rounded-[28px] border border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.98))] px-5 py-4 shadow-[0_16px_38px_rgba(15,23,42,0.05)]">
       <div className="mb-2 flex items-center justify-between gap-3">
         <p className="text-sm font-medium text-slate-800">{labels.title}</p>
         <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
           {Math.round(getProgress(job, isPreparing))}%
         </span>
       </div>
-      <div className="h-1.5 overflow-hidden bg-slate-200">
+      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
         <div
-          className="h-full bg-gradient-to-r from-[#d0a46d] to-[#8fae98] transition-all duration-500"
+          className="h-full rounded-full bg-gradient-to-r from-[#d0a46d] to-[#8fae98] transition-all duration-500"
           style={{ width: `${getProgress(job, isPreparing)}%` }}
         />
       </div>

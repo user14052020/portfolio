@@ -38,3 +38,5 @@ class SiteSettingsRead(TimestampedRead):
     about_text_en: str
     socials: dict[str, str]
     skills: list[str]
+    message_cooldown_seconds: int
+    try_other_style_cooldown_seconds: int

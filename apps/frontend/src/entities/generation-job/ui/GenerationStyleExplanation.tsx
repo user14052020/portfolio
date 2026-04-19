@@ -47,7 +47,7 @@ export function GenerationStyleExplanation({
   }
 
   return (
-    <div className="border border-slate-200 bg-[#f8f4ed] px-4 py-3">
+    <div className="rounded-[24px] border border-[#e7d7bf] bg-[#f8f4ed]/95 px-4 py-3 shadow-sm">
       <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
         {locale === "ru" ? "О стиле" : "About the style"}
       </p>

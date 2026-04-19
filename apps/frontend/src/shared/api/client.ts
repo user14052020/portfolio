@@ -11,6 +11,7 @@ import type {
   Project,
   SiteSettings,
   StyleIngestionRuntimeSettings,
+  StylistRuntimeSettings,
   StylistMessageResponse,
   TokenPair,
   UploadedAsset,
@@ -23,6 +24,20 @@ export async function getSiteSettings(fetchOptions?: Pick<RequestOptions, "cache
 
 export async function updateSiteSettings(payload: Record<string, unknown>, token: string) {
   return request<SiteSettings>("/site-settings", {
+    method: "PUT",
+    token,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getStylistRuntimeSettings(token: string) {
+  return request<StylistRuntimeSettings>("/stylist-runtime-settings", {
+    token
+  });
+}
+
+export async function updateStylistRuntimeSettings(payload: Record<string, unknown>, token: string) {
+  return request<StylistRuntimeSettings>("/stylist-runtime-settings", {
     method: "PUT",
     token,
     body: JSON.stringify(payload)

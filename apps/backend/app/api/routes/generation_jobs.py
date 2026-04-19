@@ -4,18 +4,21 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_admin
+from app.api.deps import get_optional_current_user, require_admin
 from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.models import GenerationJob, User
 from app.models.enums import GenerationStatus
+from app.domain.usage_access_policy import RequestedAction
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.schemas.generation_job import GenerationJobCreate, GenerationJobRead
 from app.services.generation import QueueRefreshCooldownError, generation_service
+from app.services.usage_access_policy import UsageAccessPolicyService
 
 
 router = APIRouter(prefix="/generation-jobs", tags=["generation-jobs"])
 settings = get_settings()
+usage_access_policy_service = UsageAccessPolicyService()
 ACTIVE_GENERATION_STATUSES = {
     GenerationStatus.PENDING,
     GenerationStatus.QUEUED,
@@ -45,7 +48,37 @@ def should_sync_generation_job_on_read(job: GenerationJob) -> bool:
 async def create_generation_job(
     payload: GenerationJobCreate,
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> GenerationJob:
+    try:
+        subject = usage_access_policy_service.build_subject(
+            current_user=current_user,
+            session_id=payload.session_id,
+            metadata=payload.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    access_decision = await usage_access_policy_service.evaluate(
+        session,
+        subject=subject,
+        action=RequestedAction(action_type="generation"),
+    )
+    if not access_decision.is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": access_decision.denial_reason,
+                "message": "Daily generation limit reached for this subject.",
+                "remaining_generations": access_decision.remaining_generations,
+                "remaining_chat_seconds": access_decision.remaining_chat_seconds,
+            },
+        )
+
+    payload.metadata = {
+        **(payload.metadata if isinstance(payload.metadata, dict) else {}),
+        **usage_access_policy_service.subject_to_metadata(subject),
+    }
     job = await generation_service.create_and_submit(session, payload)
     await session.commit()
     return job

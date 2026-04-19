@@ -176,6 +176,10 @@ class GenerationRequestBuilder:
         generation_payload = decision.generation_payload
         if generation_payload is None:
             return None
+        schedule_metadata = dict(generation_payload.metadata)
+        for key in ("usage_subject_id", "usage_session_id", "usage_user_id", "usage_is_admin"):
+            if key in command.metadata and key not in schedule_metadata:
+                schedule_metadata[key] = command.metadata[key]
         return GenerationScheduleRequest(
             session_id=command.session_id,
             locale=command.locale,
@@ -191,7 +195,7 @@ class GenerationRequestBuilder:
             workflow_version=generation_payload.metadata.get("workflow_version"),
             visual_generation_plan=generation_payload.visual_generation_plan,
             generation_metadata=generation_payload.generation_metadata,
-            metadata=generation_payload.metadata,
+            metadata=schedule_metadata,
         )
 
     def build_clarification_decision(self, *, context: ChatModeContext, text: str) -> DecisionResult:
@@ -223,6 +227,31 @@ class GenerationRequestBuilder:
             flow_state=context.flow_state,
             text_reply=notice,
         )
+
+    def downgrade_generation_to_text_only(
+        self,
+        *,
+        decision: DecisionResult,
+        context: ChatModeContext,
+        notice_text: str,
+    ) -> DecisionResult:
+        base_text = (decision.text_reply or "").strip()
+        notice = notice_text.strip()
+        if base_text and notice and notice not in base_text:
+            text_reply = f"{base_text}\n\n{notice}"
+        else:
+            text_reply = base_text or notice
+        downgraded = decision.model_copy(deep=True)
+        downgraded.decision_type = DecisionType.TEXT_ONLY
+        downgraded.flow_state = context.flow_state
+        downgraded.text_reply = text_reply
+        downgraded.generation_payload = None
+        downgraded.job_id = None
+        downgraded.visualization_offer = None
+        downgraded.can_offer_visualization = False
+        downgraded.cta_text = None
+        downgraded.visualization_type = None
+        return downgraded
 
     def build_generation_intent(
         self,

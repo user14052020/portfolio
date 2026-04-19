@@ -10,6 +10,7 @@ from app.application.knowledge.use_cases.build_knowledge_query import BuildKnowl
 from app.application.knowledge.use_cases.resolve_knowledge_bundle import ResolveKnowledgeBundleUseCase
 from app.application.prompt_building.services.prompt_pipeline_builder import PromptPipelineBuilder
 from app.application.stylist_chat.contracts.command import ChatCommand
+from app.api.deps import get_optional_current_user
 from app.db.session import get_db_session
 from app.domain.chat_context import ChatModeContext
 from app.infrastructure.knowledge.caches.knowledge_cache import InMemoryKnowledgeCache
@@ -20,6 +21,7 @@ from app.infrastructure.knowledge.repositories.materials_fabrics_repository impo
 from app.infrastructure.knowledge.repositories.style_catalog_repository import DatabaseStyleCatalogRepository
 from app.infrastructure.knowledge.repositories.tailoring_principles_repository import DatabaseTailoringPrinciplesRepository
 from app.infrastructure.knowledge.search.knowledge_search_adapter import DefaultKnowledgeSearchAdapter
+from app.models import User
 from app.schemas.stylist import (
     ChatHistoryPageRead,
     KnowledgePreviewRequest,
@@ -40,8 +42,9 @@ router = APIRouter(prefix="/stylist-chat", tags=["stylist-chat"])
 async def send_stylist_message(
     payload: StylistMessageRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> StylistMessageResponse:
-    result = await stylist_service.process_message(session, payload)
+    result = await stylist_service.process_message(session, payload, current_user=current_user)
     await session.commit()
     return StylistMessageResponse.model_validate(result)
 
@@ -50,8 +53,9 @@ async def send_stylist_message(
 async def request_stylist_visualization(
     payload: StylistVisualizationRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> StylistMessageResponse:
-    result = await stylist_service.request_visualization(session, payload)
+    result = await stylist_service.request_visualization(session, payload, current_user=current_user)
     await session.commit()
     return StylistMessageResponse.model_validate(result)
 

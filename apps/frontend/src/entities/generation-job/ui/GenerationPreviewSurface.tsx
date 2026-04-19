@@ -20,7 +20,7 @@ export function GenerationPreviewSurface({
 
   if (job?.status === "failed" || job?.status === "cancelled") {
     return (
-      <div className="mt-3 max-w-[320px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+      <div className="mt-3 max-w-[320px] rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700 shadow-sm">
         {job.error_message ||
           (locale === "ru"
             ? "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ."
@@ -39,7 +39,7 @@ export function GenerationPreviewSurface({
         href={job.result_url}
         target="_blank"
         rel="noreferrer"
-        className="block cursor-pointer overflow-hidden border border-slate-200 bg-white"
+        className="block cursor-pointer overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.10)]"
         title={locale === "ru" ? "РћС‚РєСЂС‹С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ" : "Open image"}
       >
         <Image

@@ -8,6 +8,7 @@ import { getSiteSettings, updateSiteSettings } from "@/shared/api/client";
 import type { SiteSettings } from "@/shared/api/types";
 import { WindowFrame } from "@/shared/ui/WindowFrame";
 import { StyleIngestionSettingsManager } from "@/widgets/admin/ui/StyleIngestionSettingsManager";
+import { StylistRuntimeSettingsManager } from "@/widgets/admin/ui/StylistRuntimeSettingsManager";
 
 export function SettingsManager() {
   const { tokens } = useAdminAuth();
@@ -118,6 +119,8 @@ export function SettingsManager() {
           </Button>
         </Stack>
       </WindowFrame>
+
+      <StylistRuntimeSettingsManager />
 
       <StyleIngestionSettingsManager />
     </div>

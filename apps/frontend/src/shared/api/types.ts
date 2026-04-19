@@ -316,6 +316,18 @@ export interface SiteSettings {
   about_text_en: string;
   socials: Record<string, string>;
   skills: string[];
+  message_cooldown_seconds: number;
+  try_other_style_cooldown_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StylistRuntimeSettings {
+  id: number;
+  daily_generation_limit_non_admin: number;
+  daily_chat_seconds_limit_non_admin: number;
+  message_cooldown_seconds: number;
+  try_other_style_cooldown_seconds: number;
   created_at: string;
   updated_at: string;
 }

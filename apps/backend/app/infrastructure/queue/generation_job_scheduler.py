@@ -9,16 +9,22 @@ from app.application.stylist_chat.contracts.ports import (
     GenerationScheduleResult,
 )
 from app.domain.chat_context import ChatModeContext
+from app.domain.usage_access_policy import (
+    USAGE_DENIAL_REASON_DAILY_GENERATION_LIMIT,
+    RequestedAction,
+)
 from app.models.enums import GenerationStatus
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.schemas.generation_job import GenerationJobCreate
 from app.services.generation import generation_service
+from app.services.usage_access_policy import UsageAccessPolicyService
 
 
 class DefaultGenerationJobScheduler(GenerationJobScheduler):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.session_flow_state_service = SessionFlowStateService()
+        self.usage_access_policy_service = UsageAccessPolicyService()
 
     async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
         if not context.current_job_id:
@@ -50,6 +56,27 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
                 status=enriched.status.value,
                 job=enriched,
                 blocked_by_active_job=True,
+            )
+
+        subject = self.usage_access_policy_service.build_subject(
+            session_id=request.session_id,
+            metadata=request.metadata,
+            trusted_metadata=True,
+        )
+        access_decision = await self.usage_access_policy_service.evaluate(
+            self.session,
+            subject=subject,
+            action=RequestedAction(action_type="generation"),
+        )
+        if not access_decision.is_allowed:
+            return GenerationScheduleResult(
+                job_id=None,
+                status="denied",
+                job=None,
+                notice_text=self._usage_limit_notice(
+                    locale=request.locale,
+                    denial_reason=access_decision.denial_reason,
+                ),
             )
 
         generation_job = await generation_service.create_and_submit(
@@ -104,3 +131,16 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
             cleaned = raw_value.strip()
             return cleaned or None
         return None
+
+    def _usage_limit_notice(self, *, locale: str, denial_reason: str | None) -> str:
+        if denial_reason == USAGE_DENIAL_REASON_DAILY_GENERATION_LIMIT:
+            return (
+                "На сегодня лимит генераций исчерпан. Текстовые рекомендации останутся доступны, а визуализацию можно будет запустить позже."
+                if locale == "ru"
+                else "Today's generation limit has been reached. Text recommendations stay available, and visualization can be started later."
+            )
+        return (
+            "Сейчас генерацию запустить нельзя. Попробуйте позже."
+            if locale == "ru"
+            else "Generation cannot be started right now. Please try again later."
+        )

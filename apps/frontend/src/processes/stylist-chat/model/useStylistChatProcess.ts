@@ -46,6 +46,13 @@ import {
 
 type BackendState = "connecting" | "connected" | "error";
 type ChatAvailability = "online" | "offline";
+type ChatCooldownActionType = "message" | "try_other_style";
+
+type ChatCooldownState = {
+  actionType: ChatCooldownActionType;
+  endsAt: number;
+  cooldownSeconds: number;
+};
 
 function getErrorPayloadDetail(error: unknown) {
   if (!(error instanceof Error)) {
@@ -69,6 +76,19 @@ function getRemainingSeconds(endsAt: number | null, now: number) {
   return Math.max(0, Math.ceil((endsAt - now) / 1000));
 }
 
+function resolveCooldownActionType(detail: Record<string, unknown>): ChatCooldownActionType | null {
+  if (detail.action_type === "message" || detail.action_type === "try_other_style") {
+    return detail.action_type;
+  }
+  if (detail.code === "message_cooldown") {
+    return "message";
+  }
+  if (detail.code === "try_other_style_cooldown") {
+    return "try_other_style";
+  }
+  return null;
+}
+
 function createEmptyVisualizationOffer(): VisualizationOfferState {
   return {
     canOfferVisualization: false,
@@ -77,7 +97,13 @@ function createEmptyVisualizationOffer(): VisualizationOfferState {
   };
 }
 
-export function useStylistChatProcess(locale: Locale) {
+export function useStylistChatProcess(
+  locale: Locale,
+  cooldownConfig: {
+    messageCooldownSeconds: number;
+    tryOtherStyleCooldownSeconds: number;
+  }
+) {
   const [bootstrap] = useState(() => {
     const nextSessionId = createSessionId();
     const persistedState = readPersistedStylistChatUiState(nextSessionId);
@@ -131,6 +157,7 @@ export function useStylistChatProcess(locale: Locale) {
   const [backendState, setBackendState] = useState<BackendState>("connected");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
+  const [chatCooldown, setChatCooldown] = useState<ChatCooldownState | null>(null);
   const messagesRef = useRef(messages);
   const chatAvailability: ChatAvailability = backendState === "error" ? "offline" : "online";
   const queueRefreshAvailableAt = activeJob?.queue_refresh_available_at
@@ -141,10 +168,56 @@ export function useStylistChatProcess(locale: Locale) {
   const isGenerationQueued = isGenerationJobQueued(activeJob);
   const isEditorLocked = isSending || isUploading;
   const canSubmitDraft = Boolean(input.trim() || uploadedAsset);
-  const isSendLocked = isEditorLocked || !canSubmitDraft;
+  const chatCooldownRemainingSeconds = getRemainingSeconds(chatCooldown?.endsAt ?? null, clockTick);
+  const isChatCooldownActive = chatCooldownRemainingSeconds > 0;
+  const isSendLocked = isEditorLocked || !canSubmitDraft || isChatCooldownActive;
   const isGenerationActionLocked = isSending || isUploading || isRefreshingQueue || hasActiveGenerationJob;
   const canRequestVisualization =
     visualizationOffer.canOfferVisualization && !scenarioContext.pendingClarification && !isGenerationActionLocked;
+
+  const armChatCooldown = (actionType: ChatCooldownActionType, cooldownSeconds: number, endsAt?: number | null) => {
+    if (cooldownSeconds <= 0) {
+      setChatCooldown(null);
+      return;
+    }
+    const resolvedEndsAt = endsAt ?? Date.now() + cooldownSeconds * 1000;
+    if (!Number.isFinite(resolvedEndsAt) || resolvedEndsAt <= Date.now()) {
+      setChatCooldown(null);
+      return;
+    }
+    setChatCooldown({
+      actionType,
+      endsAt: resolvedEndsAt,
+      cooldownSeconds,
+    });
+  };
+
+  const syncCooldownFromErrorDetail = (detail: Record<string, unknown> | null) => {
+    if (!detail) {
+      return false;
+    }
+    const actionType = resolveCooldownActionType(detail);
+    if (!actionType) {
+      return false;
+    }
+    const nextAllowedAt =
+      typeof detail.next_allowed_at === "string" ? Date.parse(detail.next_allowed_at) : Number.NaN;
+    const fallbackCooldownSeconds =
+      actionType === "try_other_style"
+        ? cooldownConfig.tryOtherStyleCooldownSeconds
+        : cooldownConfig.messageCooldownSeconds;
+    const cooldownSeconds =
+      typeof detail.cooldown_seconds === "number" && Number.isFinite(detail.cooldown_seconds)
+        ? detail.cooldown_seconds
+        : fallbackCooldownSeconds;
+    const endsAt = Number.isFinite(nextAllowedAt)
+      ? nextAllowedAt
+      : typeof detail.retry_after_seconds === "number"
+        ? Date.now() + detail.retry_after_seconds * 1000
+        : null;
+    armChatCooldown(actionType, cooldownSeconds, endsAt);
+    return true;
+  };
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -159,6 +232,12 @@ export function useStylistChatProcess(locale: Locale) {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (chatCooldown && chatCooldownRemainingSeconds <= 0) {
+      setChatCooldown(null);
+    }
+  }, [chatCooldown, chatCooldownRemainingSeconds]);
 
   useEffect(() => {
     let isMounted = true;
@@ -378,9 +457,11 @@ export function useStylistChatProcess(locale: Locale) {
       });
 
       setUploadedAsset(null);
+      armChatCooldown("try_other_style", cooldownConfig.tryOtherStyleCooldownSeconds);
       handleServerResponse({ response, previousActiveJob });
     } catch (error) {
       setBackendState("error");
+      syncCooldownFromErrorDetail(getErrorPayloadDetail(error));
       setErrorMessage(
         error instanceof Error && error.message
           ? error.message
@@ -438,12 +519,14 @@ export function useStylistChatProcess(locale: Locale) {
               })
             );
 
+      armChatCooldown("message", cooldownConfig.messageCooldownSeconds);
       handleServerResponse({ response, previousActiveJob });
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
       setInput(draftInput);
       setUploadedAsset(draftUploadedAsset);
       setBackendState("error");
+      syncCooldownFromErrorDetail(getErrorPayloadDetail(error));
       setErrorMessage(
         error instanceof Error && error.message
           ? error.message
@@ -505,9 +588,11 @@ export function useStylistChatProcess(locale: Locale) {
         visualizationOffer.visualizationType ?? visualizationOffer.ctaText ?? "visualization_cta"
       );
       setUploadedAsset(null);
+      armChatCooldown("message", cooldownConfig.messageCooldownSeconds);
       handleServerResponse({ response, previousActiveJob });
     } catch (error) {
       setBackendState("error");
+      syncCooldownFromErrorDetail(getErrorPayloadDetail(error));
       setErrorMessage(
         error instanceof Error && error.message
           ? error.message
@@ -582,6 +667,10 @@ export function useStylistChatProcess(locale: Locale) {
     isEditorLocked,
     isSendLocked,
     isGenerationActionLocked,
+    isChatCooldownActive,
+    chatCooldownRemainingSeconds,
+    chatCooldownActionType: chatCooldown?.actionType ?? null,
+    chatCooldownSeconds: chatCooldown?.cooldownSeconds ?? 0,
     isRefreshingQueue,
     hasActiveGenerationJob,
     isGenerationQueued,

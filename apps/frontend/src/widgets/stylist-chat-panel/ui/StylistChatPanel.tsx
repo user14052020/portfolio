@@ -1,16 +1,17 @@
 "use client";
 
-import { ActionIcon } from "@mantine/core";
-import { IconArrowUp } from "@tabler/icons-react";
 import { useLayoutEffect, useRef } from "react";
 
 import { UploadArea } from "@/features/chat/ui/UploadArea";
+import { ChatCooldownSendControl } from "@/features/chat-cooldown/ui/ChatCooldownSendControl";
 import { GenerationStatusRail } from "@/features/chat/ui/GenerationStatusRail";
 import { getQuickActionDefinitions } from "@/features/run-chat-command/model/runChatCommand";
 import { getScenarioPlaceholder } from "@/processes/stylist-chat/model/lib";
 import { useStylistChatProcess } from "@/processes/stylist-chat/model/useStylistChatProcess";
 import type { SiteSettings } from "@/shared/api/types";
 import { useI18n } from "@/shared/i18n/I18nProvider";
+import { InputSurface } from "@/shared/ui/InputSurface";
+import { SoftButton } from "@/shared/ui/SoftButton";
 import { ChatThread } from "@/widgets/chat-thread/ui/ChatThread";
 
 const RU_ASSISTANT_FALLBACK = "Валентин";
@@ -50,7 +51,10 @@ function getStatusBadge(locale: "ru" | "en", availability: "online" | "offline",
 
 export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
   const { locale } = useI18n();
-  const chat = useStylistChatProcess(locale);
+  const chat = useStylistChatProcess(locale, {
+    messageCooldownSeconds: settings.message_cooldown_seconds,
+    tryOtherStyleCooldownSeconds: settings.try_other_style_cooldown_seconds,
+  });
   const quickActions = getQuickActionDefinitions(locale);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -72,6 +76,31 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
       : "Start with “Try another style” or just describe the garment, occasion, or styling question. If visualization makes sense, I will offer it as a separate CTA.";
   const chatPlaceholder = getScenarioPlaceholder(chat.scenarioContext, locale);
   const statusBadge = getStatusBadge(locale, chat.chatAvailability, isGenerationActive(chat.activeJob?.status));
+  const interactionCooldownReason = chat.isChatCooldownActive
+    ? chat.chatCooldownActionType === "try_other_style"
+      ? locale === "ru"
+        ? "Чат временно заблокирован после выбора нового стиля"
+        : "The chat is temporarily locked after trying another style"
+      : locale === "ru"
+        ? "Чат временно заблокирован после отправки сообщения"
+        : "The chat is temporarily locked after sending a message"
+    : null;
+  const sendControlDisabledReason = chat.isChatCooldownActive
+    ? chat.chatCooldownActionType === "try_other_style"
+      ? locale === "ru"
+        ? "Повторный запуск нового стиля временно заблокирован"
+        : "Trying another style is temporarily locked"
+      : locale === "ru"
+        ? "Отправка сообщений временно заблокирована"
+        : "Sending messages is temporarily locked"
+    : null;
+  const sendControlHardDisabled =
+    chat.isEditorLocked || !chat.scenarioContext.canSendFreeformMessage || (!chat.isChatCooldownActive && !chat.input.trim() && !chat.uploadedAsset);
+  const areChatInteractionsBlocked = chat.isChatCooldownActive;
+  const areQuickActionsDisabled = chat.isGenerationActionLocked || areChatInteractionsBlocked;
+  const canShowVisualizationCta =
+    chat.visualizationOffer.canOfferVisualization && !chat.scenarioContext.pendingClarification;
+  const isVisualizationCtaDisabled = chat.isGenerationActionLocked || areChatInteractionsBlocked;
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -114,8 +143,8 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
 
   return (
     <section className="space-y-6">
-      <div className="border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_24px_64px_rgba(15,23,42,0.08)]">
+        <div className="flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.94),rgba(255,255,255,0.98))] px-6 py-5">
           <div>
             <p className="font-display text-sm text-slate-900">{assistantName}</p>
             <p className="text-sm text-slate-500">{chatSubtitle}</p>
@@ -125,7 +154,7 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
 
         <div
           ref={scrollContainerRef}
-          className="h-[480px] overflow-y-auto px-5 py-6"
+          className="h-[480px] overflow-y-auto bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-6 py-6"
           onScroll={(event) => {
             const container = event.currentTarget;
             shouldStickToBottomRef.current = isNearBottom(container);
@@ -164,31 +193,36 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
           <div className="mb-3 space-y-3">
             <div className="flex flex-wrap gap-2">
               {quickActions.map((action) => (
-                <button
+                <SoftButton
                   key={action.id}
-                  type="button"
                   onClick={() => void chat.runQuickAction(action.id)}
-                  disabled={chat.isGenerationActionLocked}
-                  className="border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-900 hover:text-slate-900 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                  disabled={areQuickActionsDisabled}
+                  title={interactionCooldownReason ?? undefined}
+                  tone="neutral"
+                  shape="pill"
                 >
                   {action.label}
-                </button>
+                </SoftButton>
               ))}
             </div>
 
-            {chat.canRequestVisualization ? (
-              <button
-                type="button"
+            {canShowVisualizationCta ? (
+              <SoftButton
                 onClick={() => void chat.requestVisualization()}
-                disabled={!chat.canRequestVisualization}
-                className="w-full border border-[#d0a46d] bg-[#fff7ec] px-4 py-3 text-left text-sm font-medium text-slate-800 transition hover:border-slate-900 hover:bg-[#fff1d9] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                disabled={isVisualizationCtaDisabled}
+                title={interactionCooldownReason ?? undefined}
+                tone="accent"
+                shape="surface"
+                fullWidth
+                align="left"
+                className="font-medium"
               >
                 {chat.visualizationOffer.ctaText ?? (locale === "ru" ? "Собрать flat lay референс?" : "Build a flat lay reference?")}
-              </button>
+              </SoftButton>
             ) : null}
 
             {chat.scenarioContext.pendingClarificationText ? (
-              <div className="border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm text-slate-700 shadow-sm">
                 <p className="font-medium">
                   {locale === "ru" ? "Нужно уточнение" : "Need a follow-up"}
                 </p>
@@ -197,7 +231,7 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
             ) : null}
 
             {chat.uploadedAsset ? (
-              <div className="flex items-center justify-between border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <div className="flex items-center justify-between rounded-[24px] border border-slate-200 bg-white/90 px-4 py-3 text-sm text-slate-700 shadow-sm">
                 <span>
                   {locale === "ru" ? "Прикреплённый asset" : "Attached asset"}: {chat.uploadedAsset.original_filename}
                 </span>
@@ -212,18 +246,19 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
             ) : null}
           </div>
 
-          <div className="border border-slate-200 bg-white px-3 py-2">
+          <InputSurface disabled={chat.isEditorLocked || areChatInteractionsBlocked} className="px-3 py-2.5">
             <div className="flex items-end gap-3">
               <UploadArea
                 onSelect={(file) => void chat.handleAttachAsset(file)}
                 isLoading={chat.isUploading}
                 filename={chat.uploadedAsset?.original_filename}
-                disabled={!chat.scenarioContext.canAttachAsset || chat.isEditorLocked}
+                disabled={!chat.scenarioContext.canAttachAsset || chat.isEditorLocked || areChatInteractionsBlocked}
               />
               <textarea
                 ref={textareaRef}
                 value={chat.input}
-                disabled={chat.isEditorLocked || !chat.scenarioContext.canSendFreeformMessage}
+                disabled={chat.isEditorLocked || !chat.scenarioContext.canSendFreeformMessage || areChatInteractionsBlocked}
+                title={interactionCooldownReason ?? undefined}
                 onChange={(event) => chat.setInput(event.currentTarget.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
@@ -237,18 +272,17 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
                 placeholder={chatPlaceholder}
                 className="min-h-[44px] flex-1 resize-none overflow-hidden border-0 bg-transparent py-[10px] text-base leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
               />
-              <ActionIcon
-                radius={0}
-                size="xl"
-                color="dark"
-                onClick={() => void chat.sendComposerMessage()}
-                disabled={chat.isSendLocked}
-                className="h-11 w-11 self-end rounded-none bg-slate-900 text-white transition hover:bg-slate-800 disabled:bg-slate-300"
-              >
-                <IconArrowUp size={18} />
-              </ActionIcon>
+              <ChatCooldownSendControl
+                isLocked={chat.isChatCooldownActive}
+                secondsRemaining={chat.chatCooldownRemainingSeconds}
+                cooldownSeconds={chat.chatCooldownSeconds}
+                onSubmit={() => void chat.sendComposerMessage()}
+                disabled={sendControlHardDisabled}
+                disabledReason={sendControlDisabledReason}
+                variant="dark"
+              />
             </div>
-          </div>
+          </InputSurface>
         </div>
       </div>
     </section>

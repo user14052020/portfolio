@@ -111,6 +111,16 @@ class StylistChatOrchestrator:
                         locale=command.locale,
                     )
                     decision.telemetry.update(original_telemetry)
+                elif schedule_result.notice_text:
+                    original_telemetry = dict(decision.telemetry)
+                    context.current_job_id = None
+                    context.flow_state = FlowState.COMPLETED
+                    decision = self.generation_request_builder.downgrade_generation_to_text_only(
+                        decision=decision,
+                        context=context,
+                        notice_text=schedule_result.notice_text,
+                    )
+                    decision.telemetry.update(original_telemetry)
                 elif self._flow_state_from_generation_status(schedule_result.status) == FlowState.RECOVERABLE_ERROR:
                     original_telemetry = dict(decision.telemetry)
                     decision = self.generation_request_builder.build_recoverable_error(

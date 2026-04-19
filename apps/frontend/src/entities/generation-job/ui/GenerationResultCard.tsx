@@ -61,7 +61,7 @@ export function GenerationResultCard({
   return (
     <div className="max-w-[620px] space-y-2">
       <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{assistantLabel}</p>
-      <div className="w-full max-w-[620px] border border-slate-200 bg-slate-50 p-3">
+      <div className="w-full max-w-[620px] rounded-[28px] border border-slate-200 bg-white/95 p-4 shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
         <div className="mb-3 flex items-center justify-between gap-3">
           <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
             {locale === "ru" ? "Р“РµРЅРµСЂР°С†РёСЏ РѕР±СЂР°Р·Р°" : "Outfit generation"}
@@ -70,7 +70,7 @@ export function GenerationResultCard({
         </div>
 
         {job?.result_url ? (
-          <div className="overflow-hidden border border-slate-200 bg-white">
+          <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
             <Image
               src={job.result_url}
               alt={locale === "ru" ? "РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ РѕР±СЂР°Р·" : "Generated outfit"}
@@ -81,7 +81,7 @@ export function GenerationResultCard({
             />
           </div>
         ) : (
-          <div className="relative flex aspect-square items-center justify-center overflow-hidden border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(208,164,109,0.22),_transparent_45%),linear-gradient(135deg,_#f8fafc,_#eef2f7)]">
+          <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-[22px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(208,164,109,0.22),_transparent_45%),linear-gradient(135deg,_#f8fafc,_#eef2f7)]">
             <div className="absolute inset-0 animate-pulse bg-[linear-gradient(135deg,rgba(255,255,255,0.1),rgba(255,255,255,0.45),rgba(255,255,255,0.08))]" />
             <div className="relative z-10 flex flex-col items-center gap-3 px-6 text-center">
               <Loader size="sm" color="dark" />
@@ -96,9 +96,9 @@ export function GenerationResultCard({
           </div>
         ) : null}
 
-        <div className="mt-3 h-1.5 overflow-hidden bg-slate-200">
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
           <div
-            className="h-full bg-gradient-to-r from-[#d0a46d] to-[#8fae98] transition-all duration-500"
+            className="h-full rounded-full bg-gradient-to-r from-[#d0a46d] to-[#8fae98] transition-all duration-500"
             style={{ width: `${progress}%` }}
           />
         </div>

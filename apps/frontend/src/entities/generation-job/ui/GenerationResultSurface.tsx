@@ -22,7 +22,7 @@ export function GenerationResultSurface({
     return (
       <div className="max-w-[620px] space-y-2">
         <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{assistantLabel}</p>
-        <div className="w-full max-w-[620px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+        <div className="w-full max-w-[620px] rounded-[24px] rounded-tl-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700 shadow-sm">
           {job.error_message ||
             (locale === "ru" ? "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ." : "Could not generate the image.")}
         </div>
@@ -39,8 +39,8 @@ export function GenerationResultSurface({
   return (
     <div className="max-w-[620px] space-y-2">
       <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{assistantLabel}</p>
-      <div className="w-full max-w-[620px] border border-slate-200 bg-slate-50 p-3">
-        <div className="overflow-hidden border border-slate-200 bg-white">
+      <div className="w-full max-w-[620px] rounded-[28px] border border-slate-200 bg-white/95 p-3 shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
+        <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
           <Image
             src={job.result_url}
             alt={locale === "ru" ? "РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ РѕР±СЂР°Р·" : "Generated outfit"}
@@ -65,7 +65,7 @@ export function GenerationResultSurface({
           href={job.result_url}
           target="_blank"
           rel="noreferrer"
-          className="mt-3 inline-flex text-sm font-medium text-slate-900 underline decoration-slate-300 underline-offset-4 transition hover:decoration-slate-600"
+          className="mt-3 inline-flex rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-sm font-medium text-slate-900 transition hover:border-slate-300 hover:bg-white"
         >
           {locale === "ru" ? "РћС‚РєСЂС‹С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ" : "Open image"}
         </a>

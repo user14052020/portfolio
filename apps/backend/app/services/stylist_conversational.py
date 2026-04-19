@@ -1,15 +1,26 @@
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.stylist_chat.contracts.command import ChatCommand
-from app.application.stylist_chat.services.constants import GENERATION_HINTS
 from app.domain.chat_context import ChatModeContext
 from app.domain.chat_modes import ChatMode, FlowState
-from app.models import UploadedAsset
+from app.domain.interaction_throttle import (
+    THROTTLE_ACTION_MESSAGE,
+    THROTTLE_ACTION_TRY_OTHER_STYLE,
+    ThrottleActionType,
+    ThrottleDecision,
+)
+from app.domain.usage_access_policy import (
+    USAGE_DENIAL_REASON_DAILY_CHAT_SECONDS_LIMIT,
+    USAGE_DENIAL_REASON_DAILY_GENERATION_LIMIT,
+    RequestedAction,
+    UsageDecision,
+)
+from app.models import UploadedAsset, User
 from app.models.chat_message import ChatMessage
 from app.models.enums import ChatMessageRole
 from app.repositories.chat_messages import chat_messages_repository
@@ -18,14 +29,31 @@ from app.repositories.uploads import uploads_repository
 from app.schemas.stylist import StylistMessageRequest, StylistVisualizationRequest
 from app.services.chat_context_store import chat_context_store
 from app.services.generation import generation_service
+from app.services.interaction_throttle import InteractionThrottleService
 from app.services.stylist_orchestrator import build_stylist_chat_orchestrator
+from app.services.usage_access_policy import UsageAccessPolicyService
 
 
 class StylistService:
-    async def process_message(self, session: AsyncSession, payload: StylistMessageRequest):
+    def __init__(self) -> None:
+        self.usage_access_policy_service = UsageAccessPolicyService()
+        self.interaction_throttle_service = InteractionThrottleService()
+
+    async def process_message(
+        self,
+        session: AsyncSession,
+        payload: StylistMessageRequest,
+        *,
+        current_user: User | None = None,
+    ):
         locale = "ru" if payload.locale == "ru" else "en"
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
         context = await self._sync_context_generation_state(session, context)
+        usage_subject = self.usage_access_policy_service.build_subject(
+            current_user=current_user,
+            session_id=payload.session_id,
+            metadata=payload.metadata,
+        )
         requested_intent = self._coerce_requested_intent(payload.requested_intent)
         source = self._resolve_message_source(payload.metadata)
         resolved_client_message_id = payload.client_message_id
@@ -45,13 +73,27 @@ class StylistService:
         )
         user_message_text = self._resolve_user_message_text(locale=locale, message=payload.message, asset=asset)
 
-        if not self._should_skip_cooldown(
-            context=context,
-            requested_intent=requested_intent,
+        access_decision = await self.usage_access_policy_service.evaluate(
+            session,
+            subject=usage_subject,
+            action=RequestedAction(action_type="text_chat"),
+        )
+        self._raise_for_usage_denial(
+            decision=access_decision,
+            locale=locale,
+            action_type="text_chat",
+        )
+        throttle_action_type = self._resolve_throttle_action_type(
             source=source,
-            message=user_message_text,
-        ):
-            await self._enforce_message_cooldown(session, payload.session_id, locale)
+            command_name=payload.command_name,
+            command_step=payload.command_step,
+        )
+        throttle_decision = await self.interaction_throttle_service.can_submit(
+            session,
+            subject_id=usage_subject.subject_id,
+            action_type=throttle_action_type,
+        )
+        self._raise_for_throttle_denial(decision=throttle_decision, locale=locale)
 
         user_message = await chat_messages_repository.create(
             session,
@@ -74,6 +116,8 @@ class StylistService:
                     "body_height_cm": payload.body_height_cm,
                     "body_weight_kg": payload.body_weight_kg,
                     "asset_id": payload.asset_id or payload.uploaded_asset_id,
+                    "throttle_action_type": throttle_action_type,
+                    **self.usage_access_policy_service.subject_to_metadata(usage_subject),
                 },
             },
         )
@@ -93,7 +137,10 @@ class StylistService:
             command_name=payload.command_name,
             command_step=payload.command_step,
             asset_id=payload.asset_id or payload.uploaded_asset_id,
-            metadata=payload.metadata,
+            metadata={
+                **payload.metadata,
+                **self.usage_access_policy_service.subject_to_metadata(usage_subject),
+            },
             client_message_id=resolved_client_message_id,
             command_id=resolved_command_id,
             correlation_id=resolved_correlation_id,
@@ -130,6 +177,7 @@ class StylistService:
             "client_message_id": resolved_client_message_id,
             "command_id": resolved_command_id,
             "correlation_id": resolved_correlation_id,
+            **self.usage_access_policy_service.subject_to_metadata(usage_subject),
         }
 
         assistant_message = await chat_messages_repository.create(
@@ -173,10 +221,21 @@ class StylistService:
             "session_context": context,
         }
 
-    async def request_visualization(self, session: AsyncSession, payload: StylistVisualizationRequest):
+    async def request_visualization(
+        self,
+        session: AsyncSession,
+        payload: StylistVisualizationRequest,
+        *,
+        current_user: User | None = None,
+    ):
         locale = "ru" if payload.locale == "ru" else "en"
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
         context = await self._sync_context_generation_state(session, context)
+        usage_subject = self.usage_access_policy_service.build_subject(
+            current_user=current_user,
+            session_id=payload.session_id,
+            metadata=payload.metadata,
+        )
         source = "visualization_cta"
         resolved_client_message_id = payload.client_message_id
         resolved_command_id = payload.command_id or resolved_client_message_id
@@ -190,10 +249,29 @@ class StylistService:
             context=context,
         )
         user_message_text = (payload.message or "").strip() or self._default_visualization_message(locale)
+
+        access_decision = await self.usage_access_policy_service.evaluate(
+            session,
+            subject=usage_subject,
+            action=RequestedAction(action_type="generation"),
+        )
+        self._raise_for_usage_denial(
+            decision=access_decision,
+            locale=locale,
+            action_type="generation",
+        )
+        throttle_decision = await self.interaction_throttle_service.can_submit(
+            session,
+            subject_id=usage_subject.subject_id,
+            action_type=THROTTLE_ACTION_MESSAGE,
+        )
+        self._raise_for_throttle_denial(decision=throttle_decision, locale=locale)
+
         metadata = {
             **payload.metadata,
             "source": source,
             "visualization_type": payload.visualization_type,
+            **self.usage_access_policy_service.subject_to_metadata(usage_subject),
         }
 
         user_message = await chat_messages_repository.create(
@@ -215,6 +293,8 @@ class StylistService:
                     "source": source,
                     "asset_id": payload.asset_id or payload.uploaded_asset_id,
                     "visualization_type": payload.visualization_type,
+                    "throttle_action_type": THROTTLE_ACTION_MESSAGE,
+                    **self.usage_access_policy_service.subject_to_metadata(usage_subject),
                 },
             },
         )
@@ -271,6 +351,7 @@ class StylistService:
             "client_message_id": resolved_client_message_id,
             "command_id": resolved_command_id,
             "correlation_id": resolved_correlation_id,
+            **self.usage_access_policy_service.subject_to_metadata(usage_subject),
         }
 
         assistant_message = await chat_messages_repository.create(
@@ -399,6 +480,76 @@ class StylistService:
                 ),
                 "retry_after_seconds": remaining_seconds,
                 "next_allowed_at": next_allowed_at.isoformat(),
+            },
+        )
+
+    def _raise_for_usage_denial(
+        self,
+        *,
+        decision: UsageDecision,
+        locale: str,
+        action_type: str,
+    ) -> None:
+        if decision.is_allowed:
+            return
+        if action_type == "generation" and decision.denial_reason == USAGE_DENIAL_REASON_DAILY_GENERATION_LIMIT:
+            message = (
+                "На сегодня лимит генераций исчерпан. Возвращайтесь позже или продолжайте без визуализации."
+                if locale == "ru"
+                else "Today's generation limit has been reached. Please come back later or continue without visualization."
+            )
+        elif action_type == "text_chat" and decision.denial_reason == USAGE_DENIAL_REASON_DAILY_CHAT_SECONDS_LIMIT:
+            message = (
+                "На сегодня лимит текстового чата исчерпан. Возвращайтесь позже."
+                if locale == "ru"
+                else "Today's text chat limit has been reached. Please come back later."
+            )
+        else:
+            message = (
+                "Сейчас запрос нельзя выполнить из-за runtime policy."
+                if locale == "ru"
+                else "This request cannot be completed right now because of the runtime policy."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": decision.denial_reason,
+                "message": message,
+                "remaining_generations": decision.remaining_generations,
+                "remaining_chat_seconds": decision.remaining_chat_seconds,
+            },
+        )
+
+    def _raise_for_throttle_denial(self, *, decision: ThrottleDecision, locale: str) -> None:
+        if decision.is_allowed:
+            return
+        if decision.action_type == THROTTLE_ACTION_TRY_OTHER_STYLE:
+            message = (
+                "РџРѕРєР° РЅРµР»СЊР·СЏ СЃРЅРѕРІР° Р·Р°РїСѓСЃС‚РёС‚СЊ РїРѕРїС‹С‚РєСѓ СЃ РґСЂСѓРіРёРј СЃС‚РёР»РµРј. РџРѕРґРѕР¶РґРёС‚Рµ РЅРµРјРЅРѕРіРѕ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР°."
+                if locale == "ru"
+                else "You can't try another style again yet. Please wait a moment and try again."
+            )
+            code = "try_other_style_cooldown"
+        else:
+            message = (
+                "РћС‚РїСЂР°РІР»СЏС‚СЊ РЅРѕРІС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ РјРѕР¶РЅРѕ РЅРµ С‡Р°С‰Рµ РѕРґРЅРѕРіРѕ СЂР°Р·Р° РІ РјРёРЅСѓС‚Сѓ. РџРѕРґРѕР¶РґРёС‚Рµ РЅРµРјРЅРѕРіРѕ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР°."
+                if locale == "ru"
+                else "Messages can only be sent once per minute. Please wait a moment and try again."
+            )
+            code = "message_cooldown"
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": code,
+                "message": message,
+                "retry_after_seconds": decision.retry_after_seconds,
+                "next_allowed_at": (
+                    decision.next_allowed_at.isoformat()
+                    if decision.next_allowed_at is not None
+                    else None
+                ),
+                "cooldown_seconds": decision.cooldown_seconds,
+                "action_type": decision.action_type,
             },
         )
 
@@ -553,6 +704,21 @@ class StylistService:
             cleaned = raw_value.strip()
             return cleaned or None
         return None
+
+    def _resolve_throttle_action_type(
+        self,
+        *,
+        source: str | None,
+        command_name: str | None,
+        command_step: str | None,
+    ) -> ThrottleActionType:
+        if (
+            source == "quick_action"
+            and command_name == ChatMode.STYLE_EXPLORATION.value
+            and command_step == "start"
+        ):
+            return THROTTLE_ACTION_TRY_OTHER_STYLE
+        return THROTTLE_ACTION_MESSAGE
 
     def _message_requests_generation(self, message: str | None) -> bool:
         lowered = (message or "").strip().lower()

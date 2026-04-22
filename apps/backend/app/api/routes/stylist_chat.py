@@ -115,6 +115,23 @@ async def get_chat_runtime_policy_state(
         current_user=current_user,
         request_meta=request_meta,
     )
+    cooldown = result.get("cooldown")
+
+    if cooldown is not None and not isinstance(cooldown, dict):
+
+        result["cooldown"] = {
+
+            "is_allowed": cooldown.is_allowed,
+
+            "action_type": cooldown.action_type,
+
+            "retry_after_seconds": cooldown.retry_after_seconds,
+
+            "next_allowed_at": cooldown.next_allowed_at,
+
+            "cooldown_seconds": cooldown.cooldown_seconds,
+
+        }
     return ChatRuntimePolicyStateRead.model_validate(result)
 
 

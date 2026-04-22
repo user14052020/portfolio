@@ -18,7 +18,9 @@ from app.services.chat_retention import chat_retention_service
 from app.services.client_request_meta import client_request_meta_resolver
 from app.services.generation import QueueRefreshCooldownError, generation_service
 from app.services.usage_access_policy import UsageAccessPolicyService
-
+import httpx
+from fastapi import Query
+from fastapi.responses import Response
 
 router = APIRouter(prefix="/generation-jobs", tags=["generation-jobs"])
 settings = get_settings()
@@ -136,6 +138,31 @@ async def list_generation_jobs_by_session(
     )
     return [await generation_service.enrich_job_runtime(session, job) for job in jobs]
 
+@router.get("/image-proxy")
+async def proxy_generation_result_image(
+    filename: str = Query(...),
+    subfolder: str = Query(""),
+    file_type: str = Query("output", alias="type"),
+) -> Response:
+    comfy_base = settings.comfyui_base_url.rstrip("/")
+    url = f"{comfy_base}/view"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        upstream = await client.get(
+            url,
+            params={
+                "filename": filename,
+                "subfolder": subfolder,
+                "type": file_type,
+            },
+        )
+
+    content_type = upstream.headers.get("content-type", "image/png")
+    return Response(
+        content=upstream.content,
+        media_type=content_type,
+        status_code=upstream.status_code,
+    )
 
 @router.get("/{public_id}", response_model=GenerationJobRead)
 async def get_generation_job(

@@ -10,18 +10,36 @@ export type RequestOptions = RequestInit & {
 };
 
 export function buildUrl(path: string, query?: RequestOptions["query"]) {
-  const baseUrl = typeof window === "undefined" ? env.internalApiUrl : env.apiUrl;
-  const url = new URL(`${baseUrl}${path}`);
-  if (query) {
-    Object.entries(query).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
-        url.searchParams.set(key, String(value));
-      }
-    });
-  }
-  return url.toString();
-}
 
+  const baseUrl = typeof window === "undefined" ? env.internalApiUrl : env.apiUrl;
+
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  const url =
+
+    baseUrl.startsWith("http://") || baseUrl.startsWith("https://")
+
+      ? new URL(`${baseUrl}${normalizedPath}`)
+
+      : new URL(`${baseUrl}${normalizedPath}`, window.location.origin);
+
+  if (query) {
+
+    Object.entries(query).forEach(([key, value]) => {
+
+      if (value !== undefined && value !== null && value !== "") {
+
+        url.searchParams.set(key, String(value));
+
+      }
+
+    });
+
+  }
+
+  return url.toString();
+
+}
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;

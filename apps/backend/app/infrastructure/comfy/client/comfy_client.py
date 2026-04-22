@@ -171,11 +171,15 @@ class ComfyClient:
             images = node_output.get("images")
             if not images:
                 continue
+
             image = images[0]
             filename = image.get("filename")
             subfolder = image.get("subfolder", "")
             file_type = image.get("type", "output")
-            return f"{self.base_url}/view?filename={filename}&subfolder={subfolder}&type={file_type}"
+            return (
+                "/api/v1/generation-jobs/image-proxy"
+                f"?filename={filename}&subfolder={subfolder}&type={file_type}"
+            )
         return None
 
     def _queue_contains_prompt(self, queue_payload: dict[str, Any], section: str, prompt_id: str) -> bool:

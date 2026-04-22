@@ -11,6 +11,7 @@ from app.application.visual_generation.services.generation_metadata_recorder imp
 from app.application.visual_generation.use_cases.persist_generation_result import PersistGenerationResultUseCase
 from app.application.visual_generation.use_cases.run_generation_job import RunGenerationJobUseCase
 from app.core.config import get_settings
+from app.domain.chat_retention import ChatRetentionPolicy
 from app.domain.visual_generation import GenerationMetadata, VisualGenerationPlan
 from app.infrastructure.comfy.adapters.comfy_generation_adapter import ComfyGenerationAdapter
 from app.infrastructure.comfy.client.comfy_client import ComfyClient
@@ -55,7 +56,12 @@ class GenerationService:
     async def create_and_submit(self, session: AsyncSession, payload: GenerationJobCreate):
         existing_active_job = None
         if payload.session_id:
-            existing_active_job = await generation_jobs_repository.get_latest_active_by_session(session, payload.session_id)
+            retention_cutoff = ChatRetentionPolicy(max_age_days=self.settings.chat_retention_days).cutoff()
+            existing_active_job = await generation_jobs_repository.get_latest_active_by_session(
+                session,
+                payload.session_id,
+                created_at_from=retention_cutoff,
+            )
             if existing_active_job:
                 existing_active_job = await self.sync_job_status(session, existing_active_job)
                 if self._is_active(existing_active_job.status):
@@ -83,6 +89,9 @@ class GenerationService:
                 "recommendation_ru": payload.recommendation_ru,
                 "recommendation_en": payload.recommendation_en,
                 "input_asset_id": payload.input_asset_id,
+                "client_ip": payload.client_ip,
+                "client_user_agent": payload.client_user_agent,
+                "request_origin": payload.request_origin,
                 "body_height_cm": payload.body_height_cm,
                 "body_weight_kg": payload.body_weight_kg,
                 "provider_payload": self._build_initial_provider_payload(payload),

@@ -11,6 +11,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from app.db.session import SessionLocal
 from app.ingestion.styles.style_chatgpt_batch_runner import DefaultStyleChatGptEnrichmentBatchRunner
+from app.ingestion.styles.structured_logging import StructuredIngestionLogger
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,41 +65,68 @@ def parse_style_ids(raw_value: str | None) -> list[int] | None:
 
 
 async def main_async(args: argparse.Namespace) -> dict[str, object]:
-    runner = DefaultStyleChatGptEnrichmentBatchRunner(session_factory=SessionLocal)
+    event_logger = StructuredIngestionLogger(logger_name="app.ingestion.styles.enrichment", mirror_stream=sys.stdout)
+    event_logger.emit(
+        "style_enrichment_command_started",
+        {
+            "mode": args.mode,
+            "style_id": args.style_id,
+            "style_ids": args.style_ids,
+            "limit": args.limit,
+            "offset": args.offset,
+            "dry_run": args.dry_run,
+            "overwrite_existing": args.overwrite_existing,
+        },
+    )
+    runner = DefaultStyleChatGptEnrichmentBatchRunner(
+        session_factory=SessionLocal,
+        progress_reporter=event_logger.as_reporter(),
+    )
 
-    if args.mode == "single":
-        result = await runner.run(
-            style_ids=[args.style_id],
-            limit=None,
-            offset=0,
-            dry_run=args.dry_run,
-            overwrite_existing=args.overwrite_existing,
+    try:
+        if args.mode == "single":
+            result = await runner.run(
+                style_ids=[args.style_id],
+                limit=None,
+                offset=0,
+                dry_run=args.dry_run,
+                overwrite_existing=args.overwrite_existing,
+            )
+        elif args.mode == "batch":
+            result = await runner.run(
+                style_ids=parse_style_ids(args.style_ids),
+                limit=args.limit,
+                offset=args.offset,
+                dry_run=args.dry_run,
+                overwrite_existing=args.overwrite_existing,
+            )
+        elif args.mode == "full-backfill":
+            result = await runner.run(
+                style_ids=None,
+                limit=args.limit,
+                offset=args.offset,
+                dry_run=args.dry_run,
+                overwrite_existing=args.overwrite_existing,
+            )
+        else:
+            result = await runner.run_retry_failed(
+                limit=args.limit,
+                offset=args.offset,
+                dry_run=args.dry_run,
+                overwrite_existing=args.overwrite_existing,
+            )
+    except Exception as exc:  # noqa: BLE001
+        event_logger.emit(
+            "style_enrichment_command_failed",
+            {
+                "mode": args.mode,
+                "error_class": exc.__class__.__name__,
+                "error_message": str(exc),
+            },
         )
-    elif args.mode == "batch":
-        result = await runner.run(
-            style_ids=parse_style_ids(args.style_ids),
-            limit=args.limit,
-            offset=args.offset,
-            dry_run=args.dry_run,
-            overwrite_existing=args.overwrite_existing,
-        )
-    elif args.mode == "full-backfill":
-        result = await runner.run(
-            style_ids=None,
-            limit=args.limit,
-            offset=args.offset,
-            dry_run=args.dry_run,
-            overwrite_existing=args.overwrite_existing,
-        )
-    else:
-        result = await runner.run_retry_failed(
-            limit=args.limit,
-            offset=args.offset,
-            dry_run=args.dry_run,
-            overwrite_existing=args.overwrite_existing,
-        )
+        raise
 
-    return {
+    payload = {
         "mode": args.mode,
         "selected_count": result.selected_count,
         "processed_count": result.processed_count,
@@ -119,6 +147,20 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
             for item in result.items
         ],
     }
+    event_logger.emit(
+        "style_enrichment_command_finished",
+        {
+            "mode": args.mode,
+            "selected_count": result.selected_count,
+            "processed_count": result.processed_count,
+            "succeeded_count": result.succeeded_count,
+            "failed_count": result.failed_count,
+            "skipped_existing_count": result.skipped_existing_count,
+            "dry_run": result.dry_run,
+            "overwrite_existing": result.overwrite_existing,
+        },
+    )
+    return payload
 
 
 def main() -> None:

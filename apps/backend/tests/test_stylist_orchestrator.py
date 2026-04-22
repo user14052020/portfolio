@@ -768,6 +768,31 @@ class StylistOrchestratorScenarioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.context_store.context.flow_state, FlowState.COMPLETED)
         self.assertEqual(len(self.scheduler.enqueued), 1)
 
+    async def test_style_exploration_quick_action_uses_fallback_when_reasoning_context_is_too_long(self) -> None:
+        self.reasoner.raise_context_limit = True
+
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage1-style-context-limit-fallback-1",
+                locale="ru",
+                message="Попробовать другой стиль",
+                requested_intent=ChatMode.STYLE_EXPLORATION,
+                command_name="style_exploration",
+                command_step="start",
+                user_message_id=1,
+                metadata={"source": "quick_action"},
+            )
+        )
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(response.job_id, "job-1")
+        self.assertNotEqual(response.error_code, "reasoning_context_limit")
+        self.assertEqual(response.telemetry["reasoning_mode"], "fallback")
+        self.assertEqual(response.telemetry["fallback_used"], True)
+        self.assertEqual(self.context_store.context.active_mode, ChatMode.STYLE_EXPLORATION)
+        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
+        self.assertEqual(len(self.scheduler.enqueued), 1)
+
     async def test_event_payload_keeps_cta_contract_and_identifiers(self) -> None:
         self.reasoner.route = "text_and_generation"
         response = await self.run_command(

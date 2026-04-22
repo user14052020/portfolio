@@ -40,6 +40,7 @@ from app.models import (
     StyleTaxonomyNode,
     StyleTrait,
     StyleVisualFacet,
+    StylistChatSession,
     StylistSessionState,
     StylistStyleExposure,
     UploadedAsset,
@@ -90,6 +91,7 @@ __all__ = [
     "StyleTaxonomyNode",
     "StyleTaxonomyLink",
     "StyleTrait",
+    "StylistChatSession",
     "StylistSessionState",
     "StylistStyleExposure",
 ]

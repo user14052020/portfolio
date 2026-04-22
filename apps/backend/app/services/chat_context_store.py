@@ -4,12 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.chat_context import ChatModeContext
 from app.models import StylistSessionState
 from app.repositories.stylist_session_states import stylist_session_states_repository
+from app.services.chat_retention import chat_retention_service
 
 
 class ChatContextStore:
     async def load(self, session: AsyncSession, session_id: str) -> tuple[StylistSessionState | None, ChatModeContext]:
         record = await stylist_session_states_repository.get_by_session_id(session, session_id)
-        if record is None:
+        if record is None or chat_retention_service.is_expired(record.updated_at):
             return None, ChatModeContext()
 
         try:
@@ -48,4 +49,3 @@ class ChatContextStore:
 
 
 chat_context_store = ChatContextStore()
-

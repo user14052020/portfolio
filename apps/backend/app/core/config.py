@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list, alias="CORS_ORIGINS")
 
     comfyui_base_url: str = Field(..., alias="COMFYUI_BASE_URL")
+    comfyui_output_root: Path | None = Field(None, alias="COMFYUI_OUTPUT_ROOT")
     comfyui_client_id: str = Field("portfolio-client", alias="COMFYUI_CLIENT_ID")
     comfyui_diffusion_model_name: str = Field(
         "flux1-krea-dev_fp8_scaled.safetensors", alias="COMFYUI_DIFFUSION_MODEL_NAME"
@@ -63,6 +64,13 @@ class Settings(BaseSettings):
     comfyui_stalled_job_auto_interrupt: bool = Field(True, alias="COMFYUI_STALLED_JOB_AUTO_INTERRUPT")
     generation_job_poll_interval_seconds: int = Field(10, alias="GENERATION_JOB_POLL_INTERVAL_SECONDS")
     enable_generation_job_poller: bool = Field(True, alias="ENABLE_GENERATION_JOB_POLLER")
+    chat_retention_days: int = Field(10, ge=1, le=10, alias="CHAT_RETENTION_DAYS")
+    chat_retention_cleanup_interval_seconds: int = Field(
+        3600,
+        ge=60,
+        alias="CHAT_RETENTION_CLEANUP_INTERVAL_SECONDS",
+    )
+    enable_chat_retention_cleanup: bool = Field(True, alias="ENABLE_CHAT_RETENTION_CLEANUP")
     enable_search_indexing: bool = Field(True, alias="ENABLE_SEARCH_INDEXING")
 
     @field_validator("cors_origins", mode="before")
@@ -77,6 +85,13 @@ class Settings(BaseSettings):
                 if isinstance(parsed, list):
                     return [str(item).strip() for item in parsed if str(item).strip()]
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("comfyui_output_root", mode="before")
+    @classmethod
+    def empty_comfyui_output_root_to_none(cls, value: str | Path | None) -> str | Path | None:
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
 

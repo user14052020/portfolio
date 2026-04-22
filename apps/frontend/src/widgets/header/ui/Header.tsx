@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Button } from "@mantine/core";
 
 import { useI18n } from "@/shared/i18n/I18nProvider";
 import { LanguageSwitcher } from "@/shared/ui/LanguageSwitcher";
+import { SoftButton } from "@/shared/ui/SoftButton";
 
 export function Header({
   email,
@@ -13,12 +13,12 @@ export function Header({
   email: string;
   onOpenContact: () => void;
 }) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
 
   return (
-    <header className="sticky top-0 z-40 mx-auto grid w-full max-w-7xl items-center gap-3 border border-slate-200 bg-white px-5 py-3 lg:grid-cols-[1fr_auto_1fr] lg:gap-4">
+    <header className="sticky top-4 z-40 mx-auto grid w-full items-center gap-3 rounded-[var(--radius-pill)] border border-white/70 bg-white/80 px-4 py-3 shadow-[var(--shadow-soft-md)] backdrop-blur-xl lg:grid-cols-[1fr_auto_1fr] lg:gap-4 lg:px-5">
       <div className="hidden items-center lg:flex">
-        <Link href={`mailto:${email}`} className="text-sm text-slate-600">
+        <Link href={`mailto:${email}`} className="text-sm text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
           {email}
         </Link>
       </div>
@@ -29,9 +29,9 @@ export function Header({
       </div>
       <div className="flex items-center justify-center gap-3 lg:justify-end">
         <LanguageSwitcher />
-        <Button radius="xl" variant="light" onClick={onOpenContact}>
+        <SoftButton tone="dark" shape="compact" onClick={onOpenContact}>
           {t("writeMe")}
-        </Button>
+        </SoftButton>
       </div>
     </header>
   );

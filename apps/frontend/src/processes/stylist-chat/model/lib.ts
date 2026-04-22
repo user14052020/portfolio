@@ -11,6 +11,9 @@ const SESSION_STORAGE_KEY = "portfolio-chat-session";
 const CHAT_STATE_STORAGE_KEY_PREFIX = "portfolio-chat-state";
 export const GENERATION_STATUS_POLL_INTERVAL_MS = 10000;
 export const INITIAL_HISTORY_PAGE_SIZE = 5;
+export const LOCAL_CHAT_RETENTION_DAYS = 10;
+const LOCAL_CHAT_RETENTION_MS = LOCAL_CHAT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const PENDING_OPTIMISTIC_MESSAGE_TTL_MS = 2 * 60 * 1000;
 
 export type PersistedStylistChatUiState = {
   messages: ThreadMessage[];
@@ -83,7 +86,7 @@ export function readPersistedStylistChatUiState(sessionId: string): PersistedSty
     }
 
     const parsed = JSON.parse(raw) as Partial<PersistedStylistChatUiState>;
-    return {
+    const prunedState = prunePersistedStylistChatUiState({
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
       uploadedAsset: parsed.uploadedAsset ?? null,
       activeJob: parsed.activeJob ?? null,
@@ -97,7 +100,13 @@ export function readPersistedStylistChatUiState(sessionId: string): PersistedSty
       lastVisualCtaConfirmed:
         typeof parsed.lastVisualCtaConfirmed === "string" ? parsed.lastVisualCtaConfirmed : null,
       presentationProfile: parsed.presentationProfile ?? {},
-    };
+    });
+    try {
+      window.localStorage.setItem(getChatStateStorageKey(sessionId), JSON.stringify(prunedState));
+    } catch {
+      // Reading should still succeed if browser storage refuses the cleanup write.
+    }
+    return prunedState;
   } catch {
     return null;
   }
@@ -112,7 +121,7 @@ export function writePersistedStylistChatUiState(
   }
 
   try {
-    window.localStorage.setItem(getChatStateStorageKey(sessionId), JSON.stringify(state));
+    window.localStorage.setItem(getChatStateStorageKey(sessionId), JSON.stringify(prunePersistedStylistChatUiState(state)));
   } catch {
     // Ignore persistence failures in restrictive browser environments.
   }
@@ -134,14 +143,16 @@ export function createDefaultScenarioContext(): FrontendScenarioContext {
 }
 
 export function mergeHistoryIntoCurrent(current: ThreadMessage[], history: ThreadMessage[]) {
+  const now = Date.now();
+  const retainedHistory = pruneMessagesByRetention(history, now);
   const historyKeys = new Set(
-    history.map(
+    retainedHistory.map(
       (message) =>
         `${message.role}::${message.content.trim()}::${message.uploaded_asset?.id ?? "no-asset"}::${message.generation_job?.public_id ?? "no-job"}`
     )
   );
-  const pendingMessages = current.filter((message) => {
-    if (message.id >= 0) {
+  const pendingMessages = pruneMessagesByRetention(current, now).filter((message) => {
+    if (!isFreshOptimisticMessage(message, now)) {
       return false;
     }
 
@@ -150,25 +161,116 @@ export function mergeHistoryIntoCurrent(current: ThreadMessage[], history: Threa
   });
 
   if (pendingMessages.length === 0) {
-    return history;
+    return retainedHistory;
   }
 
-  return [...history, ...pendingMessages];
+  return sortThreadMessagesChronologically([...retainedHistory, ...pendingMessages]);
 }
 
 export function getInitialVisibleMessages(messages: ThreadMessage[]) {
-  if (messages.length <= INITIAL_HISTORY_PAGE_SIZE) {
-    return messages;
+  const now = Date.now();
+  const retainedMessages = pruneMessagesByRetention(messages, now);
+  if (retainedMessages.length <= INITIAL_HISTORY_PAGE_SIZE) {
+    return retainedMessages.filter((message) => message.id >= 0 || isFreshOptimisticMessage(message, now));
   }
 
   const persistedMessageIds = new Set(
-    messages
+    retainedMessages
       .filter((message) => message.id >= 0)
       .slice(-INITIAL_HISTORY_PAGE_SIZE)
       .map((message) => message.id)
   );
 
-  return messages.filter((message) => message.id < 0 || persistedMessageIds.has(message.id));
+  return retainedMessages.filter(
+    (message) => isFreshOptimisticMessage(message, now) || persistedMessageIds.has(message.id)
+  );
+}
+
+export function prunePersistedStylistChatUiState(
+  state: PersistedStylistChatUiState,
+  now: number = Date.now()
+): PersistedStylistChatUiState {
+  const messages = pruneMessagesByRetention(state.messages, now);
+  const activeJob =
+    state.activeJob && isTimestampWithinLocalRetention(state.activeJob.created_at, now)
+      ? state.activeJob
+      : null;
+  const uploadedAsset =
+    state.uploadedAsset && isTimestampWithinLocalRetention(state.uploadedAsset.created_at, now)
+      ? state.uploadedAsset
+      : null;
+
+  return {
+    ...state,
+    messages,
+    activeJob,
+    uploadedAsset,
+  };
+}
+
+function pruneMessagesByRetention(messages: ThreadMessage[], now: number) {
+  return messages
+    .filter((message) => isTimestampWithinLocalRetention(message.created_at, now))
+    .map((message) => pruneMessageReferencesByRetention(message, now));
+}
+
+function pruneMessageReferencesByRetention(message: ThreadMessage, now: number): ThreadMessage {
+  const generationJob =
+    message.generation_job && isTimestampWithinLocalRetention(message.generation_job.created_at, now)
+      ? message.generation_job
+      : null;
+  const uploadedAsset =
+    message.uploaded_asset && isTimestampWithinLocalRetention(message.uploaded_asset.created_at, now)
+      ? message.uploaded_asset
+      : null;
+
+  if (generationJob === message.generation_job && uploadedAsset === message.uploaded_asset) {
+    return message;
+  }
+
+  return {
+    ...message,
+    generation_job_id: generationJob ? message.generation_job_id : null,
+    generation_job: generationJob,
+    uploaded_asset: uploadedAsset,
+  };
+}
+
+function isTimestampWithinLocalRetention(timestamp: string | undefined, now: number) {
+  if (!timestamp) {
+    return false;
+  }
+
+  const createdAtMs = Date.parse(timestamp);
+  if (!Number.isFinite(createdAtMs)) {
+    return false;
+  }
+
+  return now - createdAtMs <= LOCAL_CHAT_RETENTION_MS;
+}
+
+function isFreshOptimisticMessage(message: ThreadMessage, now: number) {
+  if (message.id >= 0 || message.isOptimistic !== true) {
+    return false;
+  }
+
+  const createdAtMs = Date.parse(message.created_at);
+  if (!Number.isFinite(createdAtMs)) {
+    return false;
+  }
+
+  return now - createdAtMs <= PENDING_OPTIMISTIC_MESSAGE_TTL_MS;
+}
+
+function sortThreadMessagesChronologically(messages: ThreadMessage[]) {
+  return [...messages].sort((left, right) => {
+    const leftTime = Date.parse(left.created_at);
+    const rightTime = Date.parse(right.created_at);
+    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime) || leftTime === rightTime) {
+      return 0;
+    }
+    return leftTime - rightTime;
+  });
 }
 
 export function prependHistoryPage(current: ThreadMessage[], olderMessages: ThreadMessage[]) {
@@ -307,6 +409,10 @@ export function getScenarioPlaceholder(
   context: FrontendScenarioContext,
   locale: Locale
 ) {
+  if (locale === "ru") {
+    return getRussianScenarioPlaceholder(context);
+  }
+
   if (context.pendingClarification) {
     return locale === "ru"
       ? "РћС‚РІРµС‚СЊС‚Рµ РЅР° СѓС‚РѕС‡РЅРµРЅРёРµ СЃС‚РёР»РёСЃС‚Р°..."
@@ -338,4 +444,24 @@ export function getScenarioPlaceholder(
 
 export function shouldRenderPendingGeneration(response: ChatResponse) {
   return response.decisionType === "text_and_generate" && Boolean(response.jobId || response.generationJob);
+}
+
+function getRussianScenarioPlaceholder(context: FrontendScenarioContext) {
+  if (context.pendingClarification) {
+    return "Ответьте на уточнение стилиста...";
+  }
+
+  if (context.activeMode === "occasion_outfit") {
+    return "Например: вечерняя выставка современного искусства осенью, хочу выглядеть интеллектуально и немного смело";
+  }
+
+  if (context.activeMode === "garment_matching") {
+    return "Например: темно-синяя джинсовая рубашка oversize";
+  }
+
+  if (context.activeMode === "style_exploration") {
+    return "Например: попробуем что-то мягче и теплее, без повторения прошлой палитры";
+  }
+
+  return "Опишите вещь, событие или желаемый стиль...";
 }

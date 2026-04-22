@@ -1,6 +1,8 @@
 import { request } from "@/shared/api/base";
 import type { RequestOptions } from "@/shared/api/base";
 import type {
+  AdminChatSessionDetails,
+  AdminChatSessionsPage,
   BlogPost,
   ChatModeContext,
   ChatHistoryPage,
@@ -319,6 +321,28 @@ export async function refreshGenerationJobQueue(publicId: string) {
 
 export async function getGenerationJobs(token: string) {
   return request<GenerationJob[]>("/generation-jobs", { token });
+}
+
+export async function getAdminChatSessions(
+  token: string,
+  params?: {
+    offset?: number;
+    limit?: number;
+    q?: string;
+  }
+) {
+  return request<AdminChatSessionsPage>("/admin/chats", {
+    token,
+    query: {
+      offset: params?.offset,
+      limit: params?.limit,
+      q: params?.q
+    }
+  });
+}
+
+export async function getAdminChatSessionDetails(sessionId: string, token: string) {
+  return request<AdminChatSessionDetails>(`/admin/chats/${sessionId}`, { token });
 }
 
 export async function getGenerationJobsBySession(sessionId: string) {

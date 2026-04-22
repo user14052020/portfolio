@@ -363,6 +363,9 @@ export interface GenerationJob {
   result_url?: string | null;
   external_job_id?: string | null;
   progress: number;
+  client_ip?: string | null;
+  client_user_agent?: string | null;
+  request_origin?: string | null;
   body_height_cm?: number | null;
   body_weight_kg?: number | null;
   error_message?: string | null;
@@ -399,6 +402,60 @@ export interface ChatHistoryPage {
   items: ChatMessage[];
   has_more: boolean;
   next_before_message_id?: number | null;
+}
+
+export interface ChatCooldownState {
+  is_allowed: boolean;
+  action_type: "message" | "try_other_style";
+  retry_after_seconds: number;
+  next_allowed_at?: string | null;
+  cooldown_seconds: number;
+}
+
+export interface ChatRuntimePolicyState {
+  cooldown: ChatCooldownState;
+  remaining_generations: number;
+  remaining_chat_seconds: number;
+}
+
+export interface AdminChatSessionSummary {
+  id: number;
+  session_id: string;
+  started_at: string;
+  last_message_at?: string | null;
+  message_count: number;
+  locale?: string | null;
+  client_ip?: string | null;
+  client_user_agent?: string | null;
+  client_user_agent_short?: string | null;
+  last_active_mode?: string | null;
+  last_decision_type?: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminChatSessionsPage {
+  items: AdminChatSessionSummary[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface AdminChatSessionStateSnapshot {
+  id: number;
+  session_id: string;
+  active_intent?: string | null;
+  state_payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminChatSessionDetails {
+  session: AdminChatSessionSummary;
+  messages: ChatMessage[];
+  generation_jobs: GenerationJob[];
+  state?: AdminChatSessionStateSnapshot | null;
 }
 
 export interface ContactRequest {

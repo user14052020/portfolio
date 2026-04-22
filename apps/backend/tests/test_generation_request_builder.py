@@ -2,10 +2,10 @@ import unittest
 
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import ReasoningOutput
-from app.application.stylist_chat.results.decision_result import DecisionType
+from app.application.stylist_chat.results.decision_result import DecisionResult, DecisionType
 from app.application.stylist_chat.services.generation_request_builder import GenerationRequestBuilder
 from app.domain.chat_context import ChatModeContext
-from app.domain.chat_modes import ChatMode
+from app.domain.chat_modes import ChatMode, FlowState
 
 
 class FakePromptBuilder:
@@ -130,6 +130,30 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.generation_payload.prompt, "prompt::soft prep editorial flat lay")
         self.assertEqual(decision.generation_payload.input_asset_id, 42)
         self.assertEqual(decision.generation_payload.generation_intent.mode, ChatMode.STYLE_EXPLORATION)
+
+    def test_downgrade_generation_to_text_only_replaces_text_for_generation_limit(self) -> None:
+        builder = GenerationRequestBuilder(prompt_builder=FakePromptBuilder())
+        context = ChatModeContext(active_mode=ChatMode.STYLE_EXPLORATION, should_auto_generate=True)
+        decision = DecisionResult(
+            decision_type=DecisionType.TEXT_AND_GENERATE,
+            active_mode=ChatMode.STYLE_EXPLORATION,
+            flow_state=FlowState.READY_FOR_GENERATION,
+            text_reply="I found a fresh style direction and will visualize it.",
+        )
+
+        downgraded = builder.downgrade_generation_to_text_only(
+            decision=decision,
+            context=context,
+            notice_text="Today's generation limit has been reached.",
+            replace_text=True,
+        )
+
+        self.assertEqual(downgraded.decision_type, DecisionType.TEXT_ONLY)
+        self.assertEqual(downgraded.text_reply, "Today's generation limit has been reached.")
+        self.assertNotIn("I found a fresh style direction", downgraded.text_reply or "")
+        self.assertNotIn("will visualize", downgraded.text_reply or "")
+        self.assertFalse(downgraded.can_offer_visualization)
+        self.assertIsNone(downgraded.generation_payload)
 
     async def test_build_schedule_request_maps_decision_to_scheduler_payload(self) -> None:
         builder = GenerationRequestBuilder(prompt_builder=FakePromptBuilder())

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.knowledge.services.knowledge_bundle_builder import KnowledgeBundleBuilder
@@ -24,6 +24,7 @@ from app.infrastructure.knowledge.search.knowledge_search_adapter import Default
 from app.models import User
 from app.schemas.stylist import (
     ChatHistoryPageRead,
+    ChatRuntimePolicyStateRead,
     KnowledgePreviewRequest,
     KnowledgePreviewResponse,
     PromptPipelinePreviewRequest,
@@ -33,6 +34,7 @@ from app.schemas.stylist import (
     StylistVisualizationRequest,
 )
 from app.services.stylist_conversational import stylist_service
+from app.services.client_request_meta import client_request_meta_resolver
 
 
 router = APIRouter(prefix="/stylist-chat", tags=["stylist-chat"])
@@ -40,22 +42,36 @@ router = APIRouter(prefix="/stylist-chat", tags=["stylist-chat"])
 
 @router.post("/message", response_model=StylistMessageResponse)
 async def send_stylist_message(
+    request: Request,
     payload: StylistMessageRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> StylistMessageResponse:
-    result = await stylist_service.process_message(session, payload, current_user=current_user)
+    request_meta = client_request_meta_resolver.resolve(request)
+    result = await stylist_service.process_message(
+        session,
+        payload,
+        current_user=current_user,
+        request_meta=request_meta,
+    )
     await session.commit()
     return StylistMessageResponse.model_validate(result)
 
 
 @router.post("/visualize", response_model=StylistMessageResponse)
 async def request_stylist_visualization(
+    request: Request,
     payload: StylistVisualizationRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     current_user: Annotated[User | None, Depends(get_optional_current_user)],
 ) -> StylistMessageResponse:
-    result = await stylist_service.request_visualization(session, payload, current_user=current_user)
+    request_meta = client_request_meta_resolver.resolve(request)
+    result = await stylist_service.request_visualization(
+        session,
+        payload,
+        current_user=current_user,
+        request_meta=request_meta,
+    )
     await session.commit()
     return StylistMessageResponse.model_validate(result)
 
@@ -83,6 +99,23 @@ async def get_chat_history(
         before_message_id=before_message_id,
     )
     return ChatHistoryPageRead.model_validate(result)
+
+
+@router.get("/runtime-policy/{session_id}", response_model=ChatRuntimePolicyStateRead)
+async def get_chat_runtime_policy_state(
+    request: Request,
+    session_id: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    current_user: Annotated[User | None, Depends(get_optional_current_user)],
+) -> ChatRuntimePolicyStateRead:
+    request_meta = client_request_meta_resolver.resolve(request)
+    result = await stylist_service.get_runtime_policy_state(
+        session,
+        session_id,
+        current_user=current_user,
+        request_meta=request_meta,
+    )
+    return ChatRuntimePolicyStateRead.model_validate(result)
 
 
 @router.post("/debug/prompt-preview", response_model=PromptPipelinePreviewResponse)

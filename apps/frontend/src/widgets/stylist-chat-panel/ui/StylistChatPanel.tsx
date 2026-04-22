@@ -2,17 +2,19 @@
 
 import { useLayoutEffect, useRef } from "react";
 
-import { UploadArea } from "@/features/chat/ui/UploadArea";
-import { ChatCooldownSendControl } from "@/features/chat-cooldown/ui/ChatCooldownSendControl";
-import { GenerationStatusRail } from "@/features/chat/ui/GenerationStatusRail";
 import { getQuickActionDefinitions } from "@/features/run-chat-command/model/runChatCommand";
 import { getScenarioPlaceholder } from "@/processes/stylist-chat/model/lib";
 import { useStylistChatProcess } from "@/processes/stylist-chat/model/useStylistChatProcess";
 import type { SiteSettings } from "@/shared/api/types";
 import { useI18n } from "@/shared/i18n/I18nProvider";
-import { InputSurface } from "@/shared/ui/InputSurface";
-import { SoftButton } from "@/shared/ui/SoftButton";
 import { ChatThread } from "@/widgets/chat-thread/ui/ChatThread";
+import { ChatAssistantHeader } from "@/widgets/stylist-chat-panel/ui/ChatAssistantHeader";
+import { ChatAttachedAssetChip } from "@/widgets/stylist-chat-panel/ui/ChatAttachedAssetChip";
+import { ChatClarificationPanel } from "@/widgets/stylist-chat-panel/ui/ChatClarificationPanel";
+import { ChatComposerDock } from "@/widgets/stylist-chat-panel/ui/ChatComposerDock";
+import { ChatConversationSurface } from "@/widgets/stylist-chat-panel/ui/ChatConversationSurface";
+import { ChatGenerationDock } from "@/widgets/stylist-chat-panel/ui/ChatGenerationDock";
+import { ChatQuickActionsBar } from "@/widgets/stylist-chat-panel/ui/ChatQuickActionsBar";
 
 const RU_ASSISTANT_FALLBACK = "Валентин";
 const RU_ONLINE = "онлайн";
@@ -32,21 +34,49 @@ function isNearBottom(container: HTMLDivElement) {
 
 function getStatusBadge(locale: "ru" | "en", availability: "online" | "offline", isGenerating: boolean) {
   if (availability === "offline") {
-    return locale === "ru"
-      ? { label: RU_OFFLINE, className: "border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700" }
-      : { label: "offline", className: "border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700" };
+    return {
+      label: locale === "ru" ? RU_OFFLINE : "offline",
+      tone: "offline" as const,
+    };
   }
 
   if (isGenerating) {
     return {
       label: locale === "ru" ? RU_GENERATING : "generating",
-      className: "border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700",
+      tone: "generating" as const,
     };
   }
 
-  return locale === "ru"
-    ? { label: RU_ONLINE, className: "border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700" }
-    : { label: "online", className: "border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700" };
+  return {
+    label: locale === "ru" ? RU_ONLINE : "online",
+    tone: "online" as const,
+  };
+}
+
+function getModeLabel(locale: "ru" | "en", mode: string) {
+  if (locale === "ru") {
+    if (mode === "style_exploration") {
+      return "режим: стиль";
+    }
+    if (mode === "garment_matching") {
+      return "режим: вещь";
+    }
+    if (mode === "occasion_outfit") {
+      return "режим: повод";
+    }
+    return "режим: совет";
+  }
+
+  if (mode === "style_exploration") {
+    return "mode: style";
+  }
+  if (mode === "garment_matching") {
+    return "mode: garment";
+  }
+  if (mode === "occasion_outfit") {
+    return "mode: occasion";
+  }
+  return "mode: advice";
 }
 
 export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
@@ -109,7 +139,7 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
     }
 
     textarea.style.height = "0px";
-    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 44), 240);
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 48), 240);
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY = textarea.scrollHeight > 240 ? "auto" : "hidden";
   }, [chat.input]);
@@ -143,18 +173,17 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
 
   return (
     <section className="space-y-6">
-      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_24px_64px_rgba(15,23,42,0.08)]">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.94),rgba(255,255,255,0.98))] px-6 py-5">
-          <div>
-            <p className="font-display text-sm text-slate-900">{assistantName}</p>
-            <p className="text-sm text-slate-500">{chatSubtitle}</p>
-          </div>
-          <div className={statusBadge.className}>{statusBadge.label}</div>
-        </div>
+      <div className="overflow-hidden rounded-[36px] border border-white/75 bg-white shadow-[var(--shadow-soft-xl)]">
+        <ChatAssistantHeader
+          assistantName={assistantName}
+          subtitle={chatSubtitle}
+          statusLabel={statusBadge.label}
+          statusTone={statusBadge.tone}
+          modeLabel={getModeLabel(locale, chat.scenarioContext.activeMode)}
+        />
 
-        <div
+        <ChatConversationSurface
           ref={scrollContainerRef}
-          className="h-[480px] overflow-y-auto bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-6 py-6"
           onScroll={(event) => {
             const container = event.currentTarget;
             shouldStickToBottomRef.current = isNearBottom(container);
@@ -181,108 +210,56 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
             isLoadingOlderHistory={chat.isLoadingOlderHistory}
             isSending={chat.isSending}
           />
-        </div>
+        </ChatConversationSurface>
 
-        <div className="border-t border-slate-200 px-4 py-4">
-          <GenerationStatusRail
+        <div className="border-t border-[var(--border-soft)] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,245,240,0.88))] px-4 py-4">
+          <ChatGenerationDock
             job={chat.activeJob}
             locale={locale}
             isPreparing={chat.isSending && !chat.activeJob}
           />
 
           <div className="mb-3 space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {quickActions.map((action) => (
-                <SoftButton
-                  key={action.id}
-                  onClick={() => void chat.runQuickAction(action.id)}
-                  disabled={areQuickActionsDisabled}
-                  title={interactionCooldownReason ?? undefined}
-                  tone="neutral"
-                  shape="pill"
-                >
-                  {action.label}
-                </SoftButton>
-              ))}
-            </div>
-
-            {canShowVisualizationCta ? (
-              <SoftButton
-                onClick={() => void chat.requestVisualization()}
-                disabled={isVisualizationCtaDisabled}
-                title={interactionCooldownReason ?? undefined}
-                tone="accent"
-                shape="surface"
-                fullWidth
-                align="left"
-                className="font-medium"
-              >
-                {chat.visualizationOffer.ctaText ?? (locale === "ru" ? "Собрать flat lay референс?" : "Build a flat lay reference?")}
-              </SoftButton>
-            ) : null}
+            <ChatQuickActionsBar
+              quickActions={quickActions}
+              locale={locale}
+              disabled={areQuickActionsDisabled}
+              disabledTitle={interactionCooldownReason}
+              canShowVisualizationCta={canShowVisualizationCta}
+              visualizationCtaText={chat.visualizationOffer.ctaText}
+              isVisualizationCtaDisabled={isVisualizationCtaDisabled}
+              onRunQuickAction={(actionId) => void chat.runQuickAction(actionId)}
+              onRequestVisualization={() => void chat.requestVisualization()}
+            />
 
             {chat.scenarioContext.pendingClarificationText ? (
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm text-slate-700 shadow-sm">
-                <p className="font-medium">
-                  {locale === "ru" ? "Нужно уточнение" : "Need a follow-up"}
-                </p>
-                <p className="mt-1 leading-6">{chat.scenarioContext.pendingClarificationText}</p>
-              </div>
+              <ChatClarificationPanel locale={locale} text={chat.scenarioContext.pendingClarificationText} />
             ) : null}
 
             {chat.uploadedAsset ? (
-              <div className="flex items-center justify-between rounded-[24px] border border-slate-200 bg-white/90 px-4 py-3 text-sm text-slate-700 shadow-sm">
-                <span>
-                  {locale === "ru" ? "Прикреплённый asset" : "Attached asset"}: {chat.uploadedAsset.original_filename}
-                </span>
-                <button
-                  type="button"
-                  onClick={chat.clearUploadedAsset}
-                  className="text-xs uppercase tracking-[0.18em] text-slate-500 transition hover:text-slate-900"
-                >
-                  {locale === "ru" ? "убрать" : "remove"}
-                </button>
-              </div>
+              <ChatAttachedAssetChip
+                locale={locale}
+                filename={chat.uploadedAsset.original_filename}
+                onRemove={chat.clearUploadedAsset}
+              />
             ) : null}
           </div>
 
-          <InputSurface disabled={chat.isEditorLocked || areChatInteractionsBlocked} className="px-3 py-2.5">
-            <div className="flex items-end gap-3">
-              <UploadArea
-                onSelect={(file) => void chat.handleAttachAsset(file)}
-                isLoading={chat.isUploading}
-                filename={chat.uploadedAsset?.original_filename}
-                disabled={!chat.scenarioContext.canAttachAsset || chat.isEditorLocked || areChatInteractionsBlocked}
-              />
-              <textarea
-                ref={textareaRef}
-                value={chat.input}
-                disabled={chat.isEditorLocked || !chat.scenarioContext.canSendFreeformMessage || areChatInteractionsBlocked}
-                title={interactionCooldownReason ?? undefined}
-                onChange={(event) => chat.setInput(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    if (!chat.isSendLocked) {
-                      void chat.sendComposerMessage();
-                    }
-                  }
-                }}
-                rows={1}
-                placeholder={chatPlaceholder}
-                className="min-h-[44px] flex-1 resize-none overflow-hidden border-0 bg-transparent py-[10px] text-base leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
-              />
-              <ChatCooldownSendControl
-                isLocked={chat.isChatCooldownActive}
-                secondsRemaining={chat.chatCooldownRemainingSeconds}
-                cooldownSeconds={chat.chatCooldownSeconds}
-                onSubmit={() => void chat.sendComposerMessage()}
-                disabled={sendControlHardDisabled}
-                disabledReason={sendControlDisabledReason}
-                variant="dark"
-              />
-            </div>
-          </InputSurface>
+          <ChatComposerDock
+            textareaRef={textareaRef}
+            input={chat.input}
+            placeholder={chatPlaceholder}
+            title={interactionCooldownReason ?? undefined}
+            disabled={chat.isEditorLocked || areChatInteractionsBlocked}
+            textareaDisabled={chat.isEditorLocked || !chat.scenarioContext.canSendFreeformMessage || areChatInteractionsBlocked}
+            isSendLocked={sendControlHardDisabled}
+            isCooldownActive={chat.isChatCooldownActive}
+            cooldownRemainingSeconds={chat.chatCooldownRemainingSeconds}
+            cooldownSeconds={chat.chatCooldownSeconds}
+            sendControlDisabledReason={sendControlDisabledReason}
+            onInputChange={chat.setInput}
+            onSubmit={() => void chat.sendComposerMessage()}
+          />
         </div>
       </div>
     </section>

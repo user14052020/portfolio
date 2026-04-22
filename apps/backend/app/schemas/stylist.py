@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.application.stylist_chat.results.decision_result import DecisionResult
 from app.domain.chat_context import ChatModeContext
+from app.domain.interaction_throttle import ThrottleActionType
 from app.models.enums import ChatMessageRole
 from app.schemas.common import TimestampedRead
 from app.schemas.generation_job import GenerationJobRead
@@ -69,6 +70,20 @@ class ChatHistoryPageRead(BaseModel):
     items: list[ChatMessageRead]
     has_more: bool
     next_before_message_id: int | None = None
+
+
+class ChatCooldownStateRead(BaseModel):
+    is_allowed: bool
+    action_type: ThrottleActionType
+    retry_after_seconds: int
+    next_allowed_at: datetime | None = None
+    cooldown_seconds: int
+
+
+class ChatRuntimePolicyStateRead(BaseModel):
+    cooldown: ChatCooldownStateRead
+    remaining_generations: int
+    remaining_chat_seconds: int
 
 
 class StylistMessageResponse(BaseModel):

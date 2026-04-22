@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.stylist_chat.contracts.command import ChatCommand
+from app.application.stylist_chat.results.decision_result import DecisionResult
 from app.domain.chat_context import ChatModeContext
 from app.domain.chat_modes import ChatMode, FlowState
 from app.domain.interaction_throttle import (
@@ -23,11 +24,15 @@ from app.domain.usage_access_policy import (
 from app.models import UploadedAsset, User
 from app.models.chat_message import ChatMessage
 from app.models.enums import ChatMessageRole
+from app.infrastructure.observability.runtime_policy_observability import RuntimePolicyObservability
 from app.repositories.chat_messages import chat_messages_repository
 from app.repositories.generation_jobs import generation_jobs_repository
+from app.repositories.stylist_chat_sessions import stylist_chat_sessions_repository
 from app.repositories.uploads import uploads_repository
 from app.schemas.stylist import StylistMessageRequest, StylistVisualizationRequest
+from app.services.chat_retention import chat_retention_service
 from app.services.chat_context_store import chat_context_store
+from app.services.client_request_meta import ClientRequestMeta
 from app.services.generation import generation_service
 from app.services.interaction_throttle import InteractionThrottleService
 from app.services.stylist_orchestrator import build_stylist_chat_orchestrator
@@ -35,9 +40,16 @@ from app.services.usage_access_policy import UsageAccessPolicyService
 
 
 class StylistService:
-    def __init__(self) -> None:
-        self.usage_access_policy_service = UsageAccessPolicyService()
-        self.interaction_throttle_service = InteractionThrottleService()
+    def __init__(
+        self,
+        *,
+        usage_access_policy_service: UsageAccessPolicyService | None = None,
+        interaction_throttle_service: InteractionThrottleService | None = None,
+        runtime_policy_observability: RuntimePolicyObservability | None = None,
+    ) -> None:
+        self.usage_access_policy_service = usage_access_policy_service or UsageAccessPolicyService()
+        self.interaction_throttle_service = interaction_throttle_service or InteractionThrottleService()
+        self.runtime_policy_observability = runtime_policy_observability or RuntimePolicyObservability()
 
     async def process_message(
         self,
@@ -45,6 +57,7 @@ class StylistService:
         payload: StylistMessageRequest,
         *,
         current_user: User | None = None,
+        request_meta: ClientRequestMeta | None = None,
     ):
         locale = "ru" if payload.locale == "ru" else "en"
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
@@ -53,6 +66,7 @@ class StylistService:
             current_user=current_user,
             session_id=payload.session_id,
             metadata=payload.metadata,
+            request_meta=request_meta,
         )
         requested_intent = self._coerce_requested_intent(payload.requested_intent)
         source = self._resolve_message_source(payload.metadata)
@@ -63,8 +77,14 @@ class StylistService:
                 resolved_client_message_id = raw_value.strip() or None
         resolved_command_id = payload.command_id or resolved_client_message_id
         resolved_correlation_id = payload.correlation_id or resolved_command_id
+        retention_cutoff = chat_retention_service.cutoff()
 
-        recent_messages_before = await chat_messages_repository.list_by_session(session, payload.session_id, limit=20)
+        recent_messages_before = await chat_messages_repository.list_by_session(
+            session,
+            payload.session_id,
+            limit=20,
+            created_at_from=retention_cutoff,
+        )
         asset = await self._resolve_context_asset(
             session=session,
             payload=payload,
@@ -77,6 +97,12 @@ class StylistService:
             session,
             subject=usage_subject,
             action=RequestedAction(action_type="text_chat"),
+        )
+        await self.runtime_policy_observability.record_usage_access_decision(
+            subject=usage_subject,
+            action_type="text_chat",
+            decision=access_decision,
+            surface="stylist_message",
         )
         self._raise_for_usage_denial(
             decision=access_decision,
@@ -92,6 +118,11 @@ class StylistService:
             session,
             subject_id=usage_subject.subject_id,
             action_type=throttle_action_type,
+        )
+        await self.runtime_policy_observability.record_cooldown_decision(
+            subject_id=usage_subject.subject_id,
+            decision=throttle_decision,
+            surface="stylist_message",
         )
         self._raise_for_throttle_denial(decision=throttle_decision, locale=locale)
 
@@ -122,7 +153,12 @@ class StylistService:
             },
         )
 
-        recent_messages = await chat_messages_repository.list_by_session(session, payload.session_id, limit=20)
+        recent_messages = await chat_messages_repository.list_by_session(
+            session,
+            payload.session_id,
+            limit=20,
+            created_at_from=retention_cutoff,
+        )
         profile_context = self._collect_profile_context(
             messages=recent_messages,
             explicit_gender=self._normalize_gender(payload.profile_gender),
@@ -148,6 +184,7 @@ class StylistService:
             profile_context=profile_context,
             asset_metadata=self._serialize_asset_metadata(asset),
             fallback_history=self._serialize_message_history(recent_messages),
+            request_metadata=self._serialize_request_meta(request_meta),
         )
         orchestrator = build_stylist_chat_orchestrator(session)
         decision = await orchestrator.handle(command=command)
@@ -159,6 +196,7 @@ class StylistService:
                 generation_job = await generation_service.enrich_job_runtime(session, generation_job)
 
         assistant_text = decision.text_reply or self._fallback_empty_reply(locale)
+        should_defer_generation_reply = generation_job is not None
         assistant_payload = {
             "decision_type": decision.decision_type.value,
             "active_mode": context.active_mode.value,
@@ -177,6 +215,9 @@ class StylistService:
             "client_message_id": resolved_client_message_id,
             "command_id": resolved_command_id,
             "correlation_id": resolved_correlation_id,
+            "defer_reply_until_image_ready": should_defer_generation_reply,
+            "hide_deferred_reply_text": should_defer_generation_reply
+            and self._should_hide_generation_launch_reply(decision),
             **self.usage_access_policy_service.subject_to_metadata(usage_subject),
         }
 
@@ -208,6 +249,18 @@ class StylistService:
             context=context,
             record=session_state_record,
         )
+        await self._record_chat_session_activity(
+            session,
+            session_id=payload.session_id,
+            locale=locale,
+            request_meta=request_meta,
+            context=context,
+            decision=decision,
+            source=source,
+            command_name=payload.command_name,
+            command_step=payload.command_step,
+            message_increment=2,
+        )
         await chat_messages_repository.trim_session(session, payload.session_id, keep_latest=50)
 
         return {
@@ -227,6 +280,7 @@ class StylistService:
         payload: StylistVisualizationRequest,
         *,
         current_user: User | None = None,
+        request_meta: ClientRequestMeta | None = None,
     ):
         locale = "ru" if payload.locale == "ru" else "en"
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
@@ -235,13 +289,20 @@ class StylistService:
             current_user=current_user,
             session_id=payload.session_id,
             metadata=payload.metadata,
+            request_meta=request_meta,
         )
         source = "visualization_cta"
         resolved_client_message_id = payload.client_message_id
         resolved_command_id = payload.command_id or resolved_client_message_id
         resolved_correlation_id = payload.correlation_id or resolved_command_id
+        retention_cutoff = chat_retention_service.cutoff()
 
-        recent_messages_before = await chat_messages_repository.list_by_session(session, payload.session_id, limit=20)
+        recent_messages_before = await chat_messages_repository.list_by_session(
+            session,
+            payload.session_id,
+            limit=20,
+            created_at_from=retention_cutoff,
+        )
         asset = await self._resolve_context_asset(
             session=session,
             payload=payload,
@@ -255,6 +316,12 @@ class StylistService:
             subject=usage_subject,
             action=RequestedAction(action_type="generation"),
         )
+        await self.runtime_policy_observability.record_usage_access_decision(
+            subject=usage_subject,
+            action_type="generation",
+            decision=access_decision,
+            surface="stylist_visualization_request",
+        )
         self._raise_for_usage_denial(
             decision=access_decision,
             locale=locale,
@@ -264,6 +331,11 @@ class StylistService:
             session,
             subject_id=usage_subject.subject_id,
             action_type=THROTTLE_ACTION_MESSAGE,
+        )
+        await self.runtime_policy_observability.record_cooldown_decision(
+            subject_id=usage_subject.subject_id,
+            decision=throttle_decision,
+            surface="stylist_visualization_request",
         )
         self._raise_for_throttle_denial(decision=throttle_decision, locale=locale)
 
@@ -299,7 +371,12 @@ class StylistService:
             },
         )
 
-        recent_messages = await chat_messages_repository.list_by_session(session, payload.session_id, limit=20)
+        recent_messages = await chat_messages_repository.list_by_session(
+            session,
+            payload.session_id,
+            limit=20,
+            created_at_from=retention_cutoff,
+        )
         profile_context = self._collect_profile_context(
             messages=recent_messages,
             explicit_gender=None,
@@ -322,6 +399,7 @@ class StylistService:
             profile_context=profile_context,
             asset_metadata=self._serialize_asset_metadata(asset),
             fallback_history=self._serialize_message_history(recent_messages),
+            request_metadata=self._serialize_request_meta(request_meta),
         )
         orchestrator = build_stylist_chat_orchestrator(session)
         decision = await orchestrator.handle(command=command)
@@ -333,6 +411,7 @@ class StylistService:
                 generation_job = await generation_service.enrich_job_runtime(session, generation_job)
 
         assistant_text = decision.text_reply or self._fallback_empty_reply(locale)
+        should_defer_generation_reply = generation_job is not None
         assistant_payload = {
             "decision_type": decision.decision_type.value,
             "active_mode": context.active_mode.value,
@@ -351,6 +430,9 @@ class StylistService:
             "client_message_id": resolved_client_message_id,
             "command_id": resolved_command_id,
             "correlation_id": resolved_correlation_id,
+            "defer_reply_until_image_ready": should_defer_generation_reply,
+            "hide_deferred_reply_text": should_defer_generation_reply
+            and self._should_hide_generation_launch_reply(decision),
             **self.usage_access_policy_service.subject_to_metadata(usage_subject),
         }
 
@@ -382,6 +464,18 @@ class StylistService:
             context=context,
             record=session_state_record,
         )
+        await self._record_chat_session_activity(
+            session,
+            session_id=payload.session_id,
+            locale=locale,
+            request_meta=request_meta,
+            context=context,
+            decision=decision,
+            source=source,
+            command_name=context.command_context.command_name if context.command_context else None,
+            command_step="confirm_visualization",
+            message_increment=2,
+        )
         await chat_messages_repository.trim_session(session, payload.session_id, keep_latest=50)
 
         return {
@@ -407,6 +501,64 @@ class StylistService:
             "asset_type": asset_type,
         }
 
+    def _should_hide_generation_launch_reply(self, decision: DecisionResult) -> bool:
+        provider = str(decision.telemetry.get("provider") or "").strip()
+        reasoning_mode = str(decision.telemetry.get("reasoning_mode") or "").strip()
+        if provider == "deterministic-fallback" or reasoning_mode == "fallback":
+            return True
+
+        text_reply = (decision.text_reply or "").casefold()
+        launch_markers = (
+            "will visualize it",
+            "will generate it now",
+            "launching visualization",
+            "launching generation",
+        )
+        return any(marker in text_reply for marker in launch_markers)
+
+    def _serialize_request_meta(self, request_meta: ClientRequestMeta | None) -> dict[str, str | None]:
+        if request_meta is None:
+            return {}
+        return request_meta.model_fields()
+
+    async def _record_chat_session_activity(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        locale: str,
+        request_meta: ClientRequestMeta | None,
+        context: ChatModeContext,
+        decision: Any,
+        source: str | None,
+        command_name: str | None,
+        command_step: str | None,
+        message_increment: int,
+    ) -> None:
+        await stylist_chat_sessions_repository.upsert_activity(
+            session,
+            session_id=session_id,
+            locale=locale,
+            request_meta=request_meta,
+            active_mode=self._enum_value(context.active_mode),
+            decision_type=self._enum_value(getattr(decision, "decision_type", None)),
+            message_increment=message_increment,
+            metadata={
+                "last_source": source,
+                "last_command_name": command_name,
+                "last_command_step": command_step,
+            },
+        )
+
+    def _enum_value(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        raw_value = getattr(value, "value", value)
+        if raw_value is None:
+            return None
+        cleaned = str(raw_value).strip()
+        return cleaned or None
+
     def _serialize_message_history(self, messages: list[ChatMessage]) -> list[dict[str, str]]:
         history: list[dict[str, str]] = []
         for message in messages:
@@ -420,7 +572,12 @@ class StylistService:
         return history
 
     async def get_history(self, session: AsyncSession, session_id: str):
-        history = await chat_messages_repository.list_by_session(session, session_id, limit=50)
+        history = await chat_messages_repository.list_by_session(
+            session,
+            session_id,
+            limit=50,
+            created_at_from=chat_retention_service.cutoff(),
+        )
         for message in history:
             if message.generation_job is not None:
                 message.generation_job = await generation_service.enrich_job_runtime(session, message.generation_job)
@@ -443,6 +600,7 @@ class StylistService:
             session_id,
             limit=limit,
             before_message_id=before_message_id,
+            created_at_from=chat_retention_service.cutoff(),
         )
         for message in items:
             if message.generation_job is not None:
@@ -454,12 +612,46 @@ class StylistService:
             "next_before_message_id": next_before_message_id,
         }
 
+    async def get_runtime_policy_state(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        current_user: User | None = None,
+        request_meta: ClientRequestMeta | None = None,
+    ) -> dict[str, Any]:
+        usage_subject = self.usage_access_policy_service.build_subject(
+            current_user=current_user,
+            session_id=session_id,
+            metadata={},
+            request_meta=request_meta,
+        )
+        cooldown_decision = await self.interaction_throttle_service.can_submit(
+            session,
+            subject_id=usage_subject.subject_id,
+            action_type=THROTTLE_ACTION_MESSAGE,
+        )
+        access_decision = await self.usage_access_policy_service.evaluate(
+            session,
+            subject=usage_subject,
+            action=RequestedAction(action_type="text_chat"),
+        )
+        return {
+            "cooldown": cooldown_decision,
+            "remaining_generations": access_decision.remaining_generations,
+            "remaining_chat_seconds": access_decision.remaining_chat_seconds,
+        }
+
     async def _sync_context_generation_state(self, session: AsyncSession, context: ChatModeContext) -> ChatModeContext:
         orchestrator = build_stylist_chat_orchestrator(session)
         return await orchestrator.generation_scheduler.sync_context(context)
 
     async def _enforce_message_cooldown(self, session: AsyncSession, session_id: str, locale: str) -> None:
-        latest_assistant_message = await chat_messages_repository.get_latest_assistant_message(session, session_id)
+        latest_assistant_message = await chat_messages_repository.get_latest_assistant_message(
+            session,
+            session_id,
+            created_at_from=chat_retention_service.cutoff(),
+        )
         if latest_assistant_message is None:
             return
         cooldown_seconds = max(generation_service.settings.chat_message_cooldown_seconds, 0)
@@ -564,7 +756,7 @@ class StylistService:
         asset_id = payload.uploaded_asset_id or payload.asset_id
         if asset_id:
             asset = await uploads_repository.get(session, asset_id)
-            if asset is None:
+            if asset is None or chat_retention_service.is_expired(asset.created_at):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uploaded asset was not found.")
             return asset
 

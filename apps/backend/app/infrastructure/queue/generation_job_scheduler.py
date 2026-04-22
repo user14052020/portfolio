@@ -13,9 +13,11 @@ from app.domain.usage_access_policy import (
     USAGE_DENIAL_REASON_DAILY_GENERATION_LIMIT,
     RequestedAction,
 )
+from app.infrastructure.observability.runtime_policy_observability import RuntimePolicyObservability
 from app.models.enums import GenerationStatus
 from app.repositories.generation_jobs import generation_jobs_repository
 from app.schemas.generation_job import GenerationJobCreate
+from app.services.chat_retention import chat_retention_service
 from app.services.generation import generation_service
 from app.services.usage_access_policy import UsageAccessPolicyService
 
@@ -25,11 +27,16 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
         self.session = session
         self.session_flow_state_service = SessionFlowStateService()
         self.usage_access_policy_service = UsageAccessPolicyService()
+        self.runtime_policy_observability = RuntimePolicyObservability()
 
     async def sync_context(self, context: ChatModeContext) -> ChatModeContext:
         if not context.current_job_id:
             return context
-        generation_job = await generation_jobs_repository.get_by_public_id(self.session, context.current_job_id)
+        generation_job = await generation_jobs_repository.get_by_public_id(
+            self.session,
+            context.current_job_id,
+            created_at_from=chat_retention_service.cutoff(),
+        )
         if generation_job is None:
             return context
         return self.session_flow_state_service.sync_generation_status(
@@ -38,7 +45,11 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
         )
 
     async def enqueue(self, request: GenerationScheduleRequest) -> GenerationScheduleResult:
-        existing_job = await generation_jobs_repository.get_latest_active_by_session(self.session, request.session_id)
+        existing_job = await generation_jobs_repository.get_latest_active_by_session(
+            self.session,
+            request.session_id,
+            created_at_from=chat_retention_service.cutoff(),
+        )
         if existing_job is not None and existing_job.status in {
             GenerationStatus.PENDING,
             GenerationStatus.QUEUED,
@@ -68,6 +79,12 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
             subject=subject,
             action=RequestedAction(action_type="generation"),
         )
+        await self.runtime_policy_observability.record_usage_access_decision(
+            subject=subject,
+            action_type="generation",
+            decision=access_decision,
+            surface="generation_scheduler",
+        )
         if not access_decision.is_allowed:
             return GenerationScheduleResult(
                 job_id=None,
@@ -77,6 +94,7 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
                     locale=request.locale,
                     denial_reason=access_decision.denial_reason,
                 ),
+                notice_replaces_text=access_decision.denial_reason == USAGE_DENIAL_REASON_DAILY_GENERATION_LIMIT,
             )
 
         generation_job = await generation_service.create_and_submit(
@@ -95,6 +113,9 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
                 workflow_version=request.workflow_version,
                 visual_generation_plan=request.visual_generation_plan,
                 generation_metadata=request.generation_metadata,
+                client_ip=self._optional_text(request.request_metadata.get("client_ip")),
+                client_user_agent=self._optional_text(request.request_metadata.get("client_user_agent")),
+                request_origin=self._optional_text(request.request_metadata.get("request_origin")),
                 metadata={
                     **request.metadata,
                     "source_message_id": (
@@ -120,6 +141,14 @@ class DefaultGenerationJobScheduler(GenerationJobScheduler):
         if isinstance(value, str) and value.strip().isdigit():
             return int(value.strip())
         return None
+
+    def _optional_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        cleaned = value.strip()
+        return cleaned or None
 
     def _job_idempotency_key(self, job: Any) -> str | None:
         provider_payload = job.provider_payload if isinstance(job.provider_payload, dict) else {}

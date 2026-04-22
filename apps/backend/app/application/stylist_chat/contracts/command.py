@@ -15,6 +15,7 @@ class ChatCommand(BaseModel):
     command_step: str | None = None
     asset_id: int | str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    request_metadata: dict[str, Any] = Field(default_factory=dict)
     client_message_id: str | None = None
     command_id: str | None = None
     correlation_id: str | None = None

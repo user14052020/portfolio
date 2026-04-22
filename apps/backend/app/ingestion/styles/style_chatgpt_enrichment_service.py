@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.styles.contracts import StyleChatGptEnrichmentService, StyleEnrichmentResult
 from app.ingestion.styles.style_chatgpt_payloads import StyleEnrichmentPayload
+from app.ingestion.styles.style_enrichment_observability import (
+    build_style_enrichment_run_event_payload,
+    build_style_enrichment_run_metric_payload,
+)
 from app.ingestion.styles.style_chatgpt_prompt_builder import (
     STYLE_ENRICHMENT_FACET_VERSION,
     STYLE_ENRICHMENT_PROMPT_VERSION,
@@ -79,13 +84,37 @@ class DefaultStyleChatGptEnrichmentService(StyleChatGptEnrichmentService):
         *,
         client: OpenAIChatGptClient | None = None,
         write_enabled: bool = True,
+        progress_reporter: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.session = session
         self.client = client or OpenAIChatGptClient()
         self.write_enabled = write_enabled
+        self.progress_reporter = progress_reporter
 
     async def enrich_style(self, style_id: int) -> StyleEnrichmentResult:
-        loaded = await self._load_source_material(style_id=style_id)
+        try:
+            loaded = await self._load_source_material(style_id=style_id)
+        except StyleEnrichmentSourceLoadError as exc:
+            self._emit_run_finished(
+                style_id=style_id,
+                source_page_id=None,
+                provider="openai",
+                model_name=self.client.model,
+                status="failed_source_load",
+                attempts=0,
+                did_write=False,
+                error_class=exc.__class__.__name__,
+                error_message=str(exc),
+            )
+            raise
+
+        self._emit_run_started(
+            style_id=loaded.style_id,
+            source_page_id=loaded.source_page_id,
+            provider="openai",
+            model_name=self.client.model,
+        )
+
         system_prompt = build_style_enrichment_system_prompt()
         user_prompt = build_style_enrichment_user_prompt(
             style_id=loaded.style_id,
@@ -122,6 +151,17 @@ class DefaultStyleChatGptEnrichmentService(StyleChatGptEnrichmentService):
                             raw_response_json=self._build_failure_payload(completion=completion),
                             error_message=str(exc),
                         )
+                    self._emit_run_finished(
+                        style_id=loaded.style_id,
+                        source_page_id=loaded.source_page_id,
+                        provider="openai",
+                        model_name=completion.provider if completion is not None else self.client.model,
+                        status="failed_validation",
+                        attempts=attempt,
+                        did_write=False,
+                        error_class=exc.__class__.__name__,
+                        error_message=str(exc),
+                    )
                     raise StyleEnrichmentValidationError(str(exc)) from exc
             except OpenAIChatGptClientError as exc:
                 if self.write_enabled:
@@ -134,6 +174,17 @@ class DefaultStyleChatGptEnrichmentService(StyleChatGptEnrichmentService):
                         raw_response_json=None,
                         error_message=str(exc),
                     )
+                self._emit_run_finished(
+                    style_id=loaded.style_id,
+                    source_page_id=loaded.source_page_id,
+                    provider="openai",
+                    model_name=self.client.model,
+                    status="failed_transport",
+                    attempts=attempt,
+                    did_write=False,
+                    error_class=exc.__class__.__name__,
+                    error_message=str(exc),
+                )
                 raise StyleEnrichmentError(str(exc)) from exc
 
         if validated_payload is None or completion is None:
@@ -170,9 +221,20 @@ class DefaultStyleChatGptEnrichmentService(StyleChatGptEnrichmentService):
                     },
                     error_message=str(exc),
                 )
+                self._emit_run_finished(
+                    style_id=loaded.style_id,
+                    source_page_id=loaded.source_page_id,
+                    provider="openai",
+                    model_name=completion.provider,
+                    status="failed_write",
+                    attempts=max(1, len(validation_errors) + 1),
+                    did_write=False,
+                    error_class=exc.__class__.__name__,
+                    error_message=str(exc),
+                )
                 raise StyleEnrichmentWriteError(str(exc)) from exc
 
-        return StyleEnrichmentResult(
+        result = StyleEnrichmentResult(
             style_id=loaded.style_id,
             style_slug=loaded.style_slug,
             source_page_id=loaded.source_page_id,
@@ -186,6 +248,18 @@ class DefaultStyleChatGptEnrichmentService(StyleChatGptEnrichmentService):
             validation_errors=tuple(validation_errors),
             error_message=None,
         )
+        self._emit_run_finished(
+            style_id=result.style_id,
+            source_page_id=result.source_page_id,
+            provider=result.provider,
+            model_name=result.model_name,
+            status=result.status,
+            attempts=result.attempts,
+            did_write=result.did_write,
+            error_class=None,
+            error_message=None,
+        )
+        return result
 
     async def _load_source_material(self, *, style_id: int) -> _LoadedStyleEnrichmentSource:
         statement: Select[Any] = (
@@ -522,6 +596,62 @@ class DefaultStyleChatGptEnrichmentService(StyleChatGptEnrichmentService):
             )
         )
         await self.session.flush()
+
+    def _emit_event(self, event_name: str, payload: dict[str, Any]) -> None:
+        if self.progress_reporter is None:
+            return
+        try:
+            self.progress_reporter(event_name, payload)
+        except Exception:
+            return
+
+    def _emit_run_started(
+        self,
+        *,
+        style_id: int,
+        source_page_id: int | None,
+        provider: str,
+        model_name: str,
+    ) -> None:
+        payload = build_style_enrichment_run_event_payload(
+            style_id=style_id,
+            source_page_id=source_page_id,
+            provider=provider,
+            model_name=model_name,
+            status="started",
+            attempts=0,
+            did_write=False,
+            dry_run=not self.write_enabled,
+        )
+        self._emit_event("style_enrichment_run_started", payload)
+
+    def _emit_run_finished(
+        self,
+        *,
+        style_id: int,
+        source_page_id: int | None,
+        provider: str,
+        model_name: str,
+        status: str,
+        attempts: int,
+        did_write: bool,
+        error_class: str | None,
+        error_message: str | None,
+    ) -> None:
+        payload = build_style_enrichment_run_event_payload(
+            style_id=style_id,
+            source_page_id=source_page_id,
+            provider=provider,
+            model_name=model_name,
+            status=status,
+            attempts=attempts,
+            did_write=did_write,
+            dry_run=not self.write_enabled,
+            error_class=error_class,
+            error_message=error_message,
+        )
+        self._emit_event("style_enrichment_run_finished", payload)
+        self._emit_event("style_enrichment_metric", build_style_enrichment_run_metric_payload(payload))
 
     def _build_failure_payload(self, *, completion: ChatGptStructuredCompletion | None) -> dict[str, Any] | None:
         if completion is None:

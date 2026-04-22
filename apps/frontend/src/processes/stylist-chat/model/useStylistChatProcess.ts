@@ -21,7 +21,7 @@ import { retryStyleExploration } from "@/features/retry-style-exploration/model/
 import { chatGateway } from "@/shared/api/gateways/chatGateway";
 import { generationGateway } from "@/shared/api/gateways/generationGateway";
 import { sessionContextGateway } from "@/shared/api/gateways/sessionContextGateway";
-import type { Locale, UploadedAsset } from "@/shared/api/types";
+import type { ChatRuntimePolicyState, Locale, UploadedAsset } from "@/shared/api/types";
 
 import {
   createClientMessageId,
@@ -154,6 +154,7 @@ export function useStylistChatProcess(
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
+  const [isRuntimePolicyLoading, setIsRuntimePolicyLoading] = useState(true);
   const [backendState, setBackendState] = useState<BackendState>("connected");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
@@ -166,14 +167,18 @@ export function useStylistChatProcess(
   const queueRefreshRemainingSeconds = getRemainingSeconds(queueRefreshAvailableAt, clockTick);
   const hasActiveGenerationJob = isGenerationJobActive(activeJob);
   const isGenerationQueued = isGenerationJobQueued(activeJob);
-  const isEditorLocked = isSending || isUploading;
+  const isEditorLocked = isSending || isUploading || isRuntimePolicyLoading;
   const canSubmitDraft = Boolean(input.trim() || uploadedAsset);
   const chatCooldownRemainingSeconds = getRemainingSeconds(chatCooldown?.endsAt ?? null, clockTick);
   const isChatCooldownActive = chatCooldownRemainingSeconds > 0;
   const isSendLocked = isEditorLocked || !canSubmitDraft || isChatCooldownActive;
-  const isGenerationActionLocked = isSending || isUploading || isRefreshingQueue || hasActiveGenerationJob;
+  const isGenerationActionLocked =
+    isRuntimePolicyLoading || isSending || isUploading || isRefreshingQueue || hasActiveGenerationJob;
   const canRequestVisualization =
-    visualizationOffer.canOfferVisualization && !scenarioContext.pendingClarification && !isGenerationActionLocked;
+    visualizationOffer.canOfferVisualization &&
+    !scenarioContext.pendingClarification &&
+    !isGenerationActionLocked &&
+    !isChatCooldownActive;
 
   const armChatCooldown = (actionType: ChatCooldownActionType, cooldownSeconds: number, endsAt?: number | null) => {
     if (cooldownSeconds <= 0) {
@@ -219,6 +224,21 @@ export function useStylistChatProcess(
     return true;
   };
 
+  const syncCooldownFromRuntimePolicy = (policyState: ChatRuntimePolicyState) => {
+    const cooldown = policyState.cooldown;
+    if (cooldown.is_allowed || cooldown.retry_after_seconds <= 0) {
+      setChatCooldown(null);
+      return;
+    }
+
+    const nextAllowedAt =
+      typeof cooldown.next_allowed_at === "string" ? Date.parse(cooldown.next_allowed_at) : Number.NaN;
+    const endsAt = Number.isFinite(nextAllowedAt)
+      ? nextAllowedAt
+      : Date.now() + cooldown.retry_after_seconds * 1000;
+    armChatCooldown(cooldown.action_type, cooldown.cooldown_seconds, endsAt);
+  };
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -244,9 +264,10 @@ export function useStylistChatProcess(
 
     const loadInitialState = async () => {
       try {
-        const [historyPage, context] = await Promise.all([
+        const [historyPage, context, runtimePolicyState] = await Promise.all([
           chatGateway.getHistoryPage(sessionId, { limit: INITIAL_HISTORY_PAGE_SIZE }),
           sessionContextGateway.getContext(sessionId),
+          chatGateway.getRuntimePolicyState(sessionId),
         ]);
         if (!isMounted) {
           return;
@@ -267,6 +288,8 @@ export function useStylistChatProcess(
         setBackendState("connected");
         setErrorMessage(null);
         setIsHistoryLoading(false);
+        setIsRuntimePolicyLoading(false);
+        syncCooldownFromRuntimePolicy(runtimePolicyState);
 
         if (latestOffer.canOfferVisualization) {
           setLastVisualCtaShown(latestOffer.visualizationType ?? latestOffer.ctaText ?? "cta");
@@ -293,6 +316,7 @@ export function useStylistChatProcess(
               : "Could not load the chat state."
         );
         setIsHistoryLoading(false);
+        setIsRuntimePolicyLoading(false);
       }
     };
 
@@ -433,7 +457,7 @@ export function useStylistChatProcess(
   };
 
   const runQuickAction = async (actionId: CommandName) => {
-    if (isGenerationActionLocked) {
+    if (isGenerationActionLocked || isChatCooldownActive) {
       return;
     }
 

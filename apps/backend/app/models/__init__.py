@@ -38,6 +38,7 @@ from app.models.style_taxonomy_link import StyleTaxonomyLink
 from app.models.style_taxonomy_node import StyleTaxonomyNode
 from app.models.style_trait import StyleTrait
 from app.models.style_visual_facets import StyleVisualFacet
+from app.models.stylist_chat_session import StylistChatSession
 from app.models.stylist_session_state import StylistSessionState
 from app.models.stylist_style_exposure import StylistStyleExposure
 from app.models.uploaded_asset import UploadedAsset
@@ -88,6 +89,7 @@ __all__ = [
     "StyleTaxonomyNode",
     "StyleTaxonomyLink",
     "StyleTrait",
+    "StylistChatSession",
     "StylistSessionState",
     "StylistStyleExposure",
 ]

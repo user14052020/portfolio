@@ -2,7 +2,7 @@ import type { ChatResponse } from "@/entities/chat-session/model/types";
 import type { ChatMessagePayload } from "@/entities/command/model/types";
 import { adaptChatResponse } from "@/entities/chat-session/model/adapters";
 import { request } from "@/shared/api/base";
-import type { ChatHistoryPage, StylistMessageResponse } from "@/shared/api/types";
+import type { ChatHistoryPage, ChatRuntimePolicyState, StylistMessageResponse } from "@/shared/api/types";
 
 function toApiAssetId(assetId: string | null | undefined) {
   if (!assetId) {
@@ -22,6 +22,7 @@ export interface ChatGateway {
       beforeMessageId?: number | null;
     }
   ): Promise<ChatHistoryPage>;
+  getRuntimePolicyState(sessionId: string): Promise<ChatRuntimePolicyState>;
 }
 
 class HttpChatGateway implements ChatGateway {
@@ -54,6 +55,10 @@ class HttpChatGateway implements ChatGateway {
         before_message_id: params?.beforeMessageId ?? undefined,
       },
     });
+  }
+
+  async getRuntimePolicyState(sessionId: string): Promise<ChatRuntimePolicyState> {
+    return request<ChatRuntimePolicyState>(`/stylist-chat/runtime-policy/${sessionId}`);
   }
 }
 

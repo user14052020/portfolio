@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +18,11 @@ from app.domain.usage_access_policy import (
 )
 from app.models import ChatMessage, GenerationJob, User
 from app.models.enums import ChatMessageRole, RoleCode
+from app.services.runtime_subjects import RuntimeSubjectResolverPort, runtime_subject_resolver
 from app.services.stylist_runtime_settings import StylistRuntimeSettingsService
+
+if TYPE_CHECKING:
+    from app.services.client_request_meta import ClientRequestMeta
 
 
 UTC = timezone.utc
@@ -26,8 +30,14 @@ WORDS_PER_SECOND_READING_ESTIMATE = 2.5
 
 
 class UsageAccessPolicyService:
-    def __init__(self, *, runtime_settings_service: StylistRuntimeSettingsService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_settings_service: StylistRuntimeSettingsService | None = None,
+        subject_resolver: RuntimeSubjectResolverPort | None = None,
+    ) -> None:
         self.runtime_settings_service = runtime_settings_service or StylistRuntimeSettingsService()
+        self.subject_resolver = subject_resolver or runtime_subject_resolver
 
     def build_subject(
         self,
@@ -35,6 +45,7 @@ class UsageAccessPolicyService:
         current_user: User | None = None,
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        request_meta: ClientRequestMeta | None = None,
         trusted_metadata: bool = False,
     ) -> UserContext:
         metadata = metadata if isinstance(metadata, dict) else {}
@@ -61,10 +72,12 @@ class UsageAccessPolicyService:
             )
 
         cleaned_session_id = self._optional_text(session_id)
-        if cleaned_session_id is None:
-            raise ValueError("Anonymous runtime requests must include session_id for usage policy evaluation.")
+        anonymous_subject_id = self.subject_resolver.resolve_anonymous_subject_id(
+            session_id=cleaned_session_id,
+            request_meta=request_meta,
+        )
         return UserContext(
-            subject_id=f"session:{cleaned_session_id}",
+            subject_id=anonymous_subject_id,
             session_id=cleaned_session_id,
             user_id=None,
             is_admin=False,

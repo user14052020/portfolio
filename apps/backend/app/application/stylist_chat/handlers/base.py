@@ -117,25 +117,32 @@ class BaseChatModeHandler:
         try:
             reasoning_output = await self.reasoner.decide(locale=command.locale, reasoning_input=reasoning_input)
         except LLMReasonerContextLimitError:
-            decision = self.generation_request_builder.build_recoverable_error(
-                context=context,
-                locale=command.locale,
-                error_code="reasoning_context_limit",
-            )
-            self._apply_telemetry(
-                decision=decision,
-                provider="vllm",
-                fallback_used=False,
-                reasoning_mode="context_limit",
-                knowledge_items_count=len(knowledge_result.items),
-                style_history_used=style_history_used,
-                knowledge_provider_used=knowledge_result.source,
-                anchor_garment_confidence=context.anchor_garment.confidence if context.anchor_garment else 0.0,
-                anchor_garment_completeness=context.anchor_garment.completeness_score if context.anchor_garment else 0.0,
-            )
-            if injected_knowledge is not None:
-                decision.telemetry.update(injected_knowledge.bundle.retrieval_trace)
-            return decision
+            if self._should_fallback_on_context_limit(command):
+                reasoning_output = await self.fallback_reasoner.decide(
+                    locale=command.locale,
+                    reasoning_input=reasoning_input,
+                )
+                fallback_used = True
+            else:
+                decision = self.generation_request_builder.build_recoverable_error(
+                    context=context,
+                    locale=command.locale,
+                    error_code="reasoning_context_limit",
+                )
+                self._apply_telemetry(
+                    decision=decision,
+                    provider="vllm",
+                    fallback_used=False,
+                    reasoning_mode="context_limit",
+                    knowledge_items_count=len(knowledge_result.items),
+                    style_history_used=style_history_used,
+                    knowledge_provider_used=knowledge_result.source,
+                    anchor_garment_confidence=context.anchor_garment.confidence if context.anchor_garment else 0.0,
+                    anchor_garment_completeness=context.anchor_garment.completeness_score if context.anchor_garment else 0.0,
+                )
+                if injected_knowledge is not None:
+                    decision.telemetry.update(injected_knowledge.bundle.retrieval_trace)
+                return decision
         except LLMReasonerError:
             reasoning_output = await self.fallback_reasoner.decide(
                 locale=command.locale,
@@ -181,6 +188,13 @@ class BaseChatModeHandler:
         if injected_knowledge is not None:
             decision.telemetry.update(injected_knowledge.bundle.retrieval_trace)
         return decision
+
+    def _should_fallback_on_context_limit(self, command: ChatCommand) -> bool:
+        return (
+            command.source == "quick_action"
+            and command.command_name == "style_exploration"
+            and command.command_step == "start"
+        )
 
     def style_seed_from_context(self, style: StyleDirectionContext) -> dict[str, str]:
         mood_bit = style.primary_mood if hasattr(style, "primary_mood") else None

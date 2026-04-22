@@ -12,19 +12,19 @@ export function AssistantPendingBubble({
   const ariaLabel = locale === "ru" ? "Ассистент печатает" : "Assistant is typing";
 
   return (
-    <div className="max-w-[620px]">
+    <div className="max-w-[680px]">
       <div
-        className="inline-flex items-center gap-1.5 rounded-[24px] rounded-tl-md border border-slate-200 bg-white/95 px-4 py-3 shadow-sm"
+        className="inline-flex items-center gap-1.5 rounded-[28px] rounded-tl-lg border border-white/80 bg-white/88 px-5 py-4 shadow-[var(--shadow-soft-sm)]"
         role="status"
         aria-label={ariaLabel}
       >
-        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-400" />
+        <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-[var(--text-muted)]" />
         <span
-          className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-400"
+          className="h-2.5 w-2.5 animate-bounce rounded-full bg-[var(--text-muted)]"
           style={{ animationDelay: "120ms" }}
         />
         <span
-          className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-400"
+          className="h-2.5 w-2.5 animate-bounce rounded-full bg-[var(--text-muted)]"
           style={{ animationDelay: "240ms" }}
         />
       </div>

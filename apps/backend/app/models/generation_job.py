@@ -13,6 +13,7 @@ class GenerationJob(Base, TimestampedMixin):
         Index("ix_generation_jobs_status_created_at", "status", "created_at"),
         Index("ix_generation_jobs_session_id", "session_id"),
         Index("ix_generation_jobs_deleted_at", "deleted_at"),
+        Index("ix_generation_jobs_client_ip", "client_ip"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -32,6 +33,9 @@ class GenerationJob(Base, TimestampedMixin):
     result_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     external_job_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    client_ip: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    client_user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_origin: Mapped[str | None] = mapped_column(String(512), nullable=True)
     body_height_cm: Mapped[int | None] = mapped_column(nullable=True)
     body_weight_kg: Mapped[int | None] = mapped_column(nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

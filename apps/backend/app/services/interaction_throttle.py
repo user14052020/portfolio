@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,7 +96,7 @@ class InteractionThrottleService:
             if latest_submitted_at is None:
                 continue
             next_allowed_at = latest_submitted_at + timedelta(seconds=cooldown_seconds)
-            retry_after_seconds = max(0, int(math.ceil((next_allowed_at - datetime.now(UTC)).total_seconds())))
+            retry_after_seconds = max(0, int(math.ceil((next_allowed_at - datetime.now(timezone.utc)).total_seconds())))
             if retry_after_seconds <= 0:
                 continue
             decisions.append(

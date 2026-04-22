@@ -113,6 +113,7 @@ class GenerationScheduleRequest:
     visual_generation_plan: dict[str, Any] | None = None
     generation_metadata: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    request_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -122,6 +123,7 @@ class GenerationScheduleResult:
     job: Any | None = None
     blocked_by_active_job: bool = False
     notice_text: str | None = None
+    notice_replaces_text: bool = False
 
 
 class ChatContextStorePort(Protocol):

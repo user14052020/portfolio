@@ -40,6 +40,7 @@ export const dictionaries = {
     posts: "Posts",
     settings: "Settings",
     contacts: "Contacts",
+    chats: "Chats",
     jobs: "Generation jobs",
     parser: "Parser",
     logout: "Logout",

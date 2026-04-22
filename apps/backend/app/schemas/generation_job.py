@@ -15,13 +15,16 @@ class GenerationJobCreate(BaseModel):
     prompt: str
     negative_prompt: str | None = None
     input_asset_id: int | None = None
+    client_ip: str | None = None
+    client_user_agent: str | None = None
+    request_origin: str | None = None
     body_height_cm: int | None = None
     body_weight_kg: int | None = None
     workflow_name: str | None = None
     workflow_version: str | None = None
     visual_generation_plan: dict | None = None
     generation_metadata: dict | None = None
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
     idempotency_key: str | None = None
     provider: GenerationProvider = GenerationProvider.COMFYUI
 
@@ -48,6 +51,9 @@ class GenerationJobRead(TimestampedRead):
     result_url: str | None = None
     external_job_id: str | None = None
     progress: int
+    client_ip: str | None = None
+    client_user_agent: str | None = None
+    request_origin: str | None = None
     body_height_cm: int | None = None
     body_weight_kg: int | None = None
     error_message: str | None = None

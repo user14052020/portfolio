@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.integrations.elasticsearch import close_elasticsearch_client
 from app.services.search import search_service
 from app.services.style_ingestion_admin import style_ingestion_admin_service
+from app.tasks.chat_retention_cleanup import run_chat_retention_cleanup
 from app.tasks.generation_polling import run_generation_job_poller
 
 
@@ -21,18 +22,29 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     poller_stop_event = asyncio.Event()
+    retention_stop_event = asyncio.Event()
     poller_task: asyncio.Task[None] | None = None
+    retention_task: asyncio.Task[None] | None = None
 
     settings.media_root.mkdir(parents=True, exist_ok=True)
     await search_service.ensure_indices()
     if settings.enable_generation_job_poller:
         poller_task = asyncio.create_task(run_generation_job_poller(poller_stop_event))
+    if settings.enable_chat_retention_cleanup:
+        retention_task = asyncio.create_task(run_chat_retention_cleanup(retention_stop_event))
     yield
     poller_stop_event.set()
+    retention_stop_event.set()
     if poller_task is not None:
         poller_task.cancel()
         try:
             await poller_task
+        except asyncio.CancelledError:
+            pass
+    if retention_task is not None:
+        retention_task.cancel()
+        try:
+            await retention_task
         except asyncio.CancelledError:
             pass
     style_ingestion_admin_service.shutdown()

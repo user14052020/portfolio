@@ -196,6 +196,7 @@ class GenerationRequestBuilder:
             visual_generation_plan=generation_payload.visual_generation_plan,
             generation_metadata=generation_payload.generation_metadata,
             metadata=schedule_metadata,
+            request_metadata=dict(command.request_metadata),
         )
 
     def build_clarification_decision(self, *, context: ChatModeContext, text: str) -> DecisionResult:
@@ -234,8 +235,9 @@ class GenerationRequestBuilder:
         decision: DecisionResult,
         context: ChatModeContext,
         notice_text: str,
+        replace_text: bool = False,
     ) -> DecisionResult:
-        base_text = (decision.text_reply or "").strip()
+        base_text = "" if replace_text else self._remove_generation_launch_promises(decision.text_reply or "")
         notice = notice_text.strip()
         if base_text and notice and notice not in base_text:
             text_reply = f"{base_text}\n\n{notice}"
@@ -252,6 +254,26 @@ class GenerationRequestBuilder:
         downgraded.cta_text = None
         downgraded.visualization_type = None
         return downgraded
+
+    def _remove_generation_launch_promises(self, text: str) -> str:
+        cleaned = text.strip()
+        if not cleaned:
+            return ""
+        cleaned = re.sub(
+            r"\s+и\s+запускаю\s+(?:визуализацию|генерацию)\.?",
+            ".",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r"\s+and\s+(?:i\s+)?(?:will|am\s+going\s+to)\s+(?:visualize|generate)\s+(?:it|this)?(?:\s+now)?\.?",
+            ".",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = re.sub(r"\.{2,}$", ".", cleaned)
+        return cleaned
 
     def build_generation_intent(
         self,

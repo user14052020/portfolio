@@ -13,6 +13,7 @@ const links = [
   { href: "/admin/projects", key: "projects" },
   { href: "/admin/posts", key: "posts" },
   { href: "/admin/contacts", key: "contacts" },
+  { href: "/admin/chats", key: "chats" },
   { href: "/admin/jobs", key: "jobs" },
   { href: "/admin/parser", key: "parser" },
   { href: "/admin/settings", key: "settings" }
@@ -54,17 +55,22 @@ export function AdminLayoutShell({ children }: { children: React.ReactNode }) {
           <h2 className="mt-2 text-2xl font-semibold text-slate-900">Control room</h2>
         </div>
         <nav className="space-y-2">
-          {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`block rounded-2xl px-4 py-3 text-sm transition ${
-                pathname === link.href ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-              }`}
-            >
-              {t(link.key)}
-            </Link>
-          ))}
+          {links.map((link) => {
+            const isActive = link.href === "/admin"
+              ? pathname === link.href
+              : pathname === link.href || pathname.startsWith(`${link.href}/`);
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`block rounded-2xl px-4 py-3 text-sm transition ${
+                  isActive ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                {t(link.key)}
+              </Link>
+            );
+          })}
         </nav>
         <Button
           radius="xl"

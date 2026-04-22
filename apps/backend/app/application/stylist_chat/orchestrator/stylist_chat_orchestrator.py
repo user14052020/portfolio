@@ -119,6 +119,7 @@ class StylistChatOrchestrator:
                         decision=decision,
                         context=context,
                         notice_text=schedule_result.notice_text,
+                        replace_text=schedule_result.notice_replaces_text,
                     )
                     decision.telemetry.update(original_telemetry)
                 elif self._flow_state_from_generation_status(schedule_result.status) == FlowState.RECOVERABLE_ERROR:

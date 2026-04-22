@@ -96,20 +96,20 @@ export function GenerationStatusRail({
   }
 
   return (
-    <div className="mb-4 rounded-[28px] border border-slate-200 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.98))] px-5 py-4 shadow-[0_16px_38px_rgba(15,23,42,0.05)]">
+    <div className="rounded-[26px] border border-[var(--border-soft)] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,245,240,0.92))] px-5 py-4 shadow-[var(--shadow-soft-sm)]">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-sm font-medium text-slate-800">{labels.title}</p>
-        <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">{labels.title}</p>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
           {Math.round(getProgress(job, isPreparing))}%
         </span>
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+      <div className="h-1.5 overflow-hidden rounded-full bg-black/10">
         <div
           className="h-full rounded-full bg-gradient-to-r from-[#d0a46d] to-[#8fae98] transition-all duration-500"
           style={{ width: `${getProgress(job, isPreparing)}%` }}
         />
       </div>
-      <p className="mt-2 text-xs leading-5 text-slate-600">{labels.detail}</p>
+      <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{labels.detail}</p>
     </div>
   );
 }

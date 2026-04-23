@@ -35,6 +35,7 @@ class ConversationRouterTests(unittest.IsolatedAsyncioTestCase):
                     "continue_existing_flow": False,
                     "should_reset_to_general": False,
                     "reasoning_depth": "normal",
+                    "retrieval_profile": "occasion_focused",
                 }
             )
         )
@@ -49,6 +50,7 @@ class ConversationRouterTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.decision.mode, RoutingMode.OCCASION_OUTFIT)
+        self.assertEqual(result.decision.retrieval_profile, "occasion_focused")
         self.assertFalse(result.used_fallback)
         self.assertEqual(result.provider, "fake-vllm-router")
         self.assertEqual(result.validation_errors, [])

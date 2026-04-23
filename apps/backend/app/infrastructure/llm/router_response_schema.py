@@ -32,6 +32,10 @@ ROUTER_DECISION_JSON_SCHEMA: dict[str, Any] = {
             "type": "string",
             "enum": [depth.value for depth in ReasoningDepth],
         },
+        "retrieval_profile": {
+            "type": ["string", "null"],
+            "enum": ["light", "style_focused", "occasion_focused", "visual_heavy", None],
+        },
         "notes": {
             "type": ["string", "null"],
         },

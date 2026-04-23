@@ -3,6 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.product_behavior.services.conversation_state_policy import ConversationStatePolicy
 from app.application.product_behavior.services.generation_policy_service import GenerationPolicyService
 from app.application.product_behavior.services.post_action_conversation_policy import PostActionConversationPolicy
+from app.application.reasoning.services import (
+    DefaultFashionBriefBuilder,
+    DefaultFashionReasoningContextAssembler,
+    DefaultFashionReasoningPipeline,
+    DefaultFashionReasoner,
+    DefaultProfileStyleAlignmentService,
+    ProfileAlignedFashionReasoningContextAssembler,
+)
 from app.application.knowledge.services.knowledge_bundle_builder import KnowledgeBundleBuilder
 from app.application.knowledge.services.knowledge_ranker import KnowledgeRanker
 from app.application.knowledge.services.knowledge_retrieval_service import DefaultKnowledgeRetrievalService
@@ -30,6 +38,9 @@ from app.application.stylist_chat.services.occasion_brief_compiler import Occasi
 from app.application.stylist_chat.services.occasion_clarification_service import OccasionClarificationService
 from app.application.stylist_chat.services.occasion_context_builder import OccasionContextBuilder
 from app.application.stylist_chat.services.reasoning_context_builder import ReasoningContextBuilder
+from app.application.stylist_chat.services.reasoning_pipeline_decision_adapter import (
+    FashionReasoningPipelineDecisionAdapter,
+)
 from app.application.stylist_chat.services.routing_context_builder import RoutingContextBuilder
 from app.application.stylist_chat.services.routing_decision_validator import RoutingDecisionValidator
 from app.application.stylist_chat.services.semantic_diversity_service import SemanticDiversityService
@@ -78,6 +89,7 @@ from app.infrastructure.persistence.style_history_provider import DatabaseStyleH
 from app.infrastructure.persistence.stylist_chat_context_store import SessionChatContextStore
 from app.infrastructure.queue.generation_job_scheduler import DefaultGenerationJobScheduler
 from app.infrastructure.search.static_knowledge_provider import StaticKnowledgeProvider
+from app.infrastructure.reasoning import StyleDistilledReasoningProvider
 
 
 def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchestrator:
@@ -121,6 +133,24 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
     garment_knowledge_provider = StaticGarmentKnowledgeProvider()
     occasion_knowledge_provider = StaticOccasionKnowledgeProvider()
     style_catalog_repository = DatabaseStyleCatalogRepository(session)
+    style_distilled_reasoning_provider = StyleDistilledReasoningProvider(
+        style_catalog_repository=style_catalog_repository,
+    )
+    reasoning_pipeline_decision_adapter = FashionReasoningPipelineDecisionAdapter(
+        reasoning_pipeline=DefaultFashionReasoningPipeline(
+            context_assembler=ProfileAlignedFashionReasoningContextAssembler(
+                context_assembler=DefaultFashionReasoningContextAssembler(
+                    knowledge_provider=style_distilled_reasoning_provider,
+                    style_facet_provider=style_distilled_reasoning_provider,
+                    semantic_fragment_provider=style_distilled_reasoning_provider,
+                ),
+                alignment_service=DefaultProfileStyleAlignmentService(),
+            ),
+            reasoner=DefaultFashionReasoner(),
+            brief_builder=DefaultFashionBriefBuilder(),
+        ),
+        generation_request_builder=generation_request_builder,
+    )
     knowledge_retrieval_service = DefaultKnowledgeRetrievalService(
         style_catalog_repository=style_catalog_repository,
         color_theory_repository=DatabaseColorTheoryRepository(style_catalog_repository=style_catalog_repository),
@@ -226,11 +256,15 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
         "reasoner": occasion_reasoner,
     }
     handlers = {
-        ChatMode.GENERAL_ADVICE: GeneralAdviceHandler(**shared_handler_kwargs),
+        ChatMode.GENERAL_ADVICE: GeneralAdviceHandler(
+            **shared_handler_kwargs,
+            reasoning_pipeline_decision_adapter=reasoning_pipeline_decision_adapter,
+        ),
         ChatMode.GARMENT_MATCHING: GarmentMatchingHandler(
             start_use_case=start_garment_matching,
             continue_use_case=continue_garment_matching,
             build_outfit_brief_use_case=build_garment_outfit_brief,
+            reasoning_pipeline_decision_adapter=reasoning_pipeline_decision_adapter,
             **garment_handler_kwargs,
         ),
         ChatMode.OCCASION_OUTFIT: OccasionOutfitHandler(
@@ -238,6 +272,7 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
             continue_use_case=continue_occasion_outfit,
             build_outfit_brief_use_case=build_occasion_outfit_brief,
             context_checkpoint_writer=context_checkpoint_writer,
+            reasoning_pipeline_decision_adapter=reasoning_pipeline_decision_adapter,
             **occasion_handler_kwargs,
         ),
         ChatMode.STYLE_EXPLORATION: StyleExplorationHandler(
@@ -249,6 +284,7 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
             style_history_service=style_history_service,
             style_history_provider=style_history_provider,
             context_checkpoint_writer=context_checkpoint_writer,
+            reasoning_pipeline_decision_adapter=reasoning_pipeline_decision_adapter,
             **shared_handler_kwargs,
         ),
     }

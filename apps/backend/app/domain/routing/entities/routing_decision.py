@@ -15,6 +15,7 @@ class RoutingDecision(BaseModel):
     continue_existing_flow: bool = False
     should_reset_to_general: bool = False
     reasoning_depth: ReasoningDepth = ReasoningDepth.NORMAL
+    retrieval_profile: str | None = None
     notes: str | None = None
     requires_style_retrieval: bool = False
     requires_historical_layer: bool = False
@@ -31,4 +32,5 @@ class RoutingDecision(BaseModel):
             continue_existing_flow=False,
             should_reset_to_general=False,
             reasoning_depth=ReasoningDepth.LIGHT,
+            retrieval_profile=None,
         )

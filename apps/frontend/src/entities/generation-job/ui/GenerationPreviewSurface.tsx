@@ -23,7 +23,7 @@ export function GenerationPreviewSurface({
       <div className="mt-3 max-w-[320px] rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700 shadow-sm">
         {job.error_message ||
           (locale === "ru"
-            ? "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ."
+            ? "Не удалось сгенерировать изображение."
             : "Could not generate the image.")}
       </div>
     );
@@ -39,12 +39,12 @@ export function GenerationPreviewSurface({
         href={job.result_url}
         target="_blank"
         rel="noreferrer"
-        className="block cursor-pointer overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.10)]"
-        title={locale === "ru" ? "РћС‚РєСЂС‹С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ" : "Open image"}
+        className="block cursor-pointer overflow-hidden rounded-[26px] border border-[var(--border-soft)] bg-white shadow-[var(--shadow-soft-md)]"
+        title={locale === "ru" ? "Открыть изображение" : "Open image"}
       >
         <Image
           src={job.result_url}
-          alt={locale === "ru" ? "РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ flat lay" : "Generated flat lay"}
+          alt={locale === "ru" ? "Сгенерированный flat lay" : "Generated flat lay"}
           width={1024}
           height={1024}
           className="h-auto w-full object-cover transition duration-200 hover:scale-[1.01]"

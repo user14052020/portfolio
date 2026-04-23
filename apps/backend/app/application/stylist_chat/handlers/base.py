@@ -13,6 +13,9 @@ from app.application.stylist_chat.contracts.ports import (
 from app.application.stylist_chat.results.decision_result import DecisionResult
 from app.application.stylist_chat.services.generation_request_builder import GenerationRequestBuilder
 from app.application.stylist_chat.services.reasoning_context_builder import ReasoningContextBuilder
+from app.application.stylist_chat.services.reasoning_pipeline_decision_adapter import (
+    FashionReasoningPipelineDecisionAdapter,
+)
 from app.domain.chat_context import ChatModeContext, OccasionContext, StyleDirectionContext
 
 
@@ -28,6 +31,7 @@ class BaseChatModeHandler:
         knowledge_query_builder=None,
         resolve_knowledge_bundle_use_case=None,
         inject_knowledge_into_reasoning_use_case=None,
+        reasoning_pipeline_decision_adapter: FashionReasoningPipelineDecisionAdapter | None = None,
     ) -> None:
         self.reasoner = reasoner
         self.fallback_reasoner = fallback_reasoner
@@ -37,6 +41,7 @@ class BaseChatModeHandler:
         self.knowledge_query_builder = knowledge_query_builder
         self.resolve_knowledge_bundle_use_case = resolve_knowledge_bundle_use_case
         self.inject_knowledge_into_reasoning_use_case = inject_knowledge_into_reasoning_use_case
+        self.reasoning_pipeline_decision_adapter = reasoning_pipeline_decision_adapter
 
     async def handle(
         self,
@@ -62,6 +67,18 @@ class BaseChatModeHandler:
         knowledge_result_override: KnowledgeResult | None = None,
         knowledge_bundle_override: KnowledgeBundle | None = None,
     ) -> DecisionResult:
+        if self.reasoning_pipeline_decision_adapter is not None:
+            return await self.reasoning_pipeline_decision_adapter.handle(
+                command=command,
+                context=context,
+                must_generate=must_generate,
+                style_seed=style_seed,
+                previous_style_directions=previous_style_directions,
+                occasion_context=occasion_context,
+                anti_repeat_constraints=anti_repeat_constraints,
+                structured_outfit_brief=structured_outfit_brief,
+            )
+
         injected_knowledge = None
         if knowledge_bundle_override is not None and self.inject_knowledge_into_reasoning_use_case is not None:
             injected_knowledge = self.inject_knowledge_into_reasoning_use_case.execute(bundle=knowledge_bundle_override)

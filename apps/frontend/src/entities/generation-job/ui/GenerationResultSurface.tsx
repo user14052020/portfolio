@@ -21,10 +21,10 @@ export function GenerationResultSurface({
   if (job?.status === "failed" || job?.status === "cancelled") {
     return (
       <div className="max-w-[620px] space-y-2">
-        <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{assistantLabel}</p>
+        <p className="text-xs font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">{assistantLabel}</p>
         <div className="w-full max-w-[620px] rounded-[24px] rounded-tl-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700 shadow-sm">
           {job.error_message ||
-            (locale === "ru" ? "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ." : "Could not generate the image.")}
+            (locale === "ru" ? "Не удалось сгенерировать изображение." : "Could not generate the image.")}
         </div>
       </div>
     );
@@ -38,12 +38,12 @@ export function GenerationResultSurface({
 
   return (
     <div className="max-w-[620px] space-y-2">
-      <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{assistantLabel}</p>
-      <div className="w-full max-w-[620px] rounded-[28px] border border-slate-200 bg-white/95 p-3 shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
-        <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">{assistantLabel}</p>
+      <div className="w-full max-w-[620px] rounded-[28px] border border-[var(--border-soft)] bg-white/95 p-3 shadow-[var(--shadow-soft-md)]">
+        <div className="overflow-hidden rounded-[24px] border border-[var(--border-soft)] bg-white shadow-[var(--shadow-soft-sm)]">
           <Image
             src={job.result_url}
-            alt={locale === "ru" ? "РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ РѕР±СЂР°Р·" : "Generated outfit"}
+            alt={locale === "ru" ? "Сгенерированный образ" : "Generated outfit"}
             width={1024}
             height={1024}
             className="h-auto w-full object-cover"
@@ -56,8 +56,8 @@ export function GenerationResultSurface({
         </div>
 
         {recommendation ? (
-          <p className="mt-3 text-sm leading-6 text-slate-600">
-            {locale === "ru" ? "Р РµРєРѕРјРµРЅРґР°С†РёСЏ:" : "Recommendation:"} {recommendation}
+          <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
+            {locale === "ru" ? "Рекомендация:" : "Recommendation:"} {recommendation}
           </p>
         ) : null}
 
@@ -65,9 +65,9 @@ export function GenerationResultSurface({
           href={job.result_url}
           target="_blank"
           rel="noreferrer"
-          className="mt-3 inline-flex rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-sm font-medium text-slate-900 transition hover:border-slate-300 hover:bg-white"
+          className="mt-3 inline-flex rounded-[var(--radius-pill)] border border-[var(--border-soft)] bg-white/80 px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition hover:border-[var(--border-strong)] hover:bg-white"
         >
-          {locale === "ru" ? "РћС‚РєСЂС‹С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ" : "Open image"}
+          {locale === "ru" ? "Открыть изображение" : "Open image"}
         </a>
       </div>
     </div>

@@ -86,7 +86,12 @@ class CommandDispatcher:
         command_context = CommandContext(
             command_name=command.command_name or self._default_command_name(active_mode=active_mode),
             command_step=command.command_step,
-            metadata=dict(command.metadata),
+            metadata={
+                **dict(command.metadata),
+                "routing_decision": routing.decision.model_dump(mode="json"),
+                "routing_provider": routing.provider,
+                "routing_retrieval_profile": routing.decision.retrieval_profile,
+            },
         )
         return ModeResolution(
             active_mode=active_mode,

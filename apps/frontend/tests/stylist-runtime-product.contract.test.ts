@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { buildChatCooldownSendControlState } from "@/features/chat-cooldown/model/cooldownSendControl";
-import type { StylistRuntimeSettings } from "@/shared/api/types";
+import type { StyleIngestionRuntimeSettings, StylistRuntimeSettings } from "@/shared/api/types";
 import {
   getInitialVisibleMessages,
   LOCAL_CHAT_RETENTION_DAYS,
@@ -17,6 +17,10 @@ import {
   buildStylistRuntimeSettingsUpdatePayload,
   toBoundedInteger,
 } from "@/widgets/admin/model/stylistRuntimeSettings";
+import {
+  buildStyleIngestionSettingsUpdatePayload,
+  toFiniteNumber,
+} from "@/widgets/admin/model/styleIngestionSettings";
 
 function readSource(relativePath: string) {
   return readFileSync(new URL(`../src/${relativePath}`, import.meta.url), "utf8");
@@ -38,6 +42,28 @@ function buildSettings(overrides: Partial<StylistRuntimeSettings> = {}): Stylist
     daily_chat_seconds_limit_non_admin: 900,
     message_cooldown_seconds: 12,
     try_other_style_cooldown_seconds: 60,
+    created_at: "2026-04-21T00:00:00Z",
+    updated_at: "2026-04-21T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function buildStyleIngestionSettings(
+  overrides: Partial<StyleIngestionRuntimeSettings> = {},
+): StyleIngestionRuntimeSettings {
+  return {
+    id: 1,
+    source_name: "aesthetics_wiki",
+    min_delay_seconds: 3,
+    max_delay_seconds: 6,
+    jitter_ratio: 0.2,
+    empty_body_cooldown_min_seconds: 30,
+    empty_body_cooldown_max_seconds: 30,
+    retry_backoff_seconds: 20,
+    retry_backoff_jitter_seconds: 1,
+    worker_idle_sleep_seconds: 5,
+    worker_lease_ttl_seconds: 90,
+    worker_lease_heartbeat_interval_seconds: 30,
     created_at: "2026-04-21T00:00:00Z",
     updated_at: "2026-04-21T00:00:00Z",
     ...overrides,
@@ -112,6 +138,18 @@ test("style explanation stays attached below generated images", () => {
   );
 });
 
+test("generation result surfaces keep readable Russian UI strings", () => {
+  const generationSources = [
+    readSource("entities/generation-job/ui/GenerationPreviewSurface.tsx"),
+    readSource("entities/generation-job/ui/GenerationResultSurface.tsx"),
+    readSource("entities/generation-job/ui/GenerationResultCard.tsx"),
+  ].join("\n");
+
+  assert.doesNotMatch(generationSources, /Рџ|Рћ|РЎ|Рќ|Р“|Р’/);
+  assert.match(generationSources, /Сгенерированный/);
+  assert.match(generationSources, /Рекомендация/);
+});
+
 test("admin runtime settings saves every configurable non-admin limit and cooldown", () => {
   const payload = buildStylistRuntimeSettingsUpdatePayload(buildSettings());
 
@@ -124,6 +162,146 @@ test("admin runtime settings saves every configurable non-admin limit and cooldo
   assert.equal(toBoundedInteger(3601, 12, 0, 3600), 3600);
   assert.equal(toBoundedInteger(-1, 12, 0, 3600), 0);
   assert.equal(toBoundedInteger("not-a-number", 12, 0, 3600), 12);
+});
+
+test("admin parser timing settings uses premium surfaces and saves every timing field", () => {
+  const payload = buildStyleIngestionSettingsUpdatePayload(buildStyleIngestionSettings());
+  const source = readSource("widgets/admin/ui/StyleIngestionSettingsManager.tsx");
+
+  assert.deepEqual(payload, {
+    min_delay_seconds: 3,
+    max_delay_seconds: 6,
+    jitter_ratio: 0.2,
+    empty_body_cooldown_min_seconds: 30,
+    empty_body_cooldown_max_seconds: 30,
+    retry_backoff_seconds: 20,
+    retry_backoff_jitter_seconds: 1,
+    worker_idle_sleep_seconds: 5,
+    worker_lease_ttl_seconds: 90,
+    worker_lease_heartbeat_interval_seconds: 30,
+  });
+  assert.equal(toFiniteNumber("not-a-number", 7), 7);
+  assert.equal(toFiniteNumber(4, 7), 4);
+  assert.match(source, /SurfaceCard/);
+  assert.match(source, /SoftButton/);
+  assert.match(source, /PillBadge/);
+  assert.match(source, /ParserNumberControl/);
+  assert.match(source, /worker_lease_ttl_seconds/);
+  assert.match(source, /retry_backoff_seconds/);
+  assert.doesNotMatch(source, /WindowFrame|Stack|TextInput|<Button/);
+});
+
+test("browser API requests reuse persisted admin token for runtime policy surfaces", () => {
+  const base = readSource("shared/api/base.ts");
+  const tokenStore = readSource("shared/auth/adminTokenStore.ts");
+  const adminAuth = readSource("features/admin-auth/model/useAdminAuth.ts");
+
+  assert.match(base, /browserAdminTokenStore\.getAccessToken\(\)/);
+  assert.match(base, /headers\.set\("Authorization", `Bearer \$\{storedToken\}`\)/);
+  assert.match(tokenStore, /ADMIN_TOKENS_STORAGE_KEY = "portfolio-admin-tokens"/);
+  assert.match(adminAuth, /browserAdminTokenStore\.readTokenPair\(\)/);
+  assert.match(adminAuth, /browserAdminTokenStore\.writeTokenPair\(nextTokens\)/);
+});
+
+test("admin shell keeps premium control-room navigation with chats audit entry", () => {
+  const adminShell = readSource("widgets/admin/ui/AdminLayoutShell.tsx");
+
+  assert.match(adminShell, /href: "\/admin\/chats"/);
+  assert.match(adminShell, /SoftButton/);
+  assert.match(adminShell, /PillBadge/);
+  assert.match(adminShell, /var\(--shadow-soft-xl\)/);
+  assert.doesNotMatch(adminShell, /@mantine\/core/);
+  assert.doesNotMatch(adminShell, /shadow-glass/);
+});
+
+test("admin dashboard uses premium overview surfaces instead of legacy frames", () => {
+  const dashboard = readSource("widgets/admin/ui/AdminDashboard.tsx");
+
+  assert.match(dashboard, /SurfaceCard/);
+  assert.match(dashboard, /SectionHeader/);
+  assert.match(dashboard, /PillBadge/);
+  assert.match(dashboard, /DashboardStatCard/);
+  assert.match(dashboard, /Generation jobs/);
+  assert.doesNotMatch(dashboard, /WindowFrame/);
+  assert.doesNotMatch(dashboard, /text-slate-|bg-slate-/);
+});
+
+test("admin parser panel keeps operational controls inside premium surfaces", () => {
+  const parserPanel = readSource("widgets/admin/ui/ParserAdminPanel.tsx");
+
+  assert.match(parserPanel, /SurfaceCard/);
+  assert.match(parserPanel, /SectionHeader/);
+  assert.match(parserPanel, /SoftButton/);
+  assert.match(parserPanel, /PillBadge/);
+  assert.match(parserPanel, /ParserMetric/);
+  assert.match(parserPanel, /CommandBlock/);
+  assert.match(parserPanel, /buildManualCommands/);
+  assert.match(parserPanel, /startStyleIngestionWorker/);
+  assert.match(parserPanel, /stopStyleIngestionWorker/);
+  assert.doesNotMatch(parserPanel, /WindowFrame/);
+  assert.doesNotMatch(parserPanel, /text-slate-|bg-slate-|<Button/);
+});
+
+test("admin contact inbox uses premium triage surfaces", () => {
+  const contacts = readSource("widgets/admin/ui/ContactRequestsTable.tsx");
+
+  assert.match(contacts, /SurfaceCard/);
+  assert.match(contacts, /SectionHeader/);
+  assert.match(contacts, /PillBadge/);
+  assert.match(contacts, /InboxMetric/);
+  assert.match(contacts, /ContactRequestCard/);
+  assert.match(contacts, /getContactRequests/);
+  assert.match(contacts, /updateContactRequest/);
+  assert.doesNotMatch(contacts, /WindowFrame/);
+  assert.doesNotMatch(contacts, /text-slate-|bg-slate-/);
+});
+
+test("admin project manager uses premium CRUD surfaces", () => {
+  const projects = readSource("widgets/admin/ui/ProjectManager.tsx");
+
+  assert.match(projects, /SurfaceCard/);
+  assert.match(projects, /SectionHeader/);
+  assert.match(projects, /SoftButton/);
+  assert.match(projects, /PillBadge/);
+  assert.match(projects, /ProjectListCard/);
+  assert.match(projects, /buildProjectPayload/);
+  assert.match(projects, /createProject/);
+  assert.match(projects, /updateProject/);
+  assert.match(projects, /deleteProject/);
+  assert.doesNotMatch(projects, /WindowFrame|<Stack|<Button|import \{[^}]*Stack/);
+  assert.doesNotMatch(projects, /text-slate-|bg-slate-/);
+});
+
+test("admin post manager uses premium CRUD surfaces", () => {
+  const posts = readSource("widgets/admin/ui/PostManager.tsx");
+
+  assert.match(posts, /SurfaceCard/);
+  assert.match(posts, /SectionHeader/);
+  assert.match(posts, /SoftButton/);
+  assert.match(posts, /PillBadge/);
+  assert.match(posts, /PostListCard/);
+  assert.match(posts, /buildPostPayload/);
+  assert.match(posts, /createBlogPost/);
+  assert.match(posts, /updateBlogPost/);
+  assert.match(posts, /deleteBlogPost/);
+  assert.doesNotMatch(posts, /WindowFrame|<Stack|<Button|import \{[^}]*Stack/);
+  assert.doesNotMatch(posts, /text-slate-|bg-slate-/);
+});
+
+test("admin generation jobs UI exposes audit fields from one maintained control panel", () => {
+  const controlPanel = readSource("widgets/admin/ui/GenerationJobsControlPanel.tsx");
+  const legacyTable = readSource("widgets/admin/ui/GenerationJobsTable.tsx");
+  const legacyLiveTable = readSource("widgets/admin/ui/GenerationJobsTableLive.tsx");
+
+  assert.match(controlPanel, /client_ip/);
+  assert.match(controlPanel, /client_user_agent/);
+  assert.match(controlPanel, /\/admin\/chats\?session=/);
+  assert.match(controlPanel, /Current operation/);
+  assert.match(controlPanel, /Recent trace/);
+  assert.match(legacyTable, /<GenerationJobsControlPanel \/>/);
+  assert.match(legacyLiveTable, /<GenerationJobsControlPanel \/>/);
+  assert.doesNotMatch(legacyTable, /getGenerationJobs|cancelGenerationJob|deleteGenerationJob/);
+  assert.doesNotMatch(legacyLiveTable, /getGenerationJobs|cancelGenerationJob|deleteGenerationJob/);
 });
 
 test("cooldown send control shows countdown progress and blocks submit while locked", () => {

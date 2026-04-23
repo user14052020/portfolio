@@ -46,6 +46,7 @@ class CommandDispatcherRoutingTests(unittest.IsolatedAsyncioTestCase):
                 decision=RoutingDecision(
                     mode=RoutingMode.STYLE_EXPLORATION,
                     confidence=0.91,
+                    retrieval_profile="style_focused",
                 )
             ),
             conversation_state_policy=ConversationStatePolicy(),
@@ -64,6 +65,11 @@ class CommandDispatcherRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.resolution.active_mode, ChatMode.STYLE_EXPLORATION)
         self.assertEqual(result.context.active_mode, ChatMode.STYLE_EXPLORATION)
         self.assertEqual(result.context.requested_intent, ChatMode.STYLE_EXPLORATION)
+        self.assertEqual(
+            result.context.command_context.metadata["routing_decision"]["retrieval_profile"],
+            "style_focused",
+        )
+        self.assertEqual(result.context.command_context.metadata["routing_provider"], "fake-router")
 
     async def test_dispatch_maps_clarification_only_to_current_mode(self) -> None:
         dispatcher = CommandDispatcher(

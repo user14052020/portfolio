@@ -24,6 +24,7 @@ def test_routing_decision_validator_normalizes_enums_and_trims_extras() -> None:
             "continue_existing_flow": False,
             "should_reset_to_general": False,
             "reasoning_depth": " NORMAL ",
+            "retrieval_profile": " STYLE_FOCUSED ",
             "notes": "router ok",
             "unexpected": "trim me",
         },
@@ -34,6 +35,7 @@ def test_routing_decision_validator_normalizes_enums_and_trims_extras() -> None:
     assert result.failure_reason is None
     assert result.decision.mode == RoutingMode.STYLE_EXPLORATION
     assert result.decision.reasoning_depth.value == "normal"
+    assert result.decision.retrieval_profile == "style_focused"
     assert result.decision.missing_slots == ["style_reference"]
     assert result.stripped_fields == ["unexpected"]
     assert "unexpected" not in result.normalized_payload
@@ -110,6 +112,30 @@ def test_routing_decision_validator_falls_back_for_invalid_missing_slots_type() 
     assert result.used_fallback is True
     assert result.failure_reason == RouterFailureReason.VALIDATION_ERROR
     assert any("missing_slots" in error for error in result.validation_errors)
+
+
+def test_routing_decision_validator_falls_back_for_invalid_retrieval_profile() -> None:
+    validator = RoutingDecisionValidator()
+    routing_input = RoutingInput(user_message="Расскажи про образ")
+
+    result = validator.validate(
+        raw_payload={
+            "mode": "general_advice",
+            "confidence": 0.8,
+            "needs_clarification": False,
+            "missing_slots": [],
+            "generation_intent": False,
+            "continue_existing_flow": False,
+            "should_reset_to_general": False,
+            "reasoning_depth": "normal",
+            "retrieval_profile": "raw_sql_dump",
+        },
+        routing_input=routing_input,
+    )
+
+    assert result.used_fallback is True
+    assert result.failure_reason == RouterFailureReason.VALIDATION_ERROR
+    assert "retrieval_profile is invalid" in result.validation_errors
 
 
 def test_routing_decision_validator_falls_back_for_malformed_payload() -> None:

@@ -80,6 +80,14 @@ class RoutingDecisionValidator:
         else:
             normalized_payload["reasoning_depth"] = normalized_depth
 
+        normalized_retrieval_profile = self._normalize_retrieval_profile(
+            normalized_payload.get("retrieval_profile")
+        )
+        if normalized_retrieval_profile is _INVALID_RETRIEVAL_PROFILE:
+            normalization_errors.append("retrieval_profile is invalid")
+        else:
+            normalized_payload["retrieval_profile"] = normalized_retrieval_profile
+
         schema_result = self.schema_validator.validate(payload=normalized_payload)
         validation_errors = [*normalization_errors, *schema_result.errors]
 
@@ -130,6 +138,7 @@ class RoutingDecisionValidator:
             "continue_existing_flow",
             "should_reset_to_general",
             "reasoning_depth",
+            "retrieval_profile",
             "notes",
             "requires_style_retrieval",
             "requires_historical_layer",
@@ -161,6 +170,19 @@ class RoutingDecisionValidator:
             if cleaned == depth.value:
                 return depth.value
         return None
+
+    def _normalize_retrieval_profile(self, value: Any) -> str | None | object:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return _INVALID_RETRIEVAL_PROFILE
+        cleaned = value.strip().lower()
+        if not cleaned:
+            return None
+        allowed_profiles = {"light", "style_focused", "occasion_focused", "visual_heavy"}
+        if cleaned in allowed_profiles:
+            return cleaned
+        return _INVALID_RETRIEVAL_PROFILE
 
     def _normalize_allowed_modes(self, *, routing_input: RoutingInput) -> set[str]:
         allowed_modes = routing_input.allowed_modes or list(ROUTING_MODES)
@@ -218,3 +240,6 @@ class RoutingDecisionValidator:
                 continue
             result.append(cleaned)
         return result
+
+
+_INVALID_RETRIEVAL_PROFILE = object()

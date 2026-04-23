@@ -1,7 +1,9 @@
 import { env } from "@/shared/config/env";
+import { browserAdminTokenStore } from "@/shared/auth/adminTokenStore";
 
 export type RequestOptions = RequestInit & {
   token?: string;
+  useStoredAuth?: boolean;
   query?: Record<string, string | number | boolean | undefined | null>;
   next?: {
     revalidate?: number | false;
@@ -11,7 +13,7 @@ export type RequestOptions = RequestInit & {
 
 export function buildUrl(path: string, query?: RequestOptions["query"]) {
 
-  const baseUrl = typeof window === "undefined" ? env.internalApiUrl : env.apiUrl;
+  const baseUrl = env.apiUrl;
 
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
@@ -47,8 +49,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (!isFormData && options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  if (options.token) {
-    headers.set("Authorization", `Bearer ${options.token}`);
+  const explicitToken = typeof options.token === "string" ? options.token.trim() : "";
+  if (explicitToken) {
+    headers.set("Authorization", `Bearer ${explicitToken}`);
+  } else if (options.useStoredAuth !== false && !headers.has("Authorization")) {
+    const storedToken = browserAdminTokenStore.getAccessToken();
+    if (storedToken) {
+      headers.set("Authorization", `Bearer ${storedToken}`);
+    }
   }
 
   const response = await fetch(buildUrl(path, options.query), {

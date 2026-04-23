@@ -24,7 +24,7 @@ from app.application.stylist_chat.handlers.style_exploration_handler import Styl
 from app.application.stylist_chat.orchestrator.command_dispatcher import CommandDispatcher
 from app.application.stylist_chat.orchestrator.mode_router import ModeRouter
 from app.application.stylist_chat.orchestrator.stylist_chat_orchestrator import StylistChatOrchestrator
-from app.application.stylist_chat.results.decision_result import DecisionType
+from app.application.stylist_chat.results.decision_result import DecisionResult, DecisionType
 from app.application.stylist_chat.services.candidate_style_selector import CandidateStyleSelector
 from app.application.stylist_chat.services.clarification_message_builder import ClarificationMessageBuilder
 from app.application.stylist_chat.services.diversity_constraints_builder import DiversityConstraintsBuilder
@@ -419,6 +419,25 @@ class FakeCheckpointWriter:
 
     async def save_checkpoint(self, *, session_id: str, context: ChatModeContext) -> None:
         self.saved_contexts.append(context.model_copy(deep=True))
+
+
+class FakeReasoningTelemetryHandler:
+    def __init__(self, *, telemetry: dict[str, object]) -> None:
+        self.telemetry = telemetry
+
+    async def handle(
+        self,
+        *,
+        command: ChatCommand,
+        context: ChatModeContext,
+    ) -> DecisionResult:
+        return DecisionResult(
+            decision_type=DecisionType.TEXT_ONLY,
+            active_mode=context.active_mode,
+            flow_state=FlowState.COMPLETED,
+            text_reply="Reasoning observability probe",
+            telemetry=dict(self.telemetry),
+        )
 
 
 def build_test_orchestrator():
@@ -851,3 +870,52 @@ class StylistOrchestratorScenarioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(orchestrated_payload["routing_provider"], "fake-router")
         self.assertEqual(orchestrated_payload["routing_mode"], "general_advice")
         self.assertEqual(orchestrated_payload["routing_used_fallback"], False)
+
+    async def test_reasoning_voice_and_generation_handoff_observability_is_recorded(self) -> None:
+        telemetry = {
+            "reasoning_pipeline_used": True,
+            "reasoning_response_type": "advice",
+            "reasoning_retrieval_profile": "style_deep",
+            "reasoning_style_facets_count": 4,
+            "reasoning_profile_alignment_applied": True,
+            "reasoning_voice_payload_ready": True,
+            "reasoning_generation_handoff_ready": True,
+            "reasoning_generation_blocked_reason": "missing_visual_context",
+            "reasoning_voice_style_logic_points_count": 3,
+            "reasoning_voice_visual_language_points_count": 2,
+        }
+        self.orchestrator.mode_router.handlers[ChatMode.GENERAL_ADVICE] = FakeReasoningTelemetryHandler(
+            telemetry=telemetry
+        )
+
+        response = await self.run_command(
+            ChatCommand(
+                session_id="stage3-reasoning-observability-1",
+                locale="en",
+                message="Build a richer style direction",
+                user_message_id=8,
+            )
+        )
+
+        self.assertEqual(response.text_reply, "Reasoning observability probe")
+        orchestrated_events = [event for event in self.event_logger.events if event[0] == "stylist_chat_orchestrated"]
+        self.assertTrue(orchestrated_events)
+        _, orchestrated_payload = orchestrated_events[-1]
+        self.assertTrue(orchestrated_payload["reasoning_voice_payload_ready"])
+        self.assertTrue(orchestrated_payload["reasoning_generation_handoff_ready"])
+        self.assertEqual(orchestrated_payload["reasoning_generation_blocked_reason"], "missing_visual_context")
+        self.assertEqual(orchestrated_payload["reasoning_voice_style_logic_points_count"], 3)
+        self.assertEqual(orchestrated_payload["reasoning_voice_visual_language_points_count"], 2)
+
+        counter_names = [name for name, _, _ in self.metrics_recorder.counters]
+        self.assertIn("reasoning_pipeline_runs", counter_names)
+        self.assertIn("reasoning_voice_payload_ready", counter_names)
+        self.assertIn("reasoning_generation_handoff_ready", counter_names)
+        blocked_counter = next(
+            item for item in self.metrics_recorder.counters if item[0] == "reasoning_generation_blocked"
+        )
+        self.assertEqual(blocked_counter[2]["blocked_reason"], "missing_visual_context")
+
+        observation_values = {name: value for name, value, _ in self.metrics_recorder.observations}
+        self.assertEqual(observation_values["reasoning_voice_style_logic_points_count"], 3.0)
+        self.assertEqual(observation_values["reasoning_voice_visual_language_points_count"], 2.0)

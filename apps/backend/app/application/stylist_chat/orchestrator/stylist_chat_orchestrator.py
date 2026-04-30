@@ -243,6 +243,45 @@ class StylistChatOrchestrator:
                 "reasoning_response_type": decision.telemetry.get("reasoning_response_type"),
                 "reasoning_retrieval_profile": decision.telemetry.get("reasoning_retrieval_profile"),
                 "reasoning_used_providers": decision.telemetry.get("reasoning_used_providers"),
+                "reasoning_knowledge_query_mode": decision.telemetry.get("knowledge_query_mode"),
+                "reasoning_knowledge_provider_count": decision.telemetry.get("knowledge_provider_count"),
+                "reasoning_knowledge_providers_used": decision.telemetry.get("knowledge_providers_used"),
+                "reasoning_knowledge_cards_per_provider": decision.telemetry.get(
+                    "knowledge_cards_per_provider"
+                ),
+                "reasoning_knowledge_empty_providers": decision.telemetry.get(
+                    "knowledge_empty_providers"
+                ),
+                "reasoning_knowledge_provider_latency_ms": decision.telemetry.get(
+                    "knowledge_provider_latency_ms"
+                ),
+                "reasoning_knowledge_duplicate_cards_filtered_count": decision.telemetry.get(
+                    "knowledge_duplicate_cards_filtered_count"
+                ),
+                "reasoning_knowledge_cards_filtered_out_count": decision.telemetry.get(
+                    "knowledge_cards_filtered_out_count"
+                ),
+                "reasoning_knowledge_ranking_summary": decision.telemetry.get(
+                    "knowledge_ranking_summary"
+                ),
+                "reasoning_style_provider_projected_cards_count": decision.telemetry.get(
+                    "style_provider_projected_cards_count"
+                ),
+                "reasoning_style_provider_knowledge_types": decision.telemetry.get(
+                    "style_provider_knowledge_types"
+                ),
+                "reasoning_style_provider_projection_versions": decision.telemetry.get(
+                    "style_provider_projection_versions"
+                ),
+                "reasoning_style_provider_parser_versions": decision.telemetry.get(
+                    "style_provider_parser_versions"
+                ),
+                "reasoning_style_provider_low_richness_styles": decision.telemetry.get(
+                    "style_provider_low_richness_styles"
+                ),
+                "reasoning_style_provider_legacy_summary_fallback_styles": decision.telemetry.get(
+                    "style_provider_legacy_summary_fallback_styles"
+                ),
                 "reasoning_style_facets_count": decision.telemetry.get("reasoning_style_facets_count"),
                 "reasoning_style_advice_facets_count": decision.telemetry.get(
                     "reasoning_style_advice_facets_count"
@@ -262,8 +301,32 @@ class StylistChatOrchestrator:
                 "reasoning_profile_alignment_applied": decision.telemetry.get(
                     "reasoning_profile_alignment_applied"
                 ),
+                "reasoning_profile_context_present": decision.telemetry.get(
+                    "reasoning_profile_context_present"
+                ),
+                "reasoning_profile_context_source": decision.telemetry.get(
+                    "reasoning_profile_context_source"
+                ),
+                "reasoning_profile_fields_count": decision.telemetry.get(
+                    "reasoning_profile_fields_count"
+                ),
                 "reasoning_profile_alignment_filtered_count": decision.telemetry.get(
                     "reasoning_profile_alignment_filtered_count"
+                ),
+                "reasoning_profile_alignment_boosted_categories": decision.telemetry.get(
+                    "reasoning_profile_alignment_boosted_categories"
+                ),
+                "reasoning_profile_alignment_removed_item_types": decision.telemetry.get(
+                    "reasoning_profile_alignment_removed_item_types"
+                ),
+                "reasoning_profile_completeness_state": decision.telemetry.get(
+                    "reasoning_profile_completeness_state"
+                ),
+                "reasoning_profile_clarification_decision": decision.telemetry.get(
+                    "reasoning_profile_clarification_decision"
+                ),
+                "reasoning_profile_clarification_required": decision.telemetry.get(
+                    "reasoning_profile_clarification_required"
                 ),
                 "reasoning_clarification_required": decision.telemetry.get(
                     "reasoning_clarification_required"
@@ -271,12 +334,95 @@ class StylistChatOrchestrator:
                 "reasoning_brief_built": decision.telemetry.get("reasoning_brief_built"),
                 "reasoning_cta_offered": decision.telemetry.get("reasoning_cta_offered"),
                 "reasoning_generation_ready": decision.telemetry.get("reasoning_generation_ready"),
+                "reasoning_profile_derived_constraints_count": decision.telemetry.get(
+                    "reasoning_profile_derived_constraints_count"
+                ),
                 "reasoning_voice_payload_ready": decision.telemetry.get("reasoning_voice_payload_ready"),
+                "reasoning_voice_mode": decision.telemetry.get("reasoning_voice_mode"),
+                "reasoning_voice_response_type": decision.telemetry.get(
+                    "reasoning_voice_response_type"
+                ),
+                "reasoning_voice_desired_depth": decision.telemetry.get(
+                    "reasoning_voice_desired_depth"
+                ),
+                "reasoning_voice_knowledge_density": decision.telemetry.get(
+                    "reasoning_voice_knowledge_density"
+                ),
+                "reasoning_voice_should_be_brief": decision.telemetry.get(
+                    "reasoning_voice_should_be_brief"
+                ),
+                "reasoning_voice_profile_context_present": decision.telemetry.get(
+                    "reasoning_voice_profile_context_present"
+                ),
+                "reasoning_voice_tone_profile": decision.telemetry.get(
+                    "reasoning_voice_tone_profile"
+                ),
+                "reasoning_voice_layers_used": decision.telemetry.get(
+                    "reasoning_voice_layers_used"
+                ),
+                "reasoning_voice_historical_used": decision.telemetry.get(
+                    "reasoning_voice_historical_used"
+                ),
+                "reasoning_voice_color_poetics_used": decision.telemetry.get(
+                    "reasoning_voice_color_poetics_used"
+                ),
+                "reasoning_voice_brevity_level": decision.telemetry.get(
+                    "reasoning_voice_brevity_level"
+                ),
+                "reasoning_voice_cta_present": decision.telemetry.get(
+                    "reasoning_voice_cta_present"
+                ),
+                "reasoning_voice_cta_style": decision.telemetry.get(
+                    "reasoning_voice_cta_style"
+                ),
+                "reasoning_voice_text_length": decision.telemetry.get(
+                    "reasoning_voice_text_length"
+                ),
                 "reasoning_generation_handoff_ready": decision.telemetry.get(
                     "reasoning_generation_handoff_ready"
                 ),
                 "reasoning_generation_blocked_reason": decision.telemetry.get(
                     "reasoning_generation_blocked_reason"
+                ),
+                "reasoning_cta_decision_reason": decision.telemetry.get("cta_decision_reason"),
+                "reasoning_cta_blocked_reasons": decision.telemetry.get("cta_blocked_reasons"),
+                "reasoning_cta_confidence_score": decision.telemetry.get("cta_confidence_score"),
+                "reasoning_profile_signals_sufficient": decision.telemetry.get(
+                    "profile_signals_sufficient"
+                ),
+                "reasoning_is_mostly_advisory": decision.telemetry.get(
+                    "reasoning_is_mostly_advisory"
+                ),
+                "reasoning_visual_intent_signal_present": decision.telemetry.get(
+                    "visual_intent_signal_present"
+                ),
+                "reasoning_image_context_strength": decision.telemetry.get("image_context_strength"),
+                "reasoning_style_logic_points_count": decision.telemetry.get(
+                    "style_logic_points_count"
+                ),
+                "reasoning_visual_language_points_count": decision.telemetry.get(
+                    "visual_language_points_count"
+                ),
+                "reasoning_historical_note_candidates_count": decision.telemetry.get(
+                    "historical_note_candidates_count"
+                ),
+                "reasoning_styling_rule_candidates_count": decision.telemetry.get(
+                    "styling_rule_candidates_count"
+                ),
+                "reasoning_anti_repeat_related_style_selected": decision.telemetry.get(
+                    "anti_repeat_related_style_selected"
+                ),
+                "reasoning_anti_repeat_hero_garments_avoided_count": decision.telemetry.get(
+                    "anti_repeat_hero_garments_avoided_count"
+                ),
+                "reasoning_anti_repeat_accessories_avoided_count": decision.telemetry.get(
+                    "anti_repeat_accessories_avoided_count"
+                ),
+                "reasoning_anti_repeat_composition_cues_avoided_count": decision.telemetry.get(
+                    "anti_repeat_composition_cues_avoided_count"
+                ),
+                "reasoning_anti_repeat_visual_motifs_avoided_count": decision.telemetry.get(
+                    "anti_repeat_visual_motifs_avoided_count"
                 ),
                 "reasoning_voice_style_logic_points_count": decision.telemetry.get(
                     "reasoning_voice_style_logic_points_count"
@@ -365,14 +511,77 @@ class StylistChatOrchestrator:
                 "decision_type": decision.decision_type.value,
                 "response_type": decision.telemetry.get("reasoning_response_type"),
                 "retrieval_profile": decision.telemetry.get("reasoning_retrieval_profile"),
+                "voice_mode": decision.telemetry.get("reasoning_voice_mode") or "unknown",
+                "voice_desired_depth": decision.telemetry.get("reasoning_voice_desired_depth")
+                or "unknown",
+                "voice_brevity_level": decision.telemetry.get("reasoning_voice_brevity_level")
+                or "unknown",
                 "profile_alignment_applied": str(
                     bool(decision.telemetry.get("reasoning_profile_alignment_applied"))
                 ).lower(),
+                "profile_context_present": str(
+                    bool(decision.telemetry.get("reasoning_profile_context_present"))
+                ).lower(),
+                "profile_context_source": decision.telemetry.get("reasoning_profile_context_source") or "none",
             }
             await self.metrics_recorder.increment("reasoning_pipeline_runs", tags=reasoning_tags)
             await self.metrics_recorder.observe(
                 "reasoning_style_facets_count",
                 value=float(decision.telemetry.get("reasoning_style_facets_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_knowledge_provider_count",
+                value=float(decision.telemetry.get("knowledge_provider_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_knowledge_empty_providers_count",
+                value=float(len(decision.telemetry.get("knowledge_empty_providers") or [])),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_knowledge_cards_filtered_out_count",
+                value=float(decision.telemetry.get("knowledge_cards_filtered_out_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_style_provider_projected_cards_count",
+                value=float(decision.telemetry.get("style_provider_projected_cards_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_style_provider_low_richness_styles_count",
+                value=float(len(decision.telemetry.get("style_provider_low_richness_styles") or [])),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_profile_fields_count",
+                value=float(decision.telemetry.get("reasoning_profile_fields_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_profile_alignment_filtered_count",
+                value=float(decision.telemetry.get("reasoning_profile_alignment_filtered_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_profile_alignment_boosted_categories_count",
+                value=float(
+                    len(decision.telemetry.get("reasoning_profile_alignment_boosted_categories") or [])
+                ),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_profile_alignment_removed_item_types_count",
+                value=float(
+                    len(decision.telemetry.get("reasoning_profile_alignment_removed_item_types") or [])
+                ),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_profile_derived_constraints_count",
+                value=float(decision.telemetry.get("reasoning_profile_derived_constraints_count") or 0),
                 tags=reasoning_tags,
             )
             await self.metrics_recorder.observe(
@@ -385,14 +594,125 @@ class StylistChatOrchestrator:
                 value=float(decision.telemetry.get("reasoning_voice_visual_language_points_count") or 0),
                 tags=reasoning_tags,
             )
+            await self.metrics_recorder.observe(
+                "reasoning_voice_text_length",
+                value=float(decision.telemetry.get("reasoning_voice_text_length") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_voice_layers_used_count",
+                value=float(len(decision.telemetry.get("reasoning_voice_layers_used") or [])),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_style_logic_points_count",
+                value=float(decision.telemetry.get("style_logic_points_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_visual_language_points_count",
+                value=float(decision.telemetry.get("visual_language_points_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_historical_note_candidates_count",
+                value=float(decision.telemetry.get("historical_note_candidates_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_styling_rule_candidates_count",
+                value=float(decision.telemetry.get("styling_rule_candidates_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_cta_confidence_score",
+                value=float(decision.telemetry.get("cta_confidence_score") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_image_context_strength",
+                value=float(decision.telemetry.get("image_context_strength") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_anti_repeat_hero_garments_avoided_count",
+                value=float(decision.telemetry.get("anti_repeat_hero_garments_avoided_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_anti_repeat_accessories_avoided_count",
+                value=float(decision.telemetry.get("anti_repeat_accessories_avoided_count") or 0),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_anti_repeat_composition_cues_avoided_count",
+                value=float(
+                    decision.telemetry.get("anti_repeat_composition_cues_avoided_count") or 0
+                ),
+                tags=reasoning_tags,
+            )
+            await self.metrics_recorder.observe(
+                "reasoning_anti_repeat_visual_motifs_avoided_count",
+                value=float(decision.telemetry.get("anti_repeat_visual_motifs_avoided_count") or 0),
+                tags=reasoning_tags,
+            )
             if decision.telemetry.get("reasoning_clarification_required"):
                 await self.metrics_recorder.increment("reasoning_clarifications", tags=reasoning_tags)
+            profile_clarification_decision = decision.telemetry.get("reasoning_profile_clarification_decision")
+            if profile_clarification_decision:
+                await self.metrics_recorder.increment(
+                    "reasoning_profile_clarification_decisions",
+                    tags={
+                        **reasoning_tags,
+                        "profile_clarification_decision": str(profile_clarification_decision),
+                    },
+                )
             if decision.telemetry.get("reasoning_cta_offered"):
                 await self.metrics_recorder.increment("reasoning_visual_cta_offered", tags=reasoning_tags)
             if decision.telemetry.get("reasoning_generation_ready"):
                 await self.metrics_recorder.increment("reasoning_generation_ready", tags=reasoning_tags)
+            if decision.telemetry.get("reasoning_profile_context_present"):
+                await self.metrics_recorder.increment("reasoning_profile_context_present", tags=reasoning_tags)
+            cta_decision_reason = decision.telemetry.get("cta_decision_reason")
+            if cta_decision_reason:
+                await self.metrics_recorder.increment(
+                    "reasoning_cta_decisions",
+                    tags={**reasoning_tags, "cta_decision_reason": str(cta_decision_reason)},
+                )
             if decision.telemetry.get("reasoning_voice_payload_ready"):
                 await self.metrics_recorder.increment("reasoning_voice_payload_ready", tags=reasoning_tags)
+                await self.metrics_recorder.increment(
+                    "reasoning_voice_layer_runs",
+                    tags={
+                        **reasoning_tags,
+                        "voice_response_type": str(
+                            decision.telemetry.get("reasoning_voice_response_type") or "unknown"
+                        ),
+                        "voice_tone_profile": str(
+                            decision.telemetry.get("reasoning_voice_tone_profile") or "unknown"
+                        ),
+                    },
+                )
+            if decision.telemetry.get("reasoning_voice_historical_used"):
+                await self.metrics_recorder.increment(
+                    "reasoning_voice_historical_layer_used",
+                    tags=reasoning_tags,
+                )
+            if decision.telemetry.get("reasoning_voice_color_poetics_used"):
+                await self.metrics_recorder.increment(
+                    "reasoning_voice_color_poetics_layer_used",
+                    tags=reasoning_tags,
+                )
+            if decision.telemetry.get("reasoning_voice_cta_present"):
+                await self.metrics_recorder.increment(
+                    "reasoning_voice_cta_present",
+                    tags={
+                        **reasoning_tags,
+                        "voice_cta_style": str(
+                            decision.telemetry.get("reasoning_voice_cta_style") or "unknown"
+                        ),
+                    },
+                )
             if decision.telemetry.get("reasoning_generation_handoff_ready"):
                 await self.metrics_recorder.increment(
                     "reasoning_generation_handoff_ready",

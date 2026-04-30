@@ -48,6 +48,16 @@ class StyleExplorationIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
         self.assertEqual(len(self.context_store.context.style_history), 1)
 
+    async def test_quick_action_forces_generation_even_when_reasoner_prefers_text_only(self) -> None:
+        self.reasoner.route = "text_only"
+
+        response = await self.run_style_command(session_id="style-int-force-generate-1", message_id=1)
+
+        self.assertEqual(response.decision_type, DecisionType.TEXT_AND_GENERATE)
+        self.assertEqual(response.job_id, "job-1")
+        self.assertEqual(self.context_store.context.flow_state, FlowState.GENERATION_QUEUED)
+        self.assertEqual(len(self.scheduler.enqueued), 1)
+
     async def test_second_style_exploration_uses_recent_history_in_reasoning_context(self) -> None:
         await self.run_style_command(session_id="style-int-2", message_id=1)
         await self.run_style_command(session_id="style-int-2", message_id=2)

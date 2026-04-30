@@ -52,6 +52,12 @@ class GenerationPayloadAssembler:
             anchor_garment_centrality=visual_preset.anchor_garment_centrality,
             practical_coherence=visual_preset.practical_coherence,
             diversity_profile=dict(fashion_brief.diversity_constraints),
+            profile_constraints=dict(fashion_brief.profile_constraints),
+            profile_context_snapshot=(
+                dict(fashion_brief.profile_context_snapshot)
+                if isinstance(fashion_brief.profile_context_snapshot, dict)
+                else None
+            ),
             palette_tags=list(compiled_prompt.palette_tags),
             garments_tags=list(compiled_prompt.garment_tags),
             materials_tags=list(fashion_brief.materials),
@@ -70,6 +76,7 @@ class GenerationPayloadAssembler:
                 "retrieved_material_cards_count": metadata.get("retrieved_material_cards_count"),
                 "retrieved_flatlay_cards_count": metadata.get("retrieved_flatlay_cards_count"),
                 "anti_repeat_constraints": metadata.get("anti_repeat_constraints") or {},
+                "profile_constraints": dict(fashion_brief.profile_constraints),
             },
         )
         generation_metadata = GenerationMetadata(
@@ -97,6 +104,12 @@ class GenerationPayloadAssembler:
             style_explanation_supporting_text=style_explanation_supporting_text,
             style_explanation_distinct_points=style_explanation_distinct_points,
             diversity_constraints=dict(plan.diversity_profile),
+            profile_constraints=dict(plan.profile_constraints),
+            profile_context_snapshot=(
+                dict(plan.profile_context_snapshot)
+                if isinstance(plan.profile_context_snapshot, dict)
+                else None
+            ),
             knowledge_refs=list(plan.knowledge_refs),
         )
         return plan, generation_metadata

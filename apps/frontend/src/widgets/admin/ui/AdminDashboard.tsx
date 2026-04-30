@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
-import { getBlogPosts, getContactRequests, getGenerationJobs, getProjects } from "@/shared/api/client";
+import { getBlogPosts, getContactRequests, getGenerationJobs, getProjects } from "@/shared/api/browser-client";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";
 import { SurfaceCard } from "@/shared/ui/SurfaceCard";

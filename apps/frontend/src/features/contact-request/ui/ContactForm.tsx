@@ -4,7 +4,7 @@ import { Button, Stack, TextInput, Textarea } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
 
-import { createContactRequest } from "@/shared/api/client";
+import { createContactRequest } from "@/shared/api/browser-client";
 import { useI18n } from "@/shared/i18n/I18nProvider";
 
 export function ContactForm({ onSuccess }: { onSuccess?: () => void }) {
@@ -54,4 +54,3 @@ export function ContactForm({ onSuccess }: { onSuccess?: () => void }) {
     </form>
   );
 }
-

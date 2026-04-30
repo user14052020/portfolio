@@ -38,6 +38,25 @@ def test_fallback_router_policy_routes_active_unfinished_clarification_flow() ->
     assert result.decision.missing_slots == ["event_type", "venue"]
 
 
+def test_fallback_router_policy_exits_clarification_for_new_general_question() -> None:
+    policy = FallbackRouterPolicy()
+
+    result = policy.resolve(
+        routing_input=RoutingInput(
+            user_message="\u0447\u0442\u043e \u0442\u044b \u0437\u043d\u0430\u0435\u0448\u044c \u043e \u0436\u0435\u043b\u0442\u043e\u043c \u0446\u0432\u0435\u0442\u0435",
+            active_mode=RoutingMode.OCCASION_OUTFIT,
+            flow_state="awaiting_occasion_clarification",
+            pending_slots=["event_type", "time_of_day"],
+        )
+    )
+
+    assert result.matched_rule == "clarification_flow_general_pivot"
+    assert result.decision.mode == RoutingMode.GENERAL_ADVICE
+    assert result.decision.needs_clarification is False
+    assert result.decision.continue_existing_flow is False
+    assert result.decision.should_reset_to_general is True
+
+
 def test_fallback_router_policy_detects_explicit_visual_trigger() -> None:
     policy = FallbackRouterPolicy()
 

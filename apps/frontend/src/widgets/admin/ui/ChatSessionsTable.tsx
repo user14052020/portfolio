@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
-import { getAdminChatSessionDetails, getAdminChatSessions } from "@/shared/api/client";
+import { getAdminChatSessionDetails, getAdminChatSessions } from "@/shared/api/browser-client";
 import type { AdminChatSessionDetails, AdminChatSessionSummary } from "@/shared/api/types";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";

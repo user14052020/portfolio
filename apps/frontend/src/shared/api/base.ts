@@ -1,47 +1,23 @@
-import { env } from "@/shared/config/env";
 import { browserAdminTokenStore } from "@/shared/auth/adminTokenStore";
+import {
+  appendQueryParams,
+  normalizePath,
+  type RequestOptions,
+  throwRequestError,
+} from "@/shared/api/request-core";
 
-export type RequestOptions = RequestInit & {
-  token?: string;
-  useStoredAuth?: boolean;
-  query?: Record<string, string | number | boolean | undefined | null>;
-  next?: {
-    revalidate?: number | false;
-    tags?: string[];
-  };
-};
+const BROWSER_API_BASE_PATH = "/api/v1";
 
 export function buildUrl(path: string, query?: RequestOptions["query"]) {
-
-  const baseUrl = env.apiUrl;
-
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-
-  const url =
-
-    baseUrl.startsWith("http://") || baseUrl.startsWith("https://")
-
-      ? new URL(`${baseUrl}${normalizedPath}`)
-
-      : new URL(`${baseUrl}${normalizedPath}`, window.location.origin);
-
-  if (query) {
-
-    Object.entries(query).forEach(([key, value]) => {
-
-      if (value !== undefined && value !== null && value !== "") {
-
-        url.searchParams.set(key, String(value));
-
-      }
-
-    });
-
+  if (typeof window === "undefined") {
+    throw new Error("Browser API client cannot be used on the server.");
   }
 
-  return url.toString();
-
+  const normalizedPath = normalizePath(path);
+  const url = new URL(`${BROWSER_API_BASE_PATH}${normalizedPath}`, window.location.origin);
+  return appendQueryParams(url, query).toString();
 }
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -67,30 +43,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    let payload: { detail?: unknown } | null = null;
-    try {
-      payload = JSON.parse(text) as { detail?: unknown };
-    } catch {
-      payload = null;
-    }
-
-    if (payload) {
-      const detail =
-        typeof payload.detail === "string"
-          ? payload.detail
-          : payload.detail && typeof payload.detail === "object" && "message" in payload.detail
-            ? String((payload.detail as { message?: unknown }).message ?? "").trim()
-            : "";
-      const error = new Error(
-        detail || text || `API request failed with status ${response.status}`
-      ) as Error & { status?: number; payload?: unknown };
-      error.status = response.status;
-      error.payload = payload;
-      throw error;
-    }
-
-    throw new Error(text || `API request failed with status ${response.status}`);
+    await throwRequestError(response);
   }
 
   if (response.status === 204) {

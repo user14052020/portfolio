@@ -64,8 +64,13 @@ class RoutingContextBuilder:
     ) -> list[RoutingMessageExcerpt]:
         excerpts: list[RoutingMessageExcerpt] = []
         if context.conversation_memory:
-            source_items = context.conversation_memory[-RECENT_ROUTING_TURNS_LIMIT:]
-            for item in source_items:
+            source_items: list[ConversationMemoryItem] = []
+            for item in reversed(context.conversation_memory):
+                if item.role in {"user", "assistant"}:
+                    source_items.append(item)
+                if len(source_items) >= RECENT_ROUTING_TURNS_LIMIT:
+                    break
+            for item in reversed(source_items):
                 excerpt = self._excerpt_from_memory(item)
                 if excerpt is not None:
                     excerpts.append(excerpt)
@@ -187,7 +192,18 @@ class RoutingContextBuilder:
         return None
 
     def _profile_context_present(self, *, command: ChatCommand) -> bool:
-        return any(self._has_profile_value(value) for value in command.profile_context.values())
+        profile_sources = [
+            command.profile_context,
+            command.metadata.get("session_profile_context"),
+            command.metadata.get("persistent_profile_context"),
+            command.metadata.get("profile_recent_updates"),
+        ]
+        return any(self._profile_source_present(source) for source in profile_sources)
+
+    def _profile_source_present(self, value: object) -> bool:
+        if not isinstance(value, dict):
+            return False
+        return any(self._has_profile_value(item) for item in value.values())
 
     def _coerce_mode(self, context: ChatModeContext) -> RoutingMode | None:
         raw_value = context.active_mode.value if context.active_mode else None

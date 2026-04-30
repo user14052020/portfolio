@@ -34,3 +34,32 @@ class ImagePromptCompilerStage7Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(compiled.visual_preset, "textured_surface")
         self.assertTrue(compiled.metadata["brief_hash"])
         self.assertTrue(compiled.metadata["compiled_prompt_hash"])
+
+    async def test_compile_uses_profile_constraints_in_prompt_and_negative_prompt(self) -> None:
+        compiler = ImagePromptCompiler()
+        brief = FashionBrief(
+            style_identity="Tailored Androgyny",
+            style_family="structured minimalism",
+            brief_mode="style_exploration",
+            silhouette="structured",
+            garment_list=["long coat", "wide trousers"],
+            palette=["graphite"],
+            profile_constraints={
+                "presentation_profile": "androgynous",
+                "fit_preferences": ["relaxed"],
+                "silhouette_preferences": ["structured", "elongated"],
+                "preferred_items": ["long coat"],
+                "avoided_items": ["heels"],
+                "color_avoidances": ["hot pink"],
+            },
+            visual_preset="editorial_studio",
+        )
+
+        compiled = await compiler.compile(brief=brief)
+
+        self.assertIn("Presentation profile: androgynous.", compiled.final_prompt)
+        self.assertIn("Silhouette direction: structured.", compiled.final_prompt)
+        self.assertIn("Silhouette preferences: structured, elongated.", compiled.final_prompt)
+        self.assertIn("Preferred items: long coat.", compiled.final_prompt)
+        self.assertIn("avoid profile-conflicting items: heels", compiled.negative_prompt)
+        self.assertIn("avoid profile-conflicting colors: hot pink", compiled.negative_prompt)

@@ -36,6 +36,7 @@ class HttpChatGateway implements ChatGateway {
         asset_id: toApiAssetId(payload.assetId),
         requested_intent: payload.requestedIntent ?? undefined,
         metadata: payload.metadata ?? {},
+        profile_context: payload.profileContext ?? undefined,
       }),
     });
 

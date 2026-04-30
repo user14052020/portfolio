@@ -49,27 +49,27 @@ class DefaultKnowledgeRetrievalService:
         if self.knowledge_search_adapter is not None:
             self.knowledge_search_adapter.expand_terms(query=query)
 
-        style_cards = self.knowledge_ranker.rank(
+        style_cards = await self.knowledge_ranker.rank(
             cards=await self.style_catalog_repository.search(query=query),
             query=query,
         )
-        color_cards = self.knowledge_ranker.rank(
+        color_cards = await self.knowledge_ranker.rank(
             cards=await self.color_theory_repository.search(query=query, context_style_cards=style_cards),
             query=query,
         )
-        history_cards = self.knowledge_ranker.rank(
+        history_cards = await self.knowledge_ranker.rank(
             cards=await self.fashion_history_repository.search(query=query, context_style_cards=style_cards),
             query=query,
         )
-        tailoring_cards = self.knowledge_ranker.rank(
+        tailoring_cards = await self.knowledge_ranker.rank(
             cards=await self.tailoring_principles_repository.search(query=query, context_style_cards=style_cards),
             query=query,
         )
-        materials_cards = self.knowledge_ranker.rank(
+        materials_cards = await self.knowledge_ranker.rank(
             cards=await self.materials_fabrics_repository.search(query=query, context_style_cards=style_cards),
             query=query,
         )
-        flatlay_cards = self.knowledge_ranker.rank(
+        flatlay_cards = await self.knowledge_ranker.rank(
             cards=await self.flatlay_patterns_repository.search(query=query, context_style_cards=style_cards),
             query=query,
         )

@@ -876,13 +876,77 @@ class StylistOrchestratorScenarioTests(unittest.IsolatedAsyncioTestCase):
             "reasoning_pipeline_used": True,
             "reasoning_response_type": "advice",
             "reasoning_retrieval_profile": "style_deep",
+            "knowledge_query_mode": "style_exploration",
+            "knowledge_provider_count": 2,
+            "knowledge_providers_used": ["style_ingestion", "fashion_historian"],
+            "knowledge_cards_per_provider": {"style_ingestion": 6, "fashion_historian": 2},
+            "knowledge_empty_providers": ["stylist_editorial"],
+            "knowledge_provider_latency_ms": {"style_ingestion": 14, "fashion_historian": 7},
+            "knowledge_duplicate_cards_filtered_count": 1,
+            "knowledge_cards_filtered_out_count": 3,
+            "knowledge_ranking_summary": {
+                "ranking_applied": True,
+                "input_cards": 7,
+                "ranked_cards": 6,
+                "returned_cards": 5,
+            },
+            "style_provider_projected_cards_count": 6,
+            "style_provider_knowledge_types": [
+                "style_catalog",
+                "style_visual_language",
+                "style_styling_rules",
+            ],
+            "style_provider_projection_versions": ["style-facet-projector.v1"],
+            "style_provider_parser_versions": ["1"],
+            "style_provider_low_richness_styles": ["soft-retro-prep"],
+            "style_provider_legacy_summary_fallback_styles": [],
             "reasoning_style_facets_count": 4,
             "reasoning_profile_alignment_applied": True,
+            "reasoning_profile_context_present": True,
+            "reasoning_profile_context_source": "profile_context_service",
+            "reasoning_profile_fields_count": 3,
+            "reasoning_profile_alignment_filtered_count": 2,
+            "reasoning_profile_alignment_boosted_categories": ["advice", "image", "relation"],
+            "reasoning_profile_alignment_removed_item_types": ["palette", "relation"],
+            "reasoning_profile_completeness_state": "partial",
+            "reasoning_profile_clarification_decision": "skipped",
+            "reasoning_profile_clarification_required": False,
+            "reasoning_profile_derived_constraints_count": 5,
             "reasoning_voice_payload_ready": True,
+            "reasoning_voice_mode": "style_exploration",
+            "reasoning_voice_response_type": "text_with_visual_offer",
+            "reasoning_voice_desired_depth": "deep",
+            "reasoning_voice_knowledge_density": "high",
+            "reasoning_voice_should_be_brief": False,
+            "reasoning_voice_profile_context_present": True,
+            "reasoning_voice_tone_profile": "smart_stylist_with_historian_and_color_poetics_rich_but_controlled",
+            "reasoning_voice_layers_used": ["stylist", "historian", "color_poetics"],
+            "reasoning_voice_historical_used": True,
+            "reasoning_voice_color_poetics_used": True,
+            "reasoning_voice_brevity_level": "deep",
+            "reasoning_voice_cta_present": True,
+            "reasoning_voice_cta_style": "editorial_soft",
+            "reasoning_voice_text_length": 29,
             "reasoning_generation_handoff_ready": True,
             "reasoning_generation_blocked_reason": "missing_visual_context",
             "reasoning_voice_style_logic_points_count": 3,
             "reasoning_voice_visual_language_points_count": 2,
+            "cta_decision_reason": "insufficient_image_context",
+            "cta_blocked_reasons": ["insufficient_image_context", "mostly_advisory"],
+            "cta_confidence_score": 0.42,
+            "profile_signals_sufficient": False,
+            "reasoning_is_mostly_advisory": True,
+            "visual_intent_signal_present": False,
+            "image_context_strength": 2,
+            "style_logic_points_count": 4,
+            "visual_language_points_count": 2,
+            "historical_note_candidates_count": 1,
+            "styling_rule_candidates_count": 3,
+            "anti_repeat_related_style_selected": "adjacent_story_shift",
+            "anti_repeat_hero_garments_avoided_count": 1,
+            "anti_repeat_accessories_avoided_count": 2,
+            "anti_repeat_composition_cues_avoided_count": 1,
+            "anti_repeat_visual_motifs_avoided_count": 1,
         }
         self.orchestrator.mode_router.handlers[ChatMode.GENERAL_ADVICE] = FakeReasoningTelemetryHandler(
             telemetry=telemetry
@@ -901,21 +965,161 @@ class StylistOrchestratorScenarioTests(unittest.IsolatedAsyncioTestCase):
         orchestrated_events = [event for event in self.event_logger.events if event[0] == "stylist_chat_orchestrated"]
         self.assertTrue(orchestrated_events)
         _, orchestrated_payload = orchestrated_events[-1]
+        self.assertEqual(orchestrated_payload["reasoning_knowledge_query_mode"], "style_exploration")
+        self.assertEqual(orchestrated_payload["reasoning_knowledge_provider_count"], 2)
+        self.assertEqual(
+            orchestrated_payload["reasoning_knowledge_providers_used"],
+            ["style_ingestion", "fashion_historian"],
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_knowledge_cards_per_provider"],
+            {"style_ingestion": 6, "fashion_historian": 2},
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_knowledge_empty_providers"],
+            ["stylist_editorial"],
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_knowledge_provider_latency_ms"],
+            {"style_ingestion": 14, "fashion_historian": 7},
+        )
+        self.assertEqual(orchestrated_payload["reasoning_knowledge_duplicate_cards_filtered_count"], 1)
+        self.assertEqual(orchestrated_payload["reasoning_knowledge_cards_filtered_out_count"], 3)
+        self.assertEqual(
+            orchestrated_payload["reasoning_style_provider_projected_cards_count"],
+            6,
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_style_provider_projection_versions"],
+            ["style-facet-projector.v1"],
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_style_provider_parser_versions"],
+            ["1"],
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_style_provider_low_richness_styles"],
+            ["soft-retro-prep"],
+        )
         self.assertTrue(orchestrated_payload["reasoning_voice_payload_ready"])
+        self.assertEqual(orchestrated_payload["reasoning_voice_mode"], "style_exploration")
+        self.assertEqual(orchestrated_payload["reasoning_voice_response_type"], "text_with_visual_offer")
+        self.assertEqual(orchestrated_payload["reasoning_voice_desired_depth"], "deep")
+        self.assertEqual(orchestrated_payload["reasoning_voice_knowledge_density"], "high")
+        self.assertFalse(orchestrated_payload["reasoning_voice_should_be_brief"])
+        self.assertTrue(orchestrated_payload["reasoning_voice_profile_context_present"])
+        self.assertEqual(
+            orchestrated_payload["reasoning_voice_tone_profile"],
+            "smart_stylist_with_historian_and_color_poetics_rich_but_controlled",
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_voice_layers_used"],
+            ["stylist", "historian", "color_poetics"],
+        )
+        self.assertTrue(orchestrated_payload["reasoning_voice_historical_used"])
+        self.assertTrue(orchestrated_payload["reasoning_voice_color_poetics_used"])
+        self.assertEqual(orchestrated_payload["reasoning_voice_brevity_level"], "deep")
+        self.assertTrue(orchestrated_payload["reasoning_voice_cta_present"])
+        self.assertEqual(orchestrated_payload["reasoning_voice_cta_style"], "editorial_soft")
+        self.assertEqual(orchestrated_payload["reasoning_voice_text_length"], 29)
         self.assertTrue(orchestrated_payload["reasoning_generation_handoff_ready"])
         self.assertEqual(orchestrated_payload["reasoning_generation_blocked_reason"], "missing_visual_context")
+        self.assertTrue(orchestrated_payload["reasoning_profile_context_present"])
+        self.assertEqual(
+            orchestrated_payload["reasoning_profile_context_source"],
+            "profile_context_service",
+        )
+        self.assertEqual(orchestrated_payload["reasoning_profile_fields_count"], 3)
+        self.assertEqual(orchestrated_payload["reasoning_profile_alignment_filtered_count"], 2)
+        self.assertEqual(
+            orchestrated_payload["reasoning_profile_alignment_boosted_categories"],
+            ["advice", "image", "relation"],
+        )
+        self.assertEqual(
+            orchestrated_payload["reasoning_profile_alignment_removed_item_types"],
+            ["palette", "relation"],
+        )
+        self.assertEqual(orchestrated_payload["reasoning_profile_completeness_state"], "partial")
+        self.assertEqual(orchestrated_payload["reasoning_profile_clarification_decision"], "skipped")
+        self.assertFalse(orchestrated_payload["reasoning_profile_clarification_required"])
+        self.assertEqual(orchestrated_payload["reasoning_profile_derived_constraints_count"], 5)
+        self.assertEqual(orchestrated_payload["reasoning_cta_decision_reason"], "insufficient_image_context")
+        self.assertEqual(
+            orchestrated_payload["reasoning_cta_blocked_reasons"],
+            ["insufficient_image_context", "mostly_advisory"],
+        )
+        self.assertEqual(orchestrated_payload["reasoning_cta_confidence_score"], 0.42)
+        self.assertFalse(orchestrated_payload["reasoning_profile_signals_sufficient"])
+        self.assertTrue(orchestrated_payload["reasoning_is_mostly_advisory"])
+        self.assertFalse(orchestrated_payload["reasoning_visual_intent_signal_present"])
+        self.assertEqual(orchestrated_payload["reasoning_image_context_strength"], 2)
+        self.assertEqual(orchestrated_payload["reasoning_style_logic_points_count"], 4)
+        self.assertEqual(orchestrated_payload["reasoning_visual_language_points_count"], 2)
+        self.assertEqual(orchestrated_payload["reasoning_historical_note_candidates_count"], 1)
+        self.assertEqual(orchestrated_payload["reasoning_styling_rule_candidates_count"], 3)
+        self.assertEqual(
+            orchestrated_payload["reasoning_anti_repeat_related_style_selected"],
+            "adjacent_story_shift",
+        )
+        self.assertEqual(orchestrated_payload["reasoning_anti_repeat_hero_garments_avoided_count"], 1)
+        self.assertEqual(orchestrated_payload["reasoning_anti_repeat_accessories_avoided_count"], 2)
+        self.assertEqual(orchestrated_payload["reasoning_anti_repeat_composition_cues_avoided_count"], 1)
+        self.assertEqual(orchestrated_payload["reasoning_anti_repeat_visual_motifs_avoided_count"], 1)
         self.assertEqual(orchestrated_payload["reasoning_voice_style_logic_points_count"], 3)
         self.assertEqual(orchestrated_payload["reasoning_voice_visual_language_points_count"], 2)
 
         counter_names = [name for name, _, _ in self.metrics_recorder.counters]
         self.assertIn("reasoning_pipeline_runs", counter_names)
+        self.assertIn("reasoning_cta_decisions", counter_names)
+        self.assertIn("reasoning_profile_clarification_decisions", counter_names)
+        self.assertIn("reasoning_profile_context_present", counter_names)
         self.assertIn("reasoning_voice_payload_ready", counter_names)
+        self.assertIn("reasoning_voice_layer_runs", counter_names)
+        self.assertIn("reasoning_voice_historical_layer_used", counter_names)
+        self.assertIn("reasoning_voice_color_poetics_layer_used", counter_names)
+        self.assertIn("reasoning_voice_cta_present", counter_names)
         self.assertIn("reasoning_generation_handoff_ready", counter_names)
         blocked_counter = next(
             item for item in self.metrics_recorder.counters if item[0] == "reasoning_generation_blocked"
         )
         self.assertEqual(blocked_counter[2]["blocked_reason"], "missing_visual_context")
+        cta_counter = next(item for item in self.metrics_recorder.counters if item[0] == "reasoning_cta_decisions")
+        self.assertEqual(cta_counter[2]["cta_decision_reason"], "insufficient_image_context")
+        voice_runs_counter = next(
+            item for item in self.metrics_recorder.counters if item[0] == "reasoning_voice_layer_runs"
+        )
+        self.assertEqual(voice_runs_counter[2]["voice_response_type"], "text_with_visual_offer")
+        self.assertEqual(
+            voice_runs_counter[2]["voice_tone_profile"],
+            "smart_stylist_with_historian_and_color_poetics_rich_but_controlled",
+        )
+        voice_cta_counter = next(
+            item for item in self.metrics_recorder.counters if item[0] == "reasoning_voice_cta_present"
+        )
+        self.assertEqual(voice_cta_counter[2]["voice_cta_style"], "editorial_soft")
 
         observation_values = {name: value for name, value, _ in self.metrics_recorder.observations}
+        self.assertEqual(observation_values["reasoning_voice_text_length"], 29.0)
+        self.assertEqual(observation_values["reasoning_voice_layers_used_count"], 3.0)
+        self.assertEqual(observation_values["reasoning_knowledge_provider_count"], 2.0)
+        self.assertEqual(observation_values["reasoning_knowledge_empty_providers_count"], 1.0)
+        self.assertEqual(observation_values["reasoning_knowledge_cards_filtered_out_count"], 3.0)
+        self.assertEqual(observation_values["reasoning_style_provider_projected_cards_count"], 6.0)
+        self.assertEqual(observation_values["reasoning_style_provider_low_richness_styles_count"], 1.0)
+        self.assertEqual(observation_values["reasoning_profile_fields_count"], 3.0)
+        self.assertEqual(observation_values["reasoning_profile_alignment_filtered_count"], 2.0)
+        self.assertEqual(observation_values["reasoning_profile_alignment_boosted_categories_count"], 3.0)
+        self.assertEqual(observation_values["reasoning_profile_alignment_removed_item_types_count"], 2.0)
+        self.assertEqual(observation_values["reasoning_profile_derived_constraints_count"], 5.0)
+        self.assertEqual(observation_values["reasoning_cta_confidence_score"], 0.42)
+        self.assertEqual(observation_values["reasoning_image_context_strength"], 2.0)
+        self.assertEqual(observation_values["reasoning_style_logic_points_count"], 4.0)
+        self.assertEqual(observation_values["reasoning_visual_language_points_count"], 2.0)
+        self.assertEqual(observation_values["reasoning_historical_note_candidates_count"], 1.0)
+        self.assertEqual(observation_values["reasoning_styling_rule_candidates_count"], 3.0)
+        self.assertEqual(observation_values["reasoning_anti_repeat_hero_garments_avoided_count"], 1.0)
+        self.assertEqual(observation_values["reasoning_anti_repeat_accessories_avoided_count"], 2.0)
+        self.assertEqual(observation_values["reasoning_anti_repeat_composition_cues_avoided_count"], 1.0)
+        self.assertEqual(observation_values["reasoning_anti_repeat_visual_motifs_avoided_count"], 1.0)
         self.assertEqual(observation_values["reasoning_voice_style_logic_points_count"], 3.0)
         self.assertEqual(observation_values["reasoning_voice_visual_language_points_count"], 2.0)

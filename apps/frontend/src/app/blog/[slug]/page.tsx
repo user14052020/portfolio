@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { getBlogPost } from "@/shared/api/client";
+import { getBlogPost } from "@/shared/api/server-client";
 import { BlogPostPage } from "@/widgets/blog/ui/BlogPostPage";
 
 export async function generateMetadata({

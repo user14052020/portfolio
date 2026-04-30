@@ -36,6 +36,24 @@ GREETING_MARKERS: tuple[str, ...] = (
     "hey",
 )
 
+GENERAL_PIVOT_MARKERS: tuple[str, ...] = (
+    "что ты знаешь",
+    "что скажешь",
+    "расскажи о",
+    "расскажи про",
+    "подскажи про",
+    "как носить",
+    "как сочетать",
+    "какой цвет",
+    "что думаешь",
+    "what do you know",
+    "what do you think",
+    "tell me about",
+    "how to style",
+    "how do i wear",
+    "can you explain",
+)
+
 ACTIVE_CLARIFICATION_STATES: set[str] = {
     FlowState.AWAITING_ANCHOR_GARMENT.value,
     FlowState.AWAITING_ANCHOR_GARMENT_CLARIFICATION.value,
@@ -79,6 +97,26 @@ class FallbackRouterPolicy:
                     notes="fallback: explicit style exploration button",
                 ),
                 matched_rule="explicit_style_button",
+                failure_reason=failure_reason,
+            )
+
+        if self._looks_like_general_question_pivot(routing_input):
+            return FallbackRoutingResult(
+                decision=RoutingDecision(
+                    mode=self._prefer_mode(
+                        preferred=RoutingMode.GENERAL_ADVICE,
+                        routing_input=routing_input,
+                    ),
+                    confidence=0.84,
+                    needs_clarification=False,
+                    missing_slots=[],
+                    generation_intent=False,
+                    continue_existing_flow=False,
+                    should_reset_to_general=True,
+                    reasoning_depth=ReasoningDepth.NORMAL,
+                    notes="fallback: clarification flow interrupted by a new general question",
+                ),
+                matched_rule="clarification_flow_general_pivot",
                 failure_reason=failure_reason,
             )
 
@@ -186,6 +224,33 @@ class FallbackRouterPolicy:
         if flow_state in ACTIVE_CLARIFICATION_STATES:
             return True
         return bool(self._normalized_pending_slots(routing_input))
+
+    def _looks_like_general_question_pivot(self, routing_input: RoutingInput) -> bool:
+        if not self._has_active_unfinished_clarification_flow(routing_input):
+            return False
+        normalized = self._normalize_text(routing_input.user_message)
+        if not normalized:
+            return False
+        if any(marker in normalized for marker in GENERAL_PIVOT_MARKERS):
+            return True
+        question_words = (
+            "что ",
+            "как ",
+            "почему ",
+            "зачем ",
+            "можно ",
+            "какой ",
+            "какая ",
+            "какие ",
+            "расскажи ",
+            "подскажи ",
+            "what ",
+            "how ",
+            "why ",
+            "can ",
+            "tell ",
+        )
+        return "?" in routing_input.user_message and normalized.startswith(question_words)
 
     def _normalized_pending_slots(self, routing_input: RoutingInput) -> list[str]:
         result: list[str] = []

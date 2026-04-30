@@ -4,6 +4,7 @@ from app.application.prompt_building.services.fashion_brief_builder import Fashi
 from app.application.prompt_building.services.fashion_reasoning_service import FashionReasoningInput
 from app.domain.knowledge.entities import KnowledgeBundle, KnowledgeCard
 from app.domain.knowledge.enums import KnowledgeType
+from app.domain.reasoning import ProfileContextSnapshot
 
 
 class FashionBriefBuilderTests(unittest.IsolatedAsyncioTestCase):
@@ -131,3 +132,37 @@ class FashionBriefBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Blend prep structure with softer warmth.", brief.tailoring_logic)
         self.assertIn("leave breathing room between garments", brief.composition_rules)
         self.assertIn("Avoid neon accents.", brief.negative_constraints)
+
+    async def test_build_brief_carries_normalized_profile_constraints_for_generation_handoff(self) -> None:
+        builder = FashionBriefBuilder()
+
+        brief = await builder.build(
+            reasoning_input=FashionReasoningInput(
+                mode="style_exploration",
+                structured_outfit_brief={
+                    "brief_type": "style_exploration",
+                    "style_identity": "Structured Soft Prep",
+                    "garment_list": ["blazer", "trousers"],
+                    "palette": ["navy"],
+                    "composition_rules": ["keep the layout clean"],
+                    "selected_style_direction": {
+                        "style_id": "structured-soft-prep",
+                        "style_name": "Structured Soft Prep",
+                    },
+                },
+                profile_context_snapshot=ProfileContextSnapshot(
+                    presentation_profile="androgynous",
+                    fit_preferences=("relaxed",),
+                    silhouette_preferences=("structured",),
+                    avoided_items=("heels",),
+                    legacy_values={"height_cm": 175},
+                    source="profile_context_service",
+                ),
+            )
+        )
+
+        self.assertEqual(brief.profile_constraints["presentation_profile"], "androgynous")
+        self.assertEqual(brief.profile_constraints["fit_preferences"], ["relaxed"])
+        self.assertEqual(brief.profile_constraints["avoided_items"], ["heels"])
+        self.assertEqual(brief.profile_context_snapshot["source"], "profile_context_service")
+        self.assertEqual(brief.profile_context_snapshot["values"]["height_cm"], 175)

@@ -30,6 +30,7 @@ class HttpCommandGateway implements CommandGateway {
         message: payload.message ?? undefined,
         asset_id: toApiAssetId(payload.assetId),
         metadata: payload.metadata ?? {},
+        profile_context: payload.profileContext ?? undefined,
       }),
     });
 

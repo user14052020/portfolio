@@ -3,6 +3,7 @@ import unittest
 from app.application.prompt_building.services.prompt_pipeline_builder import PromptPipelineBuilder
 from app.domain.knowledge.entities import KnowledgeBundle, KnowledgeCard
 from app.domain.knowledge.enums import KnowledgeType
+from app.domain.reasoning import ProfileContextSnapshot
 
 
 class EnrichedRuntimeConsumptionIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -110,6 +111,34 @@ class EnrichedRuntimeConsumptionIntegrationTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(metadata["knowledge_refs"], visual_plan["knowledge_refs"])
         self.assertEqual(generation_metadata["knowledge_refs"], visual_plan["knowledge_refs"])
         self.assertEqual(metadata["validation_errors_count"], 0)
+
+    async def test_product_generation_carries_profile_constraints_into_visual_handoff(self) -> None:
+        brief = self._build_pipeline_brief()
+        brief["profile_context_snapshot"] = ProfileContextSnapshot(
+            presentation_profile="androgynous",
+            fit_preferences=("relaxed",),
+            silhouette_preferences=("structured",),
+            legacy_values={"height_cm": 176},
+            source="profile_context_service",
+        ).model_dump(mode="json")
+
+        built = await PromptPipelineBuilder().build(brief=brief)
+
+        visual_plan = built["visual_generation_plan"]
+        generation_metadata = built["generation_metadata"]
+        compiled_prompt = built["prompt"]
+        negative_prompt = built["negative_prompt"]
+
+        self.assertEqual(visual_plan["profile_constraints"]["presentation_profile"], "androgynous")
+        self.assertEqual(generation_metadata["profile_constraints"]["fit_preferences"], ["relaxed"])
+        self.assertEqual(
+            generation_metadata["profile_context_snapshot"]["values"]["height_cm"],
+            176,
+        )
+        self.assertIn("Presentation profile: androgynous.", compiled_prompt)
+        self.assertIn("Fit preferences: relaxed.", compiled_prompt)
+        self.assertIn("Silhouette preferences: structured.", compiled_prompt)
+        self.assertIsInstance(negative_prompt, str)
 
     def _build_pipeline_brief(self) -> dict[str, object]:
         bundle = KnowledgeBundle(

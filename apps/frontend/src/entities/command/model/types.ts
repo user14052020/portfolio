@@ -1,3 +1,4 @@
+import type { FrontendProfileContext } from "@/entities/profile/model/types";
 import type { ChatMode, Locale } from "@/shared/api/types";
 
 export type CommandName = Exclude<ChatMode, "general_advice">;
@@ -16,6 +17,9 @@ export interface CommandMetadata {
   commandId?: string;
   correlationId?: string;
   uiLocale?: Locale;
+  session_profile_context?: FrontendProfileContext;
+  profile_recent_updates?: FrontendProfileContext;
+  [key: string]: unknown;
 }
 
 export interface MessageMetadata {
@@ -23,6 +27,9 @@ export interface MessageMetadata {
   clientMessageId?: string;
   commandId?: string;
   correlationId?: string;
+  session_profile_context?: FrontendProfileContext;
+  profile_recent_updates?: FrontendProfileContext;
+  [key: string]: unknown;
 }
 
 export interface ChatCommandPayload {
@@ -37,6 +44,7 @@ export interface ChatCommandPayload {
   commandId?: string;
   correlationId?: string;
   metadata?: CommandMetadata;
+  profileContext?: FrontendProfileContext | null;
 }
 
 export interface ChatMessagePayload {
@@ -49,4 +57,5 @@ export interface ChatMessagePayload {
   commandId?: string;
   correlationId?: string;
   metadata?: MessageMetadata;
+  profileContext?: FrontendProfileContext | null;
 }

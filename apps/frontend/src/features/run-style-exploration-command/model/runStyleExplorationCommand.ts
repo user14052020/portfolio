@@ -1,4 +1,5 @@
 import type { ChatResponse } from "@/entities/chat-session/model/types";
+import type { FrontendProfileContext } from "@/entities/profile/model/types";
 import {
   buildQuickActionCommandPayload,
   getQuickActionDefinitions,
@@ -10,10 +11,12 @@ export async function runStyleExplorationCommand({
   sessionId,
   locale,
   clientMessageId,
+  profileContext = null,
 }: {
   sessionId: string;
   locale: Locale;
   clientMessageId?: string;
+  profileContext?: FrontendProfileContext | null;
 }): Promise<ChatResponse> {
   const action = getQuickActionDefinitions(locale).find((item) => item.id === "style_exploration");
   if (!action) {
@@ -27,6 +30,7 @@ export async function runStyleExplorationCommand({
       action,
       assetId: null,
       clientMessageId,
+      profileContext,
     })
   );
 }

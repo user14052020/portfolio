@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { getProject } from "@/shared/api/client";
+import { getProject } from "@/shared/api/server-client";
 import { ProjectDetailPage } from "@/widgets/portfolio/ui/ProjectDetailPage";
 
 export async function generateMetadata({

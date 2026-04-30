@@ -57,6 +57,8 @@ class ProfileAlignedFashionReasoningContextAssembler:
                 "profile_alignment_applied": aligned.profile_context_present,
                 "profile_alignment_notes": list(aligned.alignment_notes),
                 "profile_alignment_filtered_out": list(aligned.filtered_out),
+                "profile_alignment_boosted_categories": list(aligned.boosted_facet_categories),
+                "profile_alignment_removed_item_types": list(aligned.removed_item_types),
                 "profile_facet_weights": dict(aligned.facet_weights),
             },
             deep=True,

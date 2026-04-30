@@ -17,6 +17,7 @@ class ImagePromptCompiler:
             f"Historical reference: {'; '.join(brief.historical_reference[:2])}." if brief.historical_reference else "",
             f"Tailoring logic: {'; '.join(brief.tailoring_logic[:3])}." if brief.tailoring_logic else "",
             f"Color logic: {'; '.join(brief.color_logic[:3])}." if brief.color_logic else "",
+            *self._profile_prompt_lines(brief),
             f"Garments: {', '.join(brief.garment_list[:5])}." if brief.garment_list else "",
             f"Palette: {', '.join(brief.palette[:4])}." if brief.palette else "",
             f"Materials: {', '.join(brief.materials[:4])}." if brief.materials else "",
@@ -29,6 +30,7 @@ class ImagePromptCompiler:
         negative_sections = [
             template["base_negative_prompt"],
             *brief.negative_constraints[:6],
+            *self._profile_negative_lines(brief),
             *self._diversity_negative_lines(brief),
         ]
         compiled = CompiledImagePrompt(
@@ -61,6 +63,39 @@ class ImagePromptCompiler:
         compiled.metadata["compiled_prompt_hash"] = compiled.content_hash()
         return compiled
 
+    def _profile_prompt_lines(self, brief: FashionBrief) -> list[str]:
+        constraints = brief.profile_constraints if isinstance(brief.profile_constraints, dict) else {}
+        lines: list[str] = []
+        if brief.silhouette:
+            lines.append(f"Silhouette direction: {brief.silhouette}.")
+        mapping = (
+            ("presentation_profile", "Presentation profile"),
+            ("fit_preferences", "Fit preferences"),
+            ("silhouette_preferences", "Silhouette preferences"),
+            ("comfort_preferences", "Comfort preferences"),
+            ("formality_preferences", "Formality preferences"),
+            ("color_preferences", "Preferred colors"),
+            ("preferred_items", "Preferred items"),
+        )
+        for key, label in mapping:
+            value = constraints.get(key)
+            rendered = self._render_profile_value(value)
+            if rendered:
+                lines.append(f"{label}: {rendered}.")
+        return lines
+
+    def _profile_negative_lines(self, brief: FashionBrief) -> list[str]:
+        constraints = brief.profile_constraints if isinstance(brief.profile_constraints, dict) else {}
+        lines: list[str] = []
+        for key, label in (
+            ("avoided_items", "avoid profile-conflicting items"),
+            ("color_avoidances", "avoid profile-conflicting colors"),
+        ):
+            rendered = self._render_profile_value(constraints.get(key))
+            if rendered:
+                lines.append(f"{label}: {rendered}")
+        return lines
+
     def _diversity_negative_lines(self, brief: FashionBrief) -> list[str]:
         constraints = brief.diversity_constraints
         if not isinstance(constraints, dict):
@@ -88,6 +123,16 @@ class ImagePromptCompiler:
         if constraints.get("force_accessory_change"):
             lines.append("force accessory change from the recent generations")
         return lines
+
+    def _render_profile_value(self, value: object) -> str | None:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        if isinstance(value, list):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            if items:
+                return ", ".join(items[:4])
+        return None
 
     def _unique(self, values: list[str]) -> list[str]:
         result: list[str] = []

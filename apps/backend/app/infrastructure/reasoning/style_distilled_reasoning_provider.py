@@ -58,14 +58,31 @@ class StyleDistilledReasoningProvider:
 
 
 def _knowledge_query(query: ReasoningRetrievalQuery, limit: int) -> KnowledgeQuery:
+    style_id = _style_id(query)
     return KnowledgeQuery(
         mode=query.mode,
-        style_id=_style_id(query),
+        style_id=style_id,
+        style_ids=[style_id] if style_id is not None else [],
         style_name=_style_name(query),
+        style_families=_string_values(
+            query.metadata.get("style_families"),
+            query.active_slots.get("style_family"),
+        ),
+        eras=_string_values(
+            query.metadata.get("style_eras"),
+            query.metadata.get("eras"),
+            query.active_slots.get("era"),
+        ),
         intent="visual" if query.generation_intent else "advice",
         limit=_limit_for_profile(query.retrieval_profile, limit),
         message=query.user_request,
+        user_request=query.user_request,
         profile_context=query.profile_context.values if query.profile_context is not None else {},
+        retrieval_profile=query.retrieval_profile,
+        need_visual_knowledge=query.generation_intent or query.mode in {"visual_offer", "style_exploration"},
+        need_historical_knowledge=query.mode in {"general_advice", "style_exploration", "occasion_outfit"},
+        need_styling_rules=query.mode in {"style_exploration", "occasion_outfit", "garment_matching"},
+        need_color_poetics=query.generation_intent or query.mode in {"style_exploration", "general_advice"},
     )
 
 
@@ -319,4 +336,13 @@ def _dedupe(items: list[str]) -> list[str]:
             continue
         seen.add(lowered)
         result.append(cleaned)
+    return result
+
+
+def _string_values(*values: Any) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        for item in _string_list(value):
+            if item not in result:
+                result.append(item)
     return result

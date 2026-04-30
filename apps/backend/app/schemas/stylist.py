@@ -28,6 +28,7 @@ class StylistMessageRequest(BaseModel):
     profile_gender: str | None = None
     body_height_cm: int | None = None
     body_weight_kg: int | None = None
+    profile_context: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def sync_asset_ids(self) -> "StylistMessageRequest":
@@ -108,6 +109,7 @@ class StylistVisualizationRequest(BaseModel):
     client_message_id: str | None = None
     command_id: str | None = None
     correlation_id: str | None = None
+    profile_context: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def sync_asset_ids(self) -> "StylistVisualizationRequest":
@@ -165,15 +167,42 @@ class KnowledgePreviewRequest(BaseModel):
     locale: str = "en"
     message: str | None = None
     style_id: str | None = None
+    style_ids: list[str | int] = Field(default_factory=list)
     style_name: str | None = None
+    style_families: list[str] = Field(default_factory=list)
+    eras: list[str] = Field(default_factory=list)
     anchor_garment: dict[str, Any] | None = None
     occasion_context: dict[str, Any] | None = None
     diversity_constraints: dict[str, Any] = Field(default_factory=dict)
     intent: str | None = None
+    retrieval_profile: str | None = None
+    need_visual_knowledge: bool | None = None
+    need_historical_knowledge: bool | None = None
+    need_styling_rules: bool | None = None
+    need_color_poetics: bool | None = None
+    user_request: str | None = None
     limit: int = Field(default=6, ge=1, le=20)
     profile_context: dict[str, Any] = Field(default_factory=dict)
 
 
+class KnowledgePreviewRuntimeProviderRead(BaseModel):
+    code: str
+    name: str
+    provider_type: str
+    priority: int
+    runtime_roles: list[str] = Field(default_factory=list)
+
+
+class KnowledgePreviewRuntimeRead(BaseModel):
+    runtime_flags: dict[str, bool]
+    provider_priorities: dict[str, int]
+    enabled_runtime_providers: list[KnowledgePreviewRuntimeProviderRead] = Field(default_factory=list)
+
+
 class KnowledgePreviewResponse(BaseModel):
     knowledge_query: dict[str, Any]
-    knowledge_bundle: dict[str, Any]
+    knowledge_context: dict[str, Any]
+    knowledge_context_counts: dict[str, int] = Field(default_factory=dict)
+    knowledge_observability: dict[str, Any] = Field(default_factory=dict)
+    knowledge_runtime: KnowledgePreviewRuntimeRead
+    knowledge_bundle: dict[str, Any] | None = None

@@ -4,7 +4,7 @@ import { Textarea, TextInput } from "@mantine/core";
 import { useCallback, useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
-import { createProject, deleteProject, getProjects, updateProject } from "@/shared/api/client";
+import { createProject, deleteProject, getProjects, updateProject } from "@/shared/api/browser-client";
 import type { Project } from "@/shared/api/types";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";

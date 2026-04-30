@@ -6,6 +6,7 @@ from app.api.routes import (
     blog_posts,
     contact_requests,
     generation_jobs,
+    knowledge_runtime_settings,
     projects,
     site_settings,
     style_ingestion_admin,
@@ -24,6 +25,7 @@ api_router.include_router(users.router)
 api_router.include_router(projects.router)
 api_router.include_router(blog_posts.router)
 api_router.include_router(contact_requests.router)
+api_router.include_router(knowledge_runtime_settings.router)
 api_router.include_router(site_settings.router)
 api_router.include_router(style_ingestion_admin.router)
 api_router.include_router(style_ingestion_settings.router)

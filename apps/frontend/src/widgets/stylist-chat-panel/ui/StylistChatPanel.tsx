@@ -233,7 +233,11 @@ export function StylistChatPanel({ settings }: { settings: SiteSettings }) {
             />
 
             {chat.scenarioContext.pendingClarificationText ? (
-              <ChatClarificationPanel locale={locale} text={chat.scenarioContext.pendingClarificationText} />
+              <ChatClarificationPanel
+                locale={locale}
+                text={chat.scenarioContext.pendingClarificationText}
+                onSuggestionSelect={chat.setInput}
+              />
             ) : null}
 
             {chat.uploadedAsset ? (

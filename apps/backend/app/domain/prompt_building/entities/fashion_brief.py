@@ -34,6 +34,8 @@ class FashionBrief(BaseModel):
     diversity_constraints: dict[str, Any] = Field(default_factory=dict)
     visual_preset: str | None = None
     generation_intent: str | None = None
+    profile_constraints: dict[str, Any] = Field(default_factory=dict)
+    profile_context_snapshot: dict[str, Any] | None = None
     knowledge_cards: list[dict[str, Any]] = Field(default_factory=list)
     source_style_facet_ids: list[str] = Field(default_factory=list)
     brief_confidence: float | None = None

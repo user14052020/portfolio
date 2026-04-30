@@ -1,4 +1,5 @@
 import type { ChatResponse } from "@/entities/chat-session/model/types";
+import type { FrontendProfileContext } from "@/entities/profile/model/types";
 import { adaptChatResponse } from "@/entities/chat-session/model/adapters";
 import { request } from "@/shared/api/base";
 import type { StylistMessageResponse } from "@/shared/api/types";
@@ -20,6 +21,7 @@ export interface VisualizationGateway {
     message?: string | null;
     assetId?: string | null;
     metadata?: Record<string, unknown>;
+    profileContext?: FrontendProfileContext | null;
   }): Promise<ChatResponse>;
 }
 
@@ -31,6 +33,7 @@ class HttpVisualizationGateway implements VisualizationGateway {
     message?: string | null;
     assetId?: string | null;
     metadata?: Record<string, unknown>;
+    profileContext?: FrontendProfileContext | null;
   }): Promise<ChatResponse> {
     const response = await request<StylistMessageResponse>("/stylist-chat/visualize", {
       method: "POST",
@@ -41,6 +44,7 @@ class HttpVisualizationGateway implements VisualizationGateway {
         message: payload.message ?? undefined,
         asset_id: toApiAssetId(payload.assetId),
         metadata: payload.metadata ?? {},
+        profile_context: payload.profileContext ?? undefined,
       }),
     });
     return adaptChatResponse(response);
@@ -48,4 +52,3 @@ class HttpVisualizationGateway implements VisualizationGateway {
 }
 
 export const visualizationGateway: VisualizationGateway = new HttpVisualizationGateway();
-

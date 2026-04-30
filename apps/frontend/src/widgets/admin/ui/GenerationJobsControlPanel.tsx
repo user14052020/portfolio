@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
-import { cancelGenerationJob, deleteGenerationJob, getGenerationJobs } from "@/shared/api/client";
+import { cancelGenerationJob, deleteGenerationJob, getGenerationJobs } from "@/shared/api/browser-client";
 import type { GenerationJob } from "@/shared/api/types";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";

@@ -25,6 +25,8 @@ class VisualGenerationPlan(BaseModel):
     anchor_garment_centrality: str | None = None
     practical_coherence: str | None = None
     diversity_profile: dict[str, Any] = Field(default_factory=dict)
+    profile_constraints: dict[str, Any] = Field(default_factory=dict)
+    profile_context_snapshot: dict[str, Any] | None = None
     palette_tags: list[str] = Field(default_factory=list)
     garments_tags: list[str] = Field(default_factory=list)
     materials_tags: list[str] = Field(default_factory=list)

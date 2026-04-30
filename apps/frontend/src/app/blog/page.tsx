@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { BlogCard } from "@/entities/blog-post/ui/BlogCard";
 import { SearchAndFilter } from "@/features/content-search/ui/SearchAndFilter";
-import { getBlogPosts } from "@/shared/api/client";
+import { getBlogPosts } from "@/shared/api/browser-client";
 import type { BlogPost } from "@/shared/api/types";
 import { useI18n } from "@/shared/i18n/I18nProvider";
 import { SectionTitle } from "@/shared/ui/SectionTitle";
@@ -33,4 +33,3 @@ export default function BlogPage() {
     </div>
   );
 }
-

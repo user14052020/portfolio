@@ -88,7 +88,7 @@ class StyleExplorationHandler(BaseChatModeHandler):
         decision = await self.run_reasoning(
             command=effective_command,
             context=context,
-            must_generate=False,
+            must_generate=True,
             style_seed=self.style_seed_from_context(selection.candidate_style),
             previous_style_directions=previous_style_directions,
             occasion_context=None,

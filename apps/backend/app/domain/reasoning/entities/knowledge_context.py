@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.domain.knowledge.entities import KnowledgeCard
@@ -20,6 +22,7 @@ class KnowledgeContext(BaseModel):
     style_visual_cards: list[KnowledgeCard] = Field(default_factory=list)
     style_history_cards: list[KnowledgeCard] = Field(default_factory=list)
     editorial_cards: list[KnowledgeCard] = Field(default_factory=list)
+    observability: dict[str, Any] = Field(default_factory=dict)
 
     def all_cards(self) -> list[KnowledgeCard | StyleKnowledgeCard]:
         return [

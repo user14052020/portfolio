@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from "react";
 
 import type { CommandName } from "@/entities/command/model/types";
 import type { ThreadMessage } from "@/entities/chat-message/model/types";
+import {
+  extractProfileUpdateFromClarification,
+  mergeProfileContext,
+  readStoredProfileContext,
+  writeStoredProfileContext,
+} from "@/entities/profile/model/profileContext";
+import type { FrontendProfileContext } from "@/entities/profile/model/types";
 import type { FrontendScenarioContext } from "@/entities/stylist-context/model/types";
 import type { GenerationJobState } from "@/entities/generation-job/model/types";
 import type { VisualizationOfferState } from "@/entities/visualization-offer/model/types";
@@ -109,6 +116,10 @@ export function useStylistChatProcess(
     const persistedState = readPersistedStylistChatUiState(nextSessionId);
     return {
       sessionId: nextSessionId,
+      profileContext: mergeProfileContext(
+        persistedState?.profileContext ?? null,
+        readStoredProfileContext(),
+      ),
       persistedState: persistedState
         ? {
             ...persistedState,
@@ -118,6 +129,7 @@ export function useStylistChatProcess(
     };
   });
   const sessionId = bootstrap.sessionId;
+  const bootstrapProfileContext = bootstrap.profileContext;
   const persistedState = bootstrap.persistedState;
 
   const [messages, setMessages] = useState<ThreadMessage[]>(() => persistedState?.messages ?? []);
@@ -146,7 +158,9 @@ export function useStylistChatProcess(
   const [lastVisualCtaConfirmed, setLastVisualCtaConfirmed] = useState<string | null>(
     () => persistedState?.lastVisualCtaConfirmed ?? null
   );
-  const [presentationProfile] = useState(() => persistedState?.presentationProfile ?? {});
+  const [profileContext, setProfileContext] = useState<FrontendProfileContext>(
+    () => bootstrapProfileContext,
+  );
   const [isHistoryLoading, setIsHistoryLoading] = useState(messages.length === 0);
   const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
@@ -328,6 +342,10 @@ export function useStylistChatProcess(
   }, [sessionId, locale]);
 
   useEffect(() => {
+    writeStoredProfileContext(profileContext);
+  }, [profileContext]);
+
+  useEffect(() => {
     writePersistedStylistChatUiState(sessionId, {
       messages,
       uploadedAsset,
@@ -336,7 +354,7 @@ export function useStylistChatProcess(
       lastUserActionType,
       lastVisualCtaShown,
       lastVisualCtaConfirmed,
-      presentationProfile,
+      profileContext,
     });
   }, [
     sessionId,
@@ -347,7 +365,7 @@ export function useStylistChatProcess(
     lastUserActionType,
     lastVisualCtaShown,
     lastVisualCtaConfirmed,
-    presentationProfile,
+    profileContext,
   ]);
 
   useEffect(() => {
@@ -478,6 +496,7 @@ export function useStylistChatProcess(
         sessionId,
         locale,
         clientMessageId,
+        profileContext,
       });
 
       setUploadedAsset(null);
@@ -514,6 +533,14 @@ export function useStylistChatProcess(
     });
     const composerSource = getComposerMessageSource(scenarioContext);
     const clientMessageId = createClientMessageId();
+    const recentProfileUpdate =
+      composerSource === "followup"
+        ? extractProfileUpdateFromClarification({
+            questionText: scenarioContext.pendingClarificationText,
+            answerText: draftInput.trim(),
+          })
+        : null;
+    const nextProfileContext = mergeProfileContext(profileContext, recentProfileUpdate);
 
     setMessages((current) => [...current, optimisticMessage]);
     setInput("");
@@ -532,6 +559,8 @@ export function useStylistChatProcess(
               message: draftInput.trim() || null,
               assetId: draftUploadedAsset?.id ?? null,
               clientMessageId,
+              profileContext: nextProfileContext,
+              profileRecentUpdate: recentProfileUpdate,
             })
           : await sendFreeformMessage(
               buildFreeformMessagePayload({
@@ -540,10 +569,13 @@ export function useStylistChatProcess(
                 message: draftInput.trim() || null,
                 assetId: draftUploadedAsset?.id ?? null,
                 clientMessageId,
+                profileContext: nextProfileContext,
+                profileRecentUpdate: recentProfileUpdate,
               })
             );
 
       armChatCooldown("message", cooldownConfig.messageCooldownSeconds);
+      setProfileContext(nextProfileContext);
       handleServerResponse({ response, previousActiveJob });
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
@@ -607,6 +639,7 @@ export function useStylistChatProcess(
         visualizationOffer,
         assetId: uploadedAsset?.id ?? null,
         clientMessageId,
+        profileContext,
       });
       setLastVisualCtaConfirmed(
         visualizationOffer.visualizationType ?? visualizationOffer.ctaText ?? "visualization_cta"

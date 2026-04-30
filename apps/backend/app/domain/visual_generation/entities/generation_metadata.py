@@ -32,6 +32,8 @@ class GenerationMetadata(BaseModel):
     style_explanation_supporting_text: str | None = None
     style_explanation_distinct_points: list[str] = Field(default_factory=list)
     diversity_constraints: dict[str, Any] = Field(default_factory=dict)
+    profile_constraints: dict[str, Any] = Field(default_factory=dict)
+    profile_context_snapshot: dict[str, Any] | None = None
     knowledge_refs: list[dict[str, Any]] = Field(default_factory=list)
 
     def content_hash(self) -> str:

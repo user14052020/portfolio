@@ -4,7 +4,7 @@ import { NumberInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
-import { getStylistRuntimeSettings, updateStylistRuntimeSettings } from "@/shared/api/client";
+import { getStylistRuntimeSettings, updateStylistRuntimeSettings } from "@/shared/api/browser-client";
 import type { StylistRuntimeSettings } from "@/shared/api/types";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SoftButton } from "@/shared/ui/SoftButton";

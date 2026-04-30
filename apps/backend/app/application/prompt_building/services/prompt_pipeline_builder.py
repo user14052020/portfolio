@@ -103,6 +103,7 @@ class PromptPipelineBuilder:
                 "knowledge_cards": brief.get("knowledge_cards") or [],
                 "knowledge_bundle": brief.get("knowledge_bundle"),
                 "profile_context": brief.get("profile_context"),
+                "profile_context_snapshot": brief.get("profile_context_snapshot"),
                 "visual_preset_candidates": [
                     value
                     for value in [
@@ -162,6 +163,20 @@ class PromptPipelineBuilder:
 def _looks_like_fashion_brief(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    return any(key in value for key in ("brief_mode", "style_identity", "style_direction")) and any(
-        key in value for key in ("garment_list", "hero_garments", "palette", "composition_rules")
+    return any(
+        _fashion_brief_value_present(value.get(key))
+        for key in ("brief_mode", "style_identity", "style_direction")
+    ) and any(
+        _fashion_brief_value_present(value.get(key))
+        for key in ("garment_list", "hero_garments", "palette", "composition_rules")
     )
+
+
+def _fashion_brief_value_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True

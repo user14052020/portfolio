@@ -1,5 +1,5 @@
 import { HomePageSurface } from "@/app/HomePageSurface";
-import { getBlogPostsCached, getProjectsCached, getSiteSettings } from "@/shared/api/client";
+import { getBlogPostsCached, getProjectsCached, getSiteSettings } from "@/shared/api/server-client";
 import { fallbackPosts, fallbackProjects, fallbackSettings } from "@/shared/mock/content";
 
 export default async function HomePage() {

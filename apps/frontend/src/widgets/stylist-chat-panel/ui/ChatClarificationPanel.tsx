@@ -1,16 +1,34 @@
+import { buildProfileClarificationSuggestions } from "@/entities/profile/model/profileContext";
 import type { Locale } from "@/shared/api/types";
+import { SoftButton } from "@/shared/ui/SoftButton";
 
 export function ChatClarificationPanel({
   locale,
   text,
+  onSuggestionSelect,
 }: {
   locale: Locale;
   text: string;
+  onSuggestionSelect?: (value: string) => void;
 }) {
+  const suggestions = buildProfileClarificationSuggestions(locale, text);
+
+  if (suggestions.length === 0) {
+    return null;
+  }
+
   return (
-    <div className="rounded-[28px] border border-amber-200/80 bg-amber-50/86 px-4 py-3 text-sm text-amber-900 shadow-[var(--shadow-soft-sm)]">
-      <p className="font-semibold">{locale === "ru" ? "Нужно уточнение" : "Need a follow-up"}</p>
-      <p className="mt-1 leading-6">{text}</p>
+    <div className="flex flex-wrap gap-2">
+      {suggestions.map((suggestion) => (
+        <SoftButton
+          key={suggestion.label}
+          tone="accent"
+          shape="compact"
+          onClick={() => onSuggestionSelect?.(suggestion.draft)}
+        >
+          {suggestion.label}
+        </SoftButton>
+      ))}
     </div>
   );
 }

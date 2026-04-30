@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 
 class StyleAdviceFacet(BaseModel):
@@ -61,8 +63,50 @@ class StyleFacetBundle(BaseModel):
 
 
 class ProfileAlignedStyleFacetBundle(BaseModel):
-    facets: StyleFacetBundle = Field(default_factory=StyleFacetBundle)
+    advice_facets: list[StyleAdviceFacet] = Field(default_factory=list)
+    image_facets: list[StyleImageFacet] = Field(default_factory=list)
+    visual_language_facets: list[StyleVisualLanguageFacet] = Field(default_factory=list)
+    relation_facets: list[StyleRelationFacet] = Field(default_factory=list)
     profile_context_present: bool = False
     alignment_notes: list[str] = Field(default_factory=list)
     filtered_out: list[str] = Field(default_factory=list)
+    boosted_facet_categories: list[str] = Field(default_factory=list)
+    removed_item_types: list[str] = Field(default_factory=list)
     facet_weights: dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_legacy_facets(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or "facets" not in data:
+            return data
+
+        raw = dict(data)
+        bundle = raw.pop("facets")
+        if isinstance(bundle, StyleFacetBundle):
+            raw.setdefault("advice_facets", list(bundle.advice_facets))
+            raw.setdefault("image_facets", list(bundle.image_facets))
+            raw.setdefault("visual_language_facets", list(bundle.visual_language_facets))
+            raw.setdefault("relation_facets", list(bundle.relation_facets))
+            return raw
+        if isinstance(bundle, dict):
+            raw.setdefault("advice_facets", list(bundle.get("advice_facets", [])))
+            raw.setdefault("image_facets", list(bundle.get("image_facets", [])))
+            raw.setdefault(
+                "visual_language_facets",
+                list(bundle.get("visual_language_facets", [])),
+            )
+            raw.setdefault("relation_facets", list(bundle.get("relation_facets", [])))
+        return raw
+
+    @computed_field(return_type=StyleFacetBundle)
+    @property
+    def facets(self) -> StyleFacetBundle:
+        return StyleFacetBundle(
+            advice_facets=list(self.advice_facets),
+            image_facets=list(self.image_facets),
+            visual_language_facets=list(self.visual_language_facets),
+            relation_facets=list(self.relation_facets),
+        )
+
+    def total_count(self) -> int:
+        return self.facets.total_count()

@@ -9,7 +9,7 @@ import {
   getStyleIngestionAdminOverview,
   startStyleIngestionWorker,
   stopStyleIngestionWorker,
-} from "@/shared/api/client";
+} from "@/shared/api/browser-client";
 import type { ParserAdminOverview, ParserAdminRecentRun } from "@/shared/api/types";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";

@@ -48,6 +48,8 @@ class GenerationPayloadBuilder:
             "style_tags": compiled_prompt.style_tags,
             "composition_tags": compiled_prompt.composition_tags,
             "diversity_constraints": fashion_brief.diversity_constraints,
+            "profile_constraints": fashion_brief.profile_constraints,
+            "profile_context_snapshot": fashion_brief.profile_context_snapshot,
             "brief_hash": fashion_brief.content_hash(),
             "compiled_prompt_hash": compiled_prompt.content_hash(),
             "knowledge_cards_count": len(fashion_brief.knowledge_cards),

@@ -1,7 +1,16 @@
 from typing import Any
 
-from app.application.reasoning.contracts import FashionReasoningPipeline, ReasoningOutputMapper
+from app.application.knowledge.contracts import KnowledgeRuntimeSettingsProvider
+from app.application.reasoning import ProfileContextInput
+from app.application.reasoning.contracts import (
+    FashionReasoningPipeline,
+    ProfileContextService,
+    ReasoningOutputMapper,
+    VoiceCompositionClient,
+    VoiceRuntimeSettingsProvider,
+)
 from app.application.reasoning.services.fashion_reasoning_pipeline import DefaultFashionReasoningPipeline
+from app.application.reasoning.services.profile_context_service import DefaultProfileContextService
 from app.application.reasoning.services.reasoning_output_mapper import DefaultReasoningOutputMapper
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import ReasoningOutput
@@ -16,6 +25,7 @@ from app.domain.reasoning import (
     ProfileContextSnapshot,
     SessionStateSnapshot,
     UsedStyleReference,
+    VoiceContext,
 )
 from app.domain.routing import RoutingDecision, RoutingMode
 from app.domain.style_exploration.entities.diversity_constraints import DiversityConstraints
@@ -28,10 +38,22 @@ class FashionReasoningPipelineDecisionAdapter:
         reasoning_pipeline: FashionReasoningPipeline | None = None,
         reasoning_output_mapper: ReasoningOutputMapper | None = None,
         generation_request_builder: GenerationRequestBuilder | None = None,
+        profile_context_service: ProfileContextService | None = None,
+        knowledge_runtime_settings_provider: KnowledgeRuntimeSettingsProvider | None = None,
+        voice_runtime_settings_provider: VoiceRuntimeSettingsProvider | None = None,
+        voice_composition_client: VoiceCompositionClient | None = None,
+        enable_model_voice_composition: bool = False,
     ) -> None:
         self.reasoning_pipeline = reasoning_pipeline or DefaultFashionReasoningPipeline()
-        self.reasoning_output_mapper = reasoning_output_mapper or DefaultReasoningOutputMapper()
+        self.reasoning_output_mapper = reasoning_output_mapper or DefaultReasoningOutputMapper(
+            voice_composition_client=voice_composition_client,
+            voice_runtime_settings_provider=voice_runtime_settings_provider,
+            enable_model_composition=enable_model_voice_composition,
+        )
         self.generation_request_builder = generation_request_builder or GenerationRequestBuilder()
+        self.profile_context_service = profile_context_service or DefaultProfileContextService()
+        self.knowledge_runtime_settings_provider = knowledge_runtime_settings_provider
+        self.voice_runtime_settings_provider = voice_runtime_settings_provider
 
     async def handle(
         self,
@@ -46,7 +68,7 @@ class FashionReasoningPipelineDecisionAdapter:
         structured_outfit_brief: dict[str, Any] | None = None,
     ) -> DecisionResult:
         routing_decision = self._routing_decision(command=command, context=context, must_generate=must_generate)
-        profile_context = self._profile_context(command)
+        profile_context = await self._profile_context(command)
         reasoning_output = await self.reasoning_pipeline.run(
             routing_decision=routing_decision,
             session_state=self._session_state(
@@ -59,7 +81,18 @@ class FashionReasoningPipelineDecisionAdapter:
             profile_context=profile_context,
             retrieval_profile=routing_decision.retrieval_profile,
         )
-        presentation_payload = self.reasoning_output_mapper.to_presentation(reasoning_output)
+        voice_context = self._voice_context(
+            command=command,
+            routing_decision=routing_decision,
+            reasoning_output=reasoning_output,
+            profile_context=profile_context,
+        )
+        runtime_flags = await self._runtime_flags()
+        presentation_payload = await self.reasoning_output_mapper.to_presentation(
+            reasoning_output,
+            voice_context=voice_context,
+            runtime_flags=runtime_flags,
+        )
 
         if reasoning_output.requires_clarification():
             decision = DecisionResult(
@@ -73,6 +106,8 @@ class FashionReasoningPipelineDecisionAdapter:
                 telemetry=self._telemetry(
                     reasoning_output=reasoning_output,
                     presentation_payload=presentation_payload,
+                    voice_context=voice_context,
+                    profile_context=profile_context,
                 ),
             )
             return decision
@@ -102,11 +137,14 @@ class FashionReasoningPipelineDecisionAdapter:
             knowledge_cards=self._knowledge_cards(fashion_brief),
             knowledge_bundle=None,
             knowledge_provider_used=self._knowledge_provider(reasoning_output),
+            profile_context_snapshot=profile_context,
         )
         decision.telemetry.update(
             self._telemetry(
                 reasoning_output=reasoning_output,
                 presentation_payload=presentation_payload,
+                voice_context=voice_context,
+                profile_context=profile_context,
             )
         )
         if reasoning_output.can_offer_visualization and not decision.requires_generation():
@@ -114,7 +152,7 @@ class FashionReasoningPipelineDecisionAdapter:
                 decision.apply_visualization_offer(
                     VisualizationOffer(
                         can_offer_visualization=True,
-                        cta_text=reasoning_output.suggested_cta,
+                        cta_text=presentation_payload.voice.cta_text or reasoning_output.suggested_cta,
                         visualization_type="flat_lay_reference",
                     )
                 )
@@ -167,6 +205,7 @@ class FashionReasoningPipelineDecisionAdapter:
                     style_id=style.style_id,
                     style_name=style.style_name,
                     style_cluster=style.style_family,
+                    silhouette_family=style.silhouette_family,
                     palette=list(style.palette),
                     hero_garments=list(style.hero_garments),
                     visual_motifs=list(style.styling_mood),
@@ -182,11 +221,73 @@ class FashionReasoningPipelineDecisionAdapter:
             },
         )
 
-    def _profile_context(self, command: ChatCommand) -> ProfileContextSnapshot | None:
-        values = {key: value for key, value in command.profile_context.items() if value is not None}
-        if not values:
+    async def _profile_context(self, command: ChatCommand) -> ProfileContextSnapshot | None:
+        request = ProfileContextInput(
+            frontend_hints={key: value for key, value in command.profile_context.items() if value is not None},
+            session_profile=self._profile_source(command.metadata.get("session_profile_context")),
+            persistent_profile=self._profile_source(command.metadata.get("persistent_profile_context")),
+            recent_updates=self._profile_updates(command.metadata.get("profile_recent_updates")),
+        )
+        if (
+            not request.frontend_hints
+            and request.session_profile is None
+            and request.persistent_profile is None
+            and request.recent_updates is None
+        ):
             return None
-        return ProfileContextSnapshot(values=values, present=True, source="chat_command")
+        return await self.profile_context_service.build_snapshot(request)
+
+    async def _runtime_flags(self):
+        if self.knowledge_runtime_settings_provider is None:
+            return None
+        return await self.knowledge_runtime_settings_provider.get_runtime_flags()
+
+    def _voice_context(
+        self,
+        *,
+        command: ChatCommand,
+        routing_decision: RoutingDecision,
+        reasoning_output: FashionReasoningOutput,
+        profile_context: ProfileContextSnapshot | None,
+    ) -> VoiceContext:
+        response_type = self._voice_response_type(reasoning_output)
+        knowledge_density = self._voice_knowledge_density(reasoning_output)
+        mode = (
+            "clarification_only"
+            if response_type == "clarification"
+            else str(routing_decision.mode.value)
+        )
+        desired_depth = self._voice_desired_depth(
+            mode=mode,
+            response_type=response_type,
+            knowledge_density=knowledge_density,
+        )
+        return VoiceContext(
+            mode=mode,
+            response_type=response_type,
+            desired_depth=desired_depth,
+            should_be_brief=response_type == "clarification" or desired_depth == "light",
+            can_use_historical_layer=bool(reasoning_output.historical_note_candidates),
+            can_use_color_poetics=bool(
+                reasoning_output.color_poetic_candidates
+                or reasoning_output.composition_theory_candidates
+                or reasoning_output.visual_language_points
+            ),
+            can_offer_visual_cta=reasoning_output.can_offer_visualization,
+            profile_context_present=bool(profile_context.present) if profile_context is not None else False,
+            knowledge_density=knowledge_density,
+            locale=command.locale or "en",
+        )
+
+    def _profile_source(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return value
+        return None
+
+    def _profile_updates(self, value: Any) -> dict[str, Any] | None:
+        if isinstance(value, dict):
+            return dict(value)
+        return None
 
     def _active_slots(
         self,
@@ -365,13 +466,42 @@ class FashionReasoningPipelineDecisionAdapter:
         *,
         reasoning_output: FashionReasoningOutput,
         presentation_payload,
+        voice_context: VoiceContext,
+        profile_context: ProfileContextSnapshot | None,
     ) -> dict[str, Any]:
         metadata = reasoning_output.reasoning_metadata
+        voice_observability = dict(presentation_payload.voice.observability)
         return {
             "reasoning_pipeline_used": True,
             "reasoning_voice_payload_ready": bool(presentation_payload.voice.draft_text),
             "reasoning_generation_handoff_ready": presentation_payload.generation.generation_ready,
             "reasoning_generation_blocked_reason": presentation_payload.generation.blocked_reason,
+            "reasoning_voice_mode": voice_observability.get("voice_mode") or voice_context.mode,
+            "reasoning_voice_response_type": voice_observability.get("voice_response_type")
+            or voice_context.response_type,
+            "reasoning_voice_desired_depth": voice_observability.get("voice_desired_depth")
+            or voice_context.desired_depth,
+            "reasoning_voice_knowledge_density": voice_observability.get("voice_knowledge_density")
+            or voice_context.knowledge_density,
+            "reasoning_voice_should_be_brief": voice_observability.get("voice_should_be_brief")
+            if "voice_should_be_brief" in voice_observability
+            else voice_context.should_be_brief,
+            "reasoning_voice_profile_context_present": voice_observability.get(
+                "voice_profile_context_present"
+            )
+            if "voice_profile_context_present" in voice_observability
+            else voice_context.profile_context_present,
+            "reasoning_voice_tone_profile": presentation_payload.voice.tone_profile,
+            "reasoning_voice_layers_used": list(presentation_payload.voice.voice_layers_used),
+            "reasoning_voice_historical_used": presentation_payload.voice.includes_historical_note,
+            "reasoning_voice_color_poetics_used": presentation_payload.voice.includes_color_poetics,
+            "reasoning_voice_brevity_level": presentation_payload.voice.brevity_level,
+            "reasoning_voice_cta_present": bool(presentation_payload.voice.cta_text),
+            "reasoning_voice_cta_style": voice_observability.get("voice_cta_style"),
+            "reasoning_voice_text_length": int(
+                voice_observability.get("voice_text_length")
+                or len((presentation_payload.voice.draft_text or "").strip())
+            ),
             "reasoning_voice_style_logic_points_count": len(presentation_payload.voice.style_logic_points),
             "reasoning_voice_visual_language_points_count": len(presentation_payload.voice.visual_language_points),
             "reasoning_response_type": reasoning_output.response_type,
@@ -384,13 +514,34 @@ class FashionReasoningPipelineDecisionAdapter:
             "reasoning_style_relation_facets_count": metadata.style_relation_facets_count,
             "reasoning_style_semantic_fragments_count": metadata.style_semantic_fragments_count,
             "reasoning_profile_alignment_applied": metadata.profile_alignment_applied,
+            "reasoning_profile_context_present": bool(profile_context.present) if profile_context else False,
+            "reasoning_profile_context_source": profile_context.source if profile_context else None,
+            "reasoning_profile_fields_count": _profile_fields_count(profile_context),
             "reasoning_profile_alignment_filtered_count": reasoning_output.observability.get(
                 "profile_alignment_filtered_count"
+            ),
+            "reasoning_profile_alignment_boosted_categories": reasoning_output.observability.get(
+                "profile_alignment_boosted_categories"
+            ),
+            "reasoning_profile_alignment_removed_item_types": reasoning_output.observability.get(
+                "profile_alignment_removed_item_types"
+            ),
+            "reasoning_profile_completeness_state": reasoning_output.observability.get(
+                "profile_completeness_state"
+            ),
+            "reasoning_profile_clarification_decision": reasoning_output.observability.get(
+                "profile_clarification_decision"
+            ),
+            "reasoning_profile_clarification_required": reasoning_output.observability.get(
+                "profile_clarification_required"
             ),
             "reasoning_clarification_required": metadata.clarification_required,
             "reasoning_brief_built": metadata.fashion_brief_built,
             "reasoning_cta_offered": metadata.cta_offered,
             "reasoning_generation_ready": metadata.generation_ready,
+            "reasoning_profile_derived_constraints_count": _profile_derived_constraints_count(
+                reasoning_output.fashion_brief
+            ),
             **dict(reasoning_output.observability),
         }
 
@@ -418,3 +569,85 @@ class FashionReasoningPipelineDecisionAdapter:
             return None
         cleaned = str(value).strip()
         return cleaned or None
+
+    def _voice_response_type(self, reasoning_output: FashionReasoningOutput) -> str:
+        return {
+            "text": "text_only",
+            "clarification": "clarification",
+            "visual_offer": "text_with_visual_offer",
+            "generation_ready": "brief_ready_for_generation",
+        }.get(reasoning_output.response_type, "text_only")
+
+    def _voice_knowledge_density(self, reasoning_output: FashionReasoningOutput) -> str:
+        signal_count = (
+            len(reasoning_output.style_logic_points)
+            + len(reasoning_output.visual_language_points)
+            + len(reasoning_output.historical_note_candidates)
+            + len(reasoning_output.styling_rule_candidates)
+            + len(reasoning_output.editorial_context_candidates)
+            + len(reasoning_output.color_poetic_candidates)
+            + len(reasoning_output.composition_theory_candidates)
+        )
+        if signal_count >= 6:
+            return "high"
+        if signal_count >= 3:
+            return "medium"
+        return "low"
+
+    def _voice_desired_depth(
+        self,
+        *,
+        mode: str,
+        response_type: str,
+        knowledge_density: str,
+    ) -> str:
+        if response_type == "clarification":
+            return "light"
+        if mode == "general_advice":
+            return "light" if response_type == "text_only" and knowledge_density != "high" else "normal"
+        if mode == "style_exploration":
+            return "deep" if knowledge_density == "high" or response_type != "text_only" else "normal"
+        if mode == "occasion_outfit":
+            return "deep" if knowledge_density == "high" and response_type != "text_only" else "normal"
+        if mode == "garment_matching":
+            return "deep" if knowledge_density == "high" and response_type == "brief_ready_for_generation" else "normal"
+        return "normal"
+
+
+def _profile_fields_count(profile_context: ProfileContextSnapshot | None) -> int:
+    if profile_context is None or not profile_context.present:
+        return 0
+
+    count = 0
+    if profile_context.presentation_profile:
+        count += 1
+    for items in (
+        profile_context.fit_preferences,
+        profile_context.silhouette_preferences,
+        profile_context.comfort_preferences,
+        profile_context.formality_preferences,
+        profile_context.color_preferences,
+        profile_context.color_avoidances,
+        profile_context.preferred_items,
+        profile_context.avoided_items,
+    ):
+        if items:
+            count += 1
+    return count
+
+
+def _profile_derived_constraints_count(fashion_brief: FashionBrief | None) -> int:
+    if fashion_brief is None:
+        return 0
+
+    count = 0
+    for value in fashion_brief.profile_constraints.values():
+        if isinstance(value, list):
+            count += len([item for item in value if str(item).strip()])
+            continue
+        if isinstance(value, dict):
+            count += len([item for item in value.values() if str(item).strip()])
+            continue
+        if value is not None and str(value).strip():
+            count += 1
+    return count

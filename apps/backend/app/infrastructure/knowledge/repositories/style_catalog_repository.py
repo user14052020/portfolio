@@ -5,8 +5,11 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.knowledge.entities import KnowledgeCard, KnowledgeQuery
-from app.domain.knowledge.enums import KnowledgeType
+from app.application.knowledge.services.style_facet_knowledge_projector import (
+    DefaultStyleFacetKnowledgeProjector,
+    StyleFacetProjectionSource,
+)
+from app.domain.knowledge.entities import KnowledgeCard, KnowledgeQuery, StyleKnowledgeProjectionResult
 from app.models import (
     Style,
     StyleAlias,
@@ -34,10 +37,27 @@ class _StyleFacetBundle:
 
 
 class DatabaseStyleCatalogRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        projector: DefaultStyleFacetKnowledgeProjector | None = None,
+    ) -> None:
         self.session = session
+        self._projector = projector or DefaultStyleFacetKnowledgeProjector()
 
     async def search(self, *, query: KnowledgeQuery) -> list[KnowledgeCard]:
+        projections = await self.search_projections(query=query)
+        cards: list[KnowledgeCard] = []
+        for projection in projections:
+            primary_card = projection.primary_runtime_card()
+            if primary_card is not None:
+                cards.append(primary_card)
+        if query.profile_context:
+            cards = self._sort_cards_with_profile_weighting(cards=cards, query=query)
+        return cards
+
+    async def search_projections(self, *, query: KnowledgeQuery) -> list[StyleKnowledgeProjectionResult]:
         limit = max(query.limit * 4, 12)
         style_rows = await self._load_style_rows(query=query, limit=limit)
         if not style_rows:
@@ -53,7 +73,7 @@ class DatabaseStyleCatalogRepository:
         relation_facets = await self._load_latest_facets(StyleRelationFacet, style_ids=style_ids)
         presentation_facets = await self._load_latest_facets(StylePresentationFacet, style_ids=style_ids)
         return [
-            self._build_card(
+            self._build_projection(
                 style=style,
                 profile=profile,
                 source=source,
@@ -182,7 +202,7 @@ class DatabaseStyleCatalogRepository:
         )
         return {item.style_id: item for item in result.scalars().all()}
 
-    def _build_card(
+    def _build_projection(
         self,
         *,
         style: Style,
@@ -193,235 +213,132 @@ class DatabaseStyleCatalogRepository:
         relations: list[StyleRelation],
         facets: _StyleFacetBundle,
     ) -> KnowledgeCard:
-        legacy_palette = list(profile.color_palette_json or []) if profile is not None else []
-        legacy_garments = list(profile.garments_json or []) if profile is not None else []
-        legacy_materials = list(profile.materials_json or []) if profile is not None else []
-        legacy_footwear = list(profile.footwear_json or []) if profile is not None else []
-        legacy_accessories = list(profile.accessories_json or []) if profile is not None else []
-        silhouettes = list(profile.silhouettes_json or []) if profile is not None else []
-        occasion_fit = list(profile.occasion_fit_json or []) if profile is not None else []
-        seasonality = list(profile.seasonality_json or []) if profile is not None else []
-        legacy_image_prompt_notes = list(profile.image_prompt_notes_json or []) if profile is not None else []
-        legacy_styling_advice = list(profile.styling_advice_json or []) if profile is not None else []
-        legacy_mood_keywords = list(profile.mood_keywords_json or []) if profile is not None else []
-        legacy_patterns_textures = list(profile.patterns_textures_json or []) if profile is not None else []
-        legacy_negative_constraints = list(profile.negative_constraints_json or []) if profile is not None else []
+        projection = self._projector.project_from_source(
+            source=StyleFacetProjectionSource(
+                style=style,
+                profile=profile,
+                source=source,
+                aliases=aliases,
+                traits=traits,
+                relations=relations,
+                knowledge_facet=facets.knowledge,
+                visual_facet=facets.visual,
+                fashion_facet=facets.fashion,
+                image_facet=facets.image,
+                relation_facet=facets.relation,
+                presentation_facet=facets.presentation,
+            )
+        )
+        primary_card = projection.primary_runtime_card()
+        if primary_card is None:
+            raise ValueError(f"Projection for style {style.slug} produced no runtime card")
+        return projection
 
-        knowledge = facets.knowledge
-        visual = facets.visual
-        fashion = facets.fashion
-        image = facets.image
-        relation_facet = facets.relation
-        presentation = facets.presentation
+    def _sort_cards_with_profile_weighting(
+        self,
+        *,
+        cards: list[KnowledgeCard],
+        query: KnowledgeQuery,
+    ) -> list[KnowledgeCard]:
+        return sorted(
+            cards,
+            key=lambda card: self._profile_weighted_score(card=card, query=query),
+            reverse=True,
+        )
 
-        palette = self._first_non_empty_list(
-            list(visual.palette_json) if visual is not None else [],
-            legacy_palette,
-        )
-        hero_garments = self._first_non_empty_list(
-            list(image.hero_garments_json) if image is not None else [],
-            legacy_garments[:4],
-        )
-        garments = self._merge_unique_strings(
-            hero_garments,
-            list(image.secondary_garments_json) if image is not None else [],
-            list(fashion.tops_json) if fashion is not None else [],
-            list(fashion.bottoms_json) if fashion is not None else [],
-            legacy_garments,
-        )
-        materials = self._first_non_empty_list(
-            list(image.materials_json) if image is not None else [],
-            legacy_materials,
-        )
-        footwear = self._first_non_empty_list(
-            list(fashion.shoes_json) if fashion is not None else [],
-            legacy_footwear,
-        )
-        accessories = self._merge_unique_strings(
-            list(image.core_accessories_json) if image is not None else [],
-            list(fashion.accessories_json) if fashion is not None else [],
-            legacy_accessories,
-        )
-        styling_advice = self._merge_unique_strings(
-            list(knowledge.styling_rules_json) if knowledge is not None else [],
-            list(knowledge.casual_adaptations_json) if knowledge is not None else [],
-            legacy_styling_advice,
-        )
-        mood_keywords = self._merge_unique_strings(
-            list(visual.visual_motifs_json) if visual is not None else [],
-            list(visual.lighting_mood_json) if visual is not None else [],
-            list(visual.photo_treatment_json) if visual is not None else [],
-            legacy_mood_keywords,
-        )
-        patterns_textures = self._first_non_empty_list(
-            list(visual.patterns_textures_json) if visual is not None else [],
-            legacy_patterns_textures,
-        )
-        negative_constraints = self._merge_unique_strings(
-            list(image.negative_constraints_json) if image is not None else [],
-            list(knowledge.negative_guidance_json) if knowledge is not None else [],
-            legacy_negative_constraints,
-        )
-        historical_context = self._join_text_segments(
-            list(knowledge.historical_notes_json) if knowledge is not None else [],
-            [profile.historical_context] if profile is not None else [],
-        )
-        cultural_context = self._join_text_segments(
-            list(relation_facet.origin_regions_json) if relation_facet is not None else [],
-            list(relation_facet.platforms_json) if relation_facet is not None else [],
-            list(relation_facet.brands_json) if relation_facet is not None else [],
-            list(relation_facet.era_json) if relation_facet is not None else [],
-            [profile.cultural_context] if profile is not None else [],
-        )
-        image_prompt_notes = self._merge_unique_strings(
-            list(image.composition_cues_json) if image is not None else [],
-            list(image.visual_motifs_json) if image is not None else [],
-            list(image.lighting_mood_json) if image is not None else [],
-            list(image.photo_treatment_json) if image is not None else [],
-            legacy_image_prompt_notes,
-        )
-        alias_values = [item.alias for item in aliases]
-        trait_values = [item.trait_value for item in traits]
-        summary = self._first_non_empty_text(
-            presentation.short_explanation if presentation is not None else None,
-            presentation.one_sentence_description if presentation is not None else None,
-            knowledge.core_definition if knowledge is not None else None,
-            style.short_definition,
-            profile.fashion_summary if profile is not None else None,
-            profile.visual_summary if profile is not None else None,
-            style.display_name,
-        )
-        body = self._first_non_empty_text(
-            self._join_text_segments(
-                list(presentation.what_makes_it_distinct_json) if presentation is not None else [],
-                list(knowledge.core_style_logic_json) if knowledge is not None else [],
-                list(knowledge.styling_rules_json) if knowledge is not None else [],
-                list(knowledge.historical_notes_json) if knowledge is not None else [],
-                list(visual.visual_motifs_json) if visual is not None else [],
-            ),
-            style.long_summary,
-            profile.visual_summary if profile is not None else None,
-        ) or None
-        metadata: dict[str, Any] = {
-            "style_numeric_id": style.id,
-            "style_slug": style.slug,
-            "style_name": style.display_name,
-            "canonical_name": style.canonical_name,
-            "palette": palette,
-            "hero_garments": hero_garments,
-            "secondary_garments": list(image.secondary_garments_json) if image is not None else [],
-            "core_accessories": list(image.core_accessories_json) if image is not None else [],
-            "garments": garments,
-            "materials": materials,
-            "footwear": footwear,
-            "accessories": accessories,
-            "silhouette_family": silhouettes[0] if silhouettes else None,
-            "silhouettes": silhouettes,
-            "occasion_fit": occasion_fit,
-            "seasonality": seasonality,
-            "mood_keywords": mood_keywords,
-            "patterns_textures": patterns_textures,
-            "negative_constraints": negative_constraints,
-            "styling_advice": styling_advice,
-            "historical_context": historical_context,
-            "cultural_context": cultural_context,
-            "fashion_summary": profile.fashion_summary if profile is not None else None,
-            "visual_summary": profile.visual_summary if profile is not None else None,
-            "image_prompt_notes": image_prompt_notes,
-            "core_definition": knowledge.core_definition if knowledge is not None else None,
-            "core_style_logic": list(knowledge.core_style_logic_json) if knowledge is not None else [],
-            "styling_rules": list(knowledge.styling_rules_json) if knowledge is not None else [],
-            "casual_adaptations": list(knowledge.casual_adaptations_json) if knowledge is not None else [],
-            "statement_pieces": list(knowledge.statement_pieces_json) if knowledge is not None else [],
-            "status_markers": list(knowledge.status_markers_json) if knowledge is not None else [],
-            "overlap_context": list(knowledge.overlap_context_json) if knowledge is not None else [],
-            "historical_notes": list(knowledge.historical_notes_json) if knowledge is not None else [],
-            "negative_guidance": list(knowledge.negative_guidance_json) if knowledge is not None else [],
-            "lighting_mood": list(visual.lighting_mood_json) if visual is not None else [],
-            "photo_treatment": list(visual.photo_treatment_json) if visual is not None else [],
-            "visual_motifs": list(visual.visual_motifs_json) if visual is not None else [],
-            "platform_visual_cues": list(visual.platform_visual_cues_json) if visual is not None else [],
-            "tops": list(fashion.tops_json) if fashion is not None else [],
-            "bottoms": list(fashion.bottoms_json) if fashion is not None else [],
-            "shoes": list(fashion.shoes_json) if fashion is not None else [],
-            "hair_makeup": list(fashion.hair_makeup_json) if fashion is not None else [],
-            "signature_details": list(fashion.signature_details_json) if fashion is not None else [],
-            "props": list(image.props_json) if image is not None else [],
-            "composition_cues": list(image.composition_cues_json) if image is not None else [],
-            "related_styles": list(relation_facet.related_styles_json) if relation_facet is not None else [],
-            "overlap_styles": list(relation_facet.overlap_styles_json) if relation_facet is not None else [],
-            "preceded_by": list(relation_facet.preceded_by_json) if relation_facet is not None else [],
-            "succeeded_by": list(relation_facet.succeeded_by_json) if relation_facet is not None else [],
-            "brands": list(relation_facet.brands_json) if relation_facet is not None else [],
-            "platforms": list(relation_facet.platforms_json) if relation_facet is not None else [],
-            "origin_regions": list(relation_facet.origin_regions_json) if relation_facet is not None else [],
-            "era": list(relation_facet.era_json) if relation_facet is not None else [],
-            "presentation_short_explanation": presentation.short_explanation if presentation is not None else None,
-            "presentation_one_sentence_description": (
-                presentation.one_sentence_description if presentation is not None else None
-            ),
-            "what_makes_it_distinct": (
-                list(presentation.what_makes_it_distinct_json) if presentation is not None else []
-            ),
-            "has_enriched_facets": any(
-                facet is not None
-                for facet in (
-                    knowledge,
-                    visual,
-                    fashion,
-                    image,
-                    relation_facet,
-                    presentation,
-                )
-            ),
-            "relations": [
-                {
-                    "target_style_id": relation.target_style_id,
-                    "relation_type": relation.relation_type,
-                    "score": relation.score,
-                }
-                for relation in relations[:6]
-            ],
-            "trait_map": self._trait_map(traits),
+    def _profile_weighted_score(self, *, card: KnowledgeCard, query: KnowledgeQuery) -> float:
+        score = float(card.confidence)
+        profile = query.profile_context or {}
+        haystack = self._card_profile_haystack(card)
+
+        score += 1.2 * self._term_overlap_score(haystack, [profile.get("presentation_profile")])
+        score += 1.0 * self._term_overlap_score(haystack, profile.get("fit_preferences"))
+        score += 1.15 * self._term_overlap_score(haystack, profile.get("silhouette_preferences"))
+        score += 0.75 * self._term_overlap_score(haystack, profile.get("comfort_preferences"))
+        score += 0.8 * self._term_overlap_score(haystack, profile.get("formality_preferences"))
+        score += 0.7 * self._term_overlap_score(haystack, profile.get("color_preferences"))
+        score += 0.9 * self._term_overlap_score(haystack, profile.get("preferred_items"))
+
+        score -= 1.35 * self._term_overlap_score(haystack, profile.get("avoided_items"))
+        score -= 1.0 * self._term_overlap_score(haystack, profile.get("color_avoidances"))
+        return score
+
+    def _card_profile_haystack(self, card: KnowledgeCard) -> set[str]:
+        metadata = card.metadata or {}
+        values: list[Any] = [
+            card.title,
+            card.summary,
+            card.body or "",
+            *card.tags,
+            metadata.get("style_name"),
+            metadata.get("style_slug"),
+            metadata.get("fashion_summary"),
+            metadata.get("visual_summary"),
+            metadata.get("presentation_short_explanation"),
+            metadata.get("presentation_one_sentence_description"),
+            metadata.get("historical_context"),
+            metadata.get("cultural_context"),
+            metadata.get("silhouette_family"),
+            metadata.get("palette"),
+            metadata.get("hero_garments"),
+            metadata.get("secondary_garments"),
+            metadata.get("garments"),
+            metadata.get("materials"),
+            metadata.get("footwear"),
+            metadata.get("accessories"),
+            metadata.get("mood_keywords"),
+            metadata.get("patterns_textures"),
+            metadata.get("styling_rules"),
+            metadata.get("casual_adaptations"),
+            metadata.get("statement_pieces"),
+            metadata.get("status_markers"),
+            metadata.get("platform_visual_cues"),
+            metadata.get("tops"),
+            metadata.get("bottoms"),
+            metadata.get("shoes"),
+            metadata.get("signature_details"),
+            metadata.get("props"),
+            metadata.get("related_styles"),
+            metadata.get("overlap_styles"),
+            metadata.get("brands"),
+            metadata.get("platforms"),
+            metadata.get("origin_regions"),
+            metadata.get("era"),
+        ]
+        return {
+            token
+            for value in values
+            for token in self._tokenize_profile_value(value)
         }
-        return KnowledgeCard(
-            id=f"style_catalog:{style.slug}",
-            knowledge_type=KnowledgeType.STYLE_CATALOG,
-            title=style.display_name,
-            summary=summary,
-            body=body,
-            tags=self._unique_strings(
-                [
-                    style.slug,
-                    style.display_name,
-                    style.canonical_name,
-                    *alias_values,
-                    *palette,
-                    *hero_garments,
-                    *materials,
-                    *footwear,
-                    *accessories,
-                    *silhouettes,
-                    *occasion_fit,
-                    *seasonality,
-                    *mood_keywords,
-                    *trait_values,
-                    *metadata["statement_pieces"],
-                    *metadata["brands"],
-                    *metadata["platforms"],
-                    *metadata["origin_regions"],
-                ]
-            ),
-            style_id=style.slug,
-            source_ref=source.source_url if source is not None else None,
-            confidence=max(style.confidence_score, 0.1),
-            freshness=(
-                source.last_seen_at.date().isoformat()
-                if source is not None and source.last_seen_at is not None
-                else style.first_ingested_at.date().isoformat()
-            ),
-            metadata=metadata,
-        )
+
+    def _term_overlap_score(self, haystack: set[str], raw_values: Any) -> float:
+        score = 0.0
+        for term in self._tokenize_profile_value(raw_values):
+            if term in haystack:
+                score += 1.0
+        return score
+
+    def _tokenize_profile_value(self, raw_values: Any) -> list[str]:
+        items: list[str] = []
+        if isinstance(raw_values, str):
+            items = [raw_values]
+        elif isinstance(raw_values, (list, tuple, set)):
+            items = [str(item) for item in raw_values]
+        elif raw_values is not None:
+            items = [str(raw_values)]
+
+        tokens: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            normalized = item.replace("_", " ").replace("-", " ").strip().lower()
+            if not normalized:
+                continue
+            variants = {normalized, normalized.replace(" ", "_"), normalized.replace(" ", "-")}
+            for variant in variants:
+                if variant and variant not in seen:
+                    seen.add(variant)
+                    tokens.append(variant)
+        return tokens
 
     def _trait_map(self, traits: list[StyleTrait]) -> dict[str, list[str]]:
         grouped: dict[str, list[str]] = defaultdict(list)

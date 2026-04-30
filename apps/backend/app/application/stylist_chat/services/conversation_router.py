@@ -40,6 +40,12 @@ class ConversationRouter(ConversationRouterPort):
     ) -> ConversationRoutingResult:
         routing_context = self.routing_context_builder.build_context(command=command, context=context)
         routing_input = self.routing_context_builder.build_input(command=command, context=context)
+        short_circuit = self._short_circuit_fallback(
+            routing_input=routing_input,
+            routing_context=routing_context,
+        )
+        if short_circuit is not None:
+            return short_circuit
 
         try:
             client_output = await self.router_client.route(routing_input=routing_input)
@@ -93,6 +99,32 @@ class ConversationRouter(ConversationRouterPort):
             stripped_fields=[],
             used_fallback=True,
             failure_reason=failure_reason,
+            fallback_rule=fallback.matched_rule,
+        )
+
+    def _short_circuit_fallback(
+        self,
+        *,
+        routing_input,
+        routing_context,
+    ) -> ConversationRoutingResult | None:
+        fallback = self.fallback_policy.resolve(routing_input=routing_input)
+        if (
+            routing_input.last_ui_action != "try_other_style"
+            and fallback.matched_rule != "clarification_flow_general_pivot"
+        ):
+            return None
+        return ConversationRoutingResult(
+            decision=fallback.decision,
+            routing_input=routing_input,
+            routing_context=routing_context,
+            provider="fallback_router_policy",
+            raw_content="",
+            normalized_payload={},
+            validation_errors=[],
+            stripped_fields=[],
+            used_fallback=True,
+            failure_reason=fallback.failure_reason,
             fallback_rule=fallback.matched_rule,
         )
 

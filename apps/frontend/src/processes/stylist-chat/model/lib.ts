@@ -1,6 +1,7 @@
 import type { ChatResponse } from "@/entities/chat-session/model/types";
 import type { ThreadMessage } from "@/entities/chat-message/model/types";
-import type { PresentationProfile } from "@/entities/profile/model/types";
+import { normalizeProfileContext } from "@/entities/profile/model/profileContext";
+import type { FrontendProfileContext } from "@/entities/profile/model/types";
 import { adaptFrontendScenarioContext } from "@/entities/stylist-context/model/adapters";
 import type { FrontendScenarioContext } from "@/entities/stylist-context/model/types";
 import type { GenerationJobState } from "@/entities/generation-job/model/types";
@@ -23,7 +24,7 @@ export type PersistedStylistChatUiState = {
   lastUserActionType: string | null;
   lastVisualCtaShown: string | null;
   lastVisualCtaConfirmed: string | null;
-  presentationProfile: PresentationProfile;
+  profileContext: FrontendProfileContext;
 };
 
 function createUuidFallback() {
@@ -99,7 +100,11 @@ export function readPersistedStylistChatUiState(sessionId: string): PersistedSty
       lastVisualCtaShown: typeof parsed.lastVisualCtaShown === "string" ? parsed.lastVisualCtaShown : null,
       lastVisualCtaConfirmed:
         typeof parsed.lastVisualCtaConfirmed === "string" ? parsed.lastVisualCtaConfirmed : null,
-      presentationProfile: parsed.presentationProfile ?? {},
+      profileContext: normalizeProfileContext(
+        parsed.profileContext
+          ?? (parsed as Partial<{ presentationProfile: unknown }>).presentationProfile
+          ?? {},
+      ),
     });
     try {
       window.localStorage.setItem(getChatStateStorageKey(sessionId), JSON.stringify(prunedState));
@@ -205,6 +210,7 @@ export function prunePersistedStylistChatUiState(
     messages,
     activeJob,
     uploadedAsset,
+    profileContext: normalizeProfileContext(state.profileContext),
   };
 }
 
@@ -363,11 +369,11 @@ export function buildOptimisticDraftMessage(
 
   if (uploadedAsset) {
     return locale === "ru"
-      ? `Р¤РѕС‚Рѕ РІРµС‰Рё: ${uploadedAsset.original_filename}`
+      ? `Фото вещи: ${uploadedAsset.original_filename}`
       : `Item photo: ${uploadedAsset.original_filename}`;
   }
 
-  return locale === "ru" ? "РќСѓР¶РЅРѕ СѓС‚РѕС‡РЅРµРЅРёРµ РїРѕ РѕР±СЂР°Р·Сѓ" : "Need outfit guidance";
+  return locale === "ru" ? "Нужна рекомендация по образу" : "Need outfit guidance";
 }
 
 export function createOptimisticUserMessage({
@@ -415,19 +421,19 @@ export function getScenarioPlaceholder(
 
   if (context.pendingClarification) {
     return locale === "ru"
-      ? "РћС‚РІРµС‚СЊС‚Рµ РЅР° СѓС‚РѕС‡РЅРµРЅРёРµ СЃС‚РёР»РёСЃС‚Р°..."
+      ? "Ответьте на уточнение стилиста..."
       : "Answer the stylist follow-up...";
   }
 
   if (context.activeMode === "occasion_outfit") {
     return locale === "ru"
-      ? "РќР°РїСЂРёРјРµСЂ: РІРµС‡РµСЂРЅСЏСЏ РІС‹СЃС‚Р°РІРєР° СЃРѕРІСЂРµРјРµРЅРЅРѕРіРѕ РёСЃРєСѓСЃСЃС‚РІР° РѕСЃРµРЅСЊСЋ, С…РѕС‡Сѓ РІС‹РіР»СЏРґРµС‚СЊ РёРЅС‚РµР»Р»РµРєС‚СѓР°Р»СЊРЅРѕ Рё РЅРµРјРЅРѕРіРѕ СЃРјРµР»Рѕ"
+      ? "Например: вечерняя выставка современного искусства осенью, хочу выглядеть интеллектуально и немного смело"
       : "For example: an evening contemporary art exhibition in autumn, I want to look thoughtful and a little bold";
   }
 
   if (context.activeMode === "garment_matching") {
     return locale === "ru"
-      ? "РќР°РїСЂРёРјРµСЂ: С‚С‘РјРЅРѕ-СЃРёРЅСЏСЏ РґР¶РёРЅСЃРѕРІР°СЏ СЂСѓР±Р°С€РєР° oversize"
+      ? "Например: тёмно-синяя джинсовая рубашка oversize"
       : "For example: a dark indigo oversized denim shirt";
   }
 
@@ -438,7 +444,7 @@ export function getScenarioPlaceholder(
   }
 
   return locale === "ru"
-    ? "РћРїРёС€РёС‚Рµ РІРµС‰СЊ, СЃРѕР±С‹С‚РёРµ РёР»Рё Р¶РµР»Р°РµРјС‹Р№ СЃС‚РёР»СЊ..."
+    ? "Опишите вещь, событие или желаемый стиль..."
     : "Describe the garment, occasion, or style direction...";
 }
 
@@ -456,7 +462,7 @@ function getRussianScenarioPlaceholder(context: FrontendScenarioContext) {
   }
 
   if (context.activeMode === "garment_matching") {
-    return "Например: темно-синяя джинсовая рубашка oversize";
+    return "Например: тёмно-синяя джинсовая рубашка oversize";
   }
 
   if (context.activeMode === "style_exploration") {

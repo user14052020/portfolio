@@ -12,6 +12,8 @@ from app.application.reasoning.services import (
     ProfileAlignedFashionReasoningContextAssembler,
 )
 from app.application.knowledge.services.knowledge_bundle_builder import KnowledgeBundleBuilder
+from app.application.knowledge.services.knowledge_context_assembler import DefaultKnowledgeContextAssembler
+from app.application.knowledge.services.knowledge_providers_registry import DefaultKnowledgeProvidersRegistry
 from app.application.knowledge.services.knowledge_ranker import KnowledgeRanker
 from app.application.knowledge.services.knowledge_retrieval_service import DefaultKnowledgeRetrievalService
 from app.application.knowledge.use_cases.build_knowledge_query import BuildKnowledgeQueryUseCase
@@ -76,10 +78,12 @@ from app.infrastructure.knowledge.repositories.tailoring_principles_repository i
 from app.infrastructure.knowledge.search.knowledge_search_adapter import DefaultKnowledgeSearchAdapter
 from app.infrastructure.knowledge.occasion_knowledge_provider import StaticOccasionKnowledgeProvider
 from app.infrastructure.knowledge.garment_knowledge_provider import StaticGarmentKnowledgeProvider
+from app.infrastructure.knowledge.style_distilled_knowledge_provider import StyleDistilledKnowledgeProvider
 from app.infrastructure.llm.llm_garment_extractor import LLMGarmentExtractorAdapter
 from app.infrastructure.llm.llm_garment_reasoner import LLMGarmentReasonerAdapter
 from app.infrastructure.llm.llm_occasion_extractor import LLMOccasionExtractorAdapter
 from app.infrastructure.llm.llm_occasion_reasoner import LLMOccasionReasonerAdapter
+from app.infrastructure.llm.voice_composition_client import OpenAICompatibleVoiceCompositionClient
 from app.infrastructure.llm.vllm_router_client import VllmRouterClient
 from app.infrastructure.llm.vllm_reasoner import VLLMReasonerAdapter
 from app.infrastructure.observability.structured_event_logger import StructuredEventLogger
@@ -89,7 +93,14 @@ from app.infrastructure.persistence.style_history_provider import DatabaseStyleH
 from app.infrastructure.persistence.stylist_chat_context_store import SessionChatContextStore
 from app.infrastructure.queue.generation_job_scheduler import DefaultGenerationJobScheduler
 from app.infrastructure.search.static_knowledge_provider import StaticKnowledgeProvider
-from app.infrastructure.reasoning import StyleDistilledReasoningProvider
+from app.services.knowledge_runtime_settings import (
+    DatabaseKnowledgeRuntimeSettingsProvider,
+    KnowledgeRuntimeSettingsService,
+)
+from app.services.voice_runtime_settings import (
+    DatabaseVoiceRuntimeSettingsProvider,
+    VoiceRuntimeSettingsService,
+)
 
 
 def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchestrator:
@@ -133,23 +144,47 @@ def build_stylist_chat_orchestrator(session: AsyncSession) -> StylistChatOrchest
     garment_knowledge_provider = StaticGarmentKnowledgeProvider()
     occasion_knowledge_provider = StaticOccasionKnowledgeProvider()
     style_catalog_repository = DatabaseStyleCatalogRepository(session)
-    style_distilled_reasoning_provider = StyleDistilledReasoningProvider(
-        style_catalog_repository=style_catalog_repository,
+    style_distilled_knowledge_provider = StyleDistilledKnowledgeProvider(
+        projection_repository=style_catalog_repository,
+    )
+    knowledge_runtime_settings_service = KnowledgeRuntimeSettingsService()
+    knowledge_runtime_settings_provider = DatabaseKnowledgeRuntimeSettingsProvider(
+        session=session,
+        service=knowledge_runtime_settings_service,
+    )
+    voice_runtime_settings_service = VoiceRuntimeSettingsService()
+    voice_runtime_settings_provider = DatabaseVoiceRuntimeSettingsProvider(
+        session=session,
+        service=voice_runtime_settings_service,
+    )
+    voice_composition_client = OpenAICompatibleVoiceCompositionClient()
+    reasoning_knowledge_registry = DefaultKnowledgeProvidersRegistry(
+        providers=[style_distilled_knowledge_provider],
+        runtime_settings_provider=knowledge_runtime_settings_provider,
+    )
+    reasoning_knowledge_context_assembler = DefaultKnowledgeContextAssembler(
+        providers_registry=reasoning_knowledge_registry,
+        knowledge_card_ranker=knowledge_ranker,
     )
     reasoning_pipeline_decision_adapter = FashionReasoningPipelineDecisionAdapter(
         reasoning_pipeline=DefaultFashionReasoningPipeline(
             context_assembler=ProfileAlignedFashionReasoningContextAssembler(
                 context_assembler=DefaultFashionReasoningContextAssembler(
-                    knowledge_provider=style_distilled_reasoning_provider,
-                    style_facet_provider=style_distilled_reasoning_provider,
-                    semantic_fragment_provider=style_distilled_reasoning_provider,
+                    knowledge_context_assembler=reasoning_knowledge_context_assembler,
+                    knowledge_runtime_settings_provider=knowledge_runtime_settings_provider,
                 ),
                 alignment_service=DefaultProfileStyleAlignmentService(),
             ),
-            reasoner=DefaultFashionReasoner(),
+            reasoner=DefaultFashionReasoner(
+                knowledge_runtime_settings_provider=knowledge_runtime_settings_provider,
+            ),
             brief_builder=DefaultFashionBriefBuilder(),
         ),
         generation_request_builder=generation_request_builder,
+        knowledge_runtime_settings_provider=knowledge_runtime_settings_provider,
+        voice_runtime_settings_provider=voice_runtime_settings_provider,
+        voice_composition_client=voice_composition_client,
+        enable_model_voice_composition=True,
     )
     knowledge_retrieval_service = DefaultKnowledgeRetrievalService(
         style_catalog_repository=style_catalog_repository,

@@ -3,6 +3,7 @@ from typing import Any
 from app.application.prompt_building.services.fashion_reasoning_service import FashionReasoningInput
 from app.domain.knowledge.entities import KnowledgeBundle
 from app.domain.prompt_building.entities.fashion_brief import FashionBrief
+from app.domain.reasoning import ProfileContextSnapshot
 
 
 class FashionBriefBuilder:
@@ -112,6 +113,8 @@ class FashionBriefBuilder:
             diversity_constraints=dict(structured.get("diversity_constraints") or reasoning_input.diversity_constraints),
             visual_preset=self._optional_text(structured.get("visual_preset") or selected_style.get("visual_preset")),
             generation_intent="style_exploration",
+            profile_constraints=self._profile_constraints(reasoning_input),
+            profile_context_snapshot=self._profile_context_snapshot(reasoning_input),
             knowledge_cards=list(reasoning_input.knowledge_cards),
             metadata={
                 "style_id": selected_style.get("style_id"),
@@ -162,6 +165,8 @@ class FashionBriefBuilder:
             diversity_constraints=dict(reasoning_input.diversity_constraints),
             visual_preset=self._first_present(reasoning_input.visual_preset_candidates, default="editorial_studio"),
             generation_intent="garment_matching",
+            profile_constraints=self._profile_constraints(reasoning_input),
+            profile_context_snapshot=self._profile_context_snapshot(reasoning_input),
             knowledge_cards=list(reasoning_input.knowledge_cards),
             metadata={
                 "anchor_summary": anchor_summary,
@@ -202,6 +207,8 @@ class FashionBriefBuilder:
             diversity_constraints=dict(reasoning_input.diversity_constraints),
             visual_preset=self._resolve_occasion_preset(occasion_context),
             generation_intent="occasion_outfit",
+            profile_constraints=self._profile_constraints(reasoning_input),
+            profile_context_snapshot=self._profile_context_snapshot(reasoning_input),
             knowledge_cards=list(reasoning_input.knowledge_cards),
             metadata={
                 "composition_type": "occasion-led flat lay",
@@ -226,6 +233,8 @@ class FashionBriefBuilder:
             diversity_constraints=dict(reasoning_input.diversity_constraints),
             visual_preset=self._first_present(reasoning_input.visual_preset_candidates, default="editorial_studio"),
             generation_intent="general_advice",
+            profile_constraints=self._profile_constraints(reasoning_input),
+            profile_context_snapshot=self._profile_context_snapshot(reasoning_input),
             knowledge_cards=list(reasoning_input.knowledge_cards),
             metadata={
                 "style_id": self._optional_text(style_seed.get("slug")),
@@ -249,6 +258,7 @@ class FashionBriefBuilder:
         styling_notes = list(brief.styling_notes)
         composition_rules = list(brief.composition_rules)
         negative_constraints = list(brief.negative_constraints)
+        diversity_constraints = dict(brief.diversity_constraints)
         metadata = dict(brief.metadata)
         style_identity = brief.style_identity
         style_family = brief.style_family
@@ -377,6 +387,13 @@ class FashionBriefBuilder:
                 for material in self._extract_matching_tokens(text, self.MATERIAL_TOKENS):
                     if material not in materials:
                         materials.append(material)
+        if not color_logic and palette:
+            color_logic.append(f"build around {', '.join(palette[:3])}")
+        if brief.brief_mode == "style_exploration" and not diversity_constraints:
+            diversity_constraints = {
+                "anti_repeat_constraints": dict(reasoning_input.anti_repeat_constraints),
+                "previous_style_directions": list(reasoning_input.previous_style_directions),
+            }
         return brief.model_copy(
             update={
                 "style_identity": style_identity,
@@ -384,6 +401,7 @@ class FashionBriefBuilder:
                 "historical_reference": historical_reference[:4],
                 "tailoring_logic": tailoring_logic[:5],
                 "color_logic": color_logic[:5],
+                "diversity_constraints": diversity_constraints,
                 "garment_list": garment_list[:8],
                 "palette": palette[:6],
                 "materials": materials[:6],
@@ -492,6 +510,47 @@ class FashionBriefBuilder:
             value = str(value)
         cleaned = value.strip()
         return cleaned or None
+
+    def _profile_constraints(self, reasoning_input: FashionReasoningInput) -> dict[str, Any]:
+        snapshot = self._profile_context_snapshot_model(reasoning_input)
+        if snapshot is None or not snapshot.present:
+            return {}
+        constraints = {
+            "presentation_profile": snapshot.presentation_profile,
+            "fit_preferences": list(snapshot.fit_preferences),
+            "silhouette_preferences": list(snapshot.silhouette_preferences),
+            "comfort_preferences": list(snapshot.comfort_preferences),
+            "formality_preferences": list(snapshot.formality_preferences),
+            "color_preferences": list(snapshot.color_preferences),
+            "color_avoidances": list(snapshot.color_avoidances),
+            "preferred_items": list(snapshot.preferred_items),
+            "avoided_items": list(snapshot.avoided_items),
+        }
+        return {key: value for key, value in constraints.items() if value}
+
+    def _profile_context_snapshot(self, reasoning_input: FashionReasoningInput) -> dict[str, Any] | None:
+        snapshot = self._profile_context_snapshot_model(reasoning_input)
+        if snapshot is None:
+            return None
+        return {
+            "present": snapshot.present,
+            "source": snapshot.source,
+            "values": dict(snapshot.values),
+            **self._profile_constraints(reasoning_input),
+        }
+
+    def _profile_context_snapshot_model(
+        self,
+        reasoning_input: FashionReasoningInput,
+    ) -> ProfileContextSnapshot | None:
+        if reasoning_input.profile_context_snapshot is not None:
+            return reasoning_input.profile_context_snapshot
+        if isinstance(reasoning_input.profile_context, dict) and reasoning_input.profile_context:
+            try:
+                return ProfileContextSnapshot.model_validate(reasoning_input.profile_context)
+            except Exception:
+                return None
+        return None
 
     def _string_list(self, values: Any) -> list[str]:
         if values is None:

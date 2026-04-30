@@ -3,24 +3,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.knowledge.services.knowledge_bundle_builder import KnowledgeBundleBuilder
+from app.application.knowledge.services.knowledge_context_assembler import DefaultKnowledgeContextAssembler
+from app.application.knowledge.services.knowledge_providers_registry import DefaultKnowledgeProvidersRegistry
 from app.application.knowledge.services.knowledge_ranker import KnowledgeRanker
-from app.application.knowledge.services.knowledge_retrieval_service import DefaultKnowledgeRetrievalService
-from app.application.knowledge.use_cases.build_knowledge_query import BuildKnowledgeQueryUseCase
-from app.application.knowledge.use_cases.resolve_knowledge_bundle import ResolveKnowledgeBundleUseCase
+from app.application.knowledge.use_cases import PreviewKnowledgeRetrievalUseCase
 from app.application.prompt_building.services.prompt_pipeline_builder import PromptPipelineBuilder
 from app.application.stylist_chat.contracts.command import ChatCommand
-from app.api.deps import get_optional_current_user
+from app.api.deps import get_optional_current_user, require_admin
 from app.db.session import get_db_session
 from app.domain.chat_context import ChatModeContext
-from app.infrastructure.knowledge.caches.knowledge_cache import InMemoryKnowledgeCache
-from app.infrastructure.knowledge.repositories.color_theory_repository import DatabaseColorTheoryRepository
-from app.infrastructure.knowledge.repositories.fashion_history_repository import DatabaseFashionHistoryRepository
-from app.infrastructure.knowledge.repositories.flatlay_patterns_repository import DatabaseFlatlayPatternsRepository
-from app.infrastructure.knowledge.repositories.materials_fabrics_repository import DatabaseMaterialsFabricsRepository
 from app.infrastructure.knowledge.repositories.style_catalog_repository import DatabaseStyleCatalogRepository
-from app.infrastructure.knowledge.repositories.tailoring_principles_repository import DatabaseTailoringPrinciplesRepository
-from app.infrastructure.knowledge.search.knowledge_search_adapter import DefaultKnowledgeSearchAdapter
+from app.infrastructure.knowledge.style_distilled_knowledge_provider import StyleDistilledKnowledgeProvider
 from app.models import User
 from app.schemas.stylist import (
     ChatHistoryPageRead,
@@ -32,6 +25,10 @@ from app.schemas.stylist import (
     StylistMessageRequest,
     StylistMessageResponse,
     StylistVisualizationRequest,
+)
+from app.services.knowledge_runtime_settings import (
+    DatabaseKnowledgeRuntimeSettingsProvider,
+    KnowledgeRuntimeSettingsService,
 )
 from app.services.stylist_conversational import stylist_service
 from app.services.client_request_meta import client_request_meta_resolver
@@ -153,22 +150,31 @@ async def preview_prompt_pipeline(
 @router.post("/debug/knowledge-preview", response_model=KnowledgePreviewResponse)
 async def preview_knowledge_bundle(
     payload: KnowledgePreviewRequest,
+    _: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> KnowledgePreviewResponse:
     style_catalog_repository = DatabaseStyleCatalogRepository(session)
-    retrieval_service = DefaultKnowledgeRetrievalService(
-        style_catalog_repository=style_catalog_repository,
-        color_theory_repository=DatabaseColorTheoryRepository(style_catalog_repository=style_catalog_repository),
-        fashion_history_repository=DatabaseFashionHistoryRepository(style_catalog_repository=style_catalog_repository),
-        tailoring_principles_repository=DatabaseTailoringPrinciplesRepository(style_catalog_repository=style_catalog_repository),
-        materials_fabrics_repository=DatabaseMaterialsFabricsRepository(style_catalog_repository=style_catalog_repository),
-        flatlay_patterns_repository=DatabaseFlatlayPatternsRepository(style_catalog_repository=style_catalog_repository),
-        knowledge_ranker=KnowledgeRanker(),
-        knowledge_bundle_builder=KnowledgeBundleBuilder(),
-        knowledge_search_adapter=DefaultKnowledgeSearchAdapter(),
-        knowledge_cache=InMemoryKnowledgeCache(),
+    runtime_settings_provider = DatabaseKnowledgeRuntimeSettingsProvider(
+        session=session,
+        service=KnowledgeRuntimeSettingsService(),
     )
-    query = BuildKnowledgeQueryUseCase().execute(
+    providers_registry = DefaultKnowledgeProvidersRegistry(
+        providers=[
+            StyleDistilledKnowledgeProvider(
+                projection_repository=style_catalog_repository,
+            )
+        ],
+        runtime_settings_provider=runtime_settings_provider,
+    )
+    knowledge_context_assembler = DefaultKnowledgeContextAssembler(
+        providers_registry=providers_registry,
+        knowledge_card_ranker=KnowledgeRanker(),
+    )
+    preview = await PreviewKnowledgeRetrievalUseCase(
+        knowledge_context_assembler=knowledge_context_assembler,
+        providers_registry=providers_registry,
+        runtime_settings_provider=runtime_settings_provider,
+    ).execute(
         command=ChatCommand(
             session_id=payload.session_id,
             locale=payload.locale,
@@ -187,11 +193,38 @@ async def preview_knowledge_bundle(
         occasion_context=payload.occasion_context,
         diversity_constraints=payload.diversity_constraints,
         limit=payload.limit,
+        query_overrides={
+            "style_ids": list(payload.style_ids),
+            "style_families": list(payload.style_families),
+            "eras": list(payload.eras),
+            "retrieval_profile": payload.retrieval_profile,
+            "need_visual_knowledge": payload.need_visual_knowledge,
+            "need_historical_knowledge": payload.need_historical_knowledge,
+            "need_styling_rules": payload.need_styling_rules,
+            "need_color_poetics": payload.need_color_poetics,
+            "user_request": payload.user_request,
+        },
     )
-    bundle = await ResolveKnowledgeBundleUseCase(
-        knowledge_retrieval_service=retrieval_service,
-    ).execute(query=query)
     return KnowledgePreviewResponse(
-        knowledge_query=query.model_dump(mode="json"),
-        knowledge_bundle=bundle.model_dump(mode="json"),
+        knowledge_query=preview.knowledge_query.model_dump(mode="json"),
+        knowledge_context=preview.knowledge_context.model_dump(mode="json"),
+        knowledge_context_counts=preview.knowledge_context.counts(),
+        knowledge_observability=dict(preview.knowledge_context.observability),
+        knowledge_runtime={
+            "runtime_flags": preview.runtime_flags.model_dump(mode="json"),
+            "provider_priorities": dict(preview.provider_priorities),
+            "enabled_runtime_providers": [
+                {
+                    "code": item.code,
+                    "name": item.name,
+                    "provider_type": item.provider_type,
+                    "priority": preview.provider_priorities.get(
+                        item.code.strip().lower(),
+                        item.priority,
+                    ),
+                    "runtime_roles": list(item.runtime_roles),
+                }
+                for item in preview.enabled_runtime_providers
+            ],
+        },
     )

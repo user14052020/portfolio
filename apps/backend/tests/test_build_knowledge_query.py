@@ -6,17 +6,23 @@ from app.domain.chat_context import ChatModeContext
 
 
 class BuildKnowledgeQueryUseCaseTests(unittest.TestCase):
-    def test_style_exploration_query_carries_style_and_diversity_context(self) -> None:
+    def test_style_exploration_query_carries_normalized_merged_profile_context(self) -> None:
         query = BuildKnowledgeQueryUseCase().execute(
             command=ChatCommand(
                 session_id="stage8-style-1",
                 locale="en",
                 message="Try another direction",
-                profile_context={"gender": "female"},
+                profile_context={"fit": "relaxed"},
+                metadata={"persistent_profile_context": {"height_cm": 176}},
             ),
             context=ChatModeContext(
                 current_style_id="soft-retro-prep",
                 current_style_name="Soft Retro Prep",
+                session_profile_context={
+                    "presentation_profile": "androgynous",
+                    "preferred_items": ["long coat"],
+                },
+                profile_recent_updates={"avoid_items": ["heels"]},
             ),
             mode="style_exploration",
             intent="style_exploration",
@@ -30,7 +36,20 @@ class BuildKnowledgeQueryUseCaseTests(unittest.TestCase):
         self.assertEqual(query.style_id, "soft-retro-prep")
         self.assertEqual(query.style_name, "Soft Retro Prep")
         self.assertEqual(query.diversity_constraints["avoid_palette"], ["camel", "cream"])
-        self.assertEqual(query.profile_context["gender"], "female")
+        self.assertEqual(
+            query.profile_context,
+            {
+                "presentation_profile": "androgynous",
+                "fit_preferences": ["relaxed"],
+                "preferred_items": ["long coat"],
+                "avoided_items": ["heels"],
+                "fit": "relaxed",
+                "fit_preference": "relaxed",
+                "favorite_items": ["long coat"],
+                "avoid_items": ["heels"],
+                "height_cm": 176,
+            },
+        )
         self.assertEqual(query.limit, 8)
 
     def test_garment_query_uses_anchor_garment_and_message(self) -> None:

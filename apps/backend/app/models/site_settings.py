@@ -49,3 +49,18 @@ class SiteSettings(Base, TimestampedMixin):
         default=DEFAULT_TRY_OTHER_STYLE_COOLDOWN_SECONDS,
         nullable=False,
     )
+    knowledge_runtime_flags_json: Mapped[dict[str, bool]] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    knowledge_provider_priorities_json: Mapped[dict[str, int]] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    voice_runtime_flags_json: Mapped[dict[str, bool]] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )

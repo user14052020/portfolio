@@ -26,6 +26,7 @@ from app.application.stylist_chat.contracts.ports import (
 from app.application.stylist_chat.results.decision_result import DecisionResult, DecisionType, GenerationPayload
 from app.domain.chat_context import ChatModeContext, GenerationIntent, OccasionContext
 from app.domain.chat_modes import ChatMode, FlowState
+from app.domain.reasoning import ProfileContextSnapshot
 
 from .constants import GENERATION_HINTS
 from .style_prompt_compiler import StylePromptCompiler
@@ -57,8 +58,14 @@ class GenerationRequestBuilder:
         knowledge_cards: list[dict[str, Any]] | None = None,
         knowledge_bundle: dict[str, Any] | None = None,
         knowledge_provider_used: str | None = None,
+        profile_context_snapshot: ProfileContextSnapshot | None = None,
     ) -> DecisionResult:
         text_reply = reasoning_output.reply_text.strip()
+        profile_context = self._profile_context_for_handoff(
+            raw_profile_context=command.profile_context,
+            profile_context_snapshot=profile_context_snapshot,
+        )
+        profile_snapshot_payload = self._profile_context_snapshot_payload(profile_context_snapshot)
         generation_decision = await self.generation_policy_service.decide(
             GenerationPolicyInput(
                 command=command,
@@ -89,7 +96,8 @@ class GenerationRequestBuilder:
                     "image_brief_en": image_brief_en,
                     "recommendation_text": text_reply,
                     "asset_id": asset_id,
-                    "profile_context": command.profile_context,
+                    "profile_context": profile_context,
+                    "profile_context_snapshot": profile_snapshot_payload,
                     "style_seed": style_seed,
                     "previous_style_directions": previous_style_directions or [],
                     "anti_repeat_constraints": anti_repeat_constraints or {},
@@ -194,6 +202,13 @@ class GenerationRequestBuilder:
         for key in ("usage_subject_id", "usage_session_id", "usage_user_id", "usage_is_admin"):
             if key in command.metadata and key not in schedule_metadata:
                 schedule_metadata[key] = command.metadata[key]
+        profile_context = self._scheduled_profile_context(
+            raw_profile_context=command.profile_context,
+            metadata_sources=[
+                generation_payload.metadata,
+                generation_payload.generation_metadata,
+            ],
+        )
         return GenerationScheduleRequest(
             session_id=command.session_id,
             locale=command.locale,
@@ -202,7 +217,7 @@ class GenerationRequestBuilder:
             prompt=generation_payload.prompt,
             negative_prompt=generation_payload.negative_prompt,
             input_asset_id=generation_payload.input_asset_id,
-            profile_context=command.profile_context,
+            profile_context=profile_context,
             generation_intent=generation_payload.generation_intent,
             idempotency_key=command.build_generation_idempotency_key(active_mode=context.active_mode),
             workflow_name=generation_payload.metadata.get("workflow_name"),
@@ -212,6 +227,57 @@ class GenerationRequestBuilder:
             metadata=schedule_metadata,
             request_metadata=dict(command.request_metadata),
         )
+
+    def _profile_context_for_handoff(
+        self,
+        *,
+        raw_profile_context: dict[str, Any] | None,
+        profile_context_snapshot: ProfileContextSnapshot | None,
+    ) -> dict[str, Any]:
+        if profile_context_snapshot is not None and profile_context_snapshot.present:
+            return dict(profile_context_snapshot.values)
+        if not isinstance(raw_profile_context, dict):
+            return {}
+        return {key: value for key, value in raw_profile_context.items() if value is not None}
+
+    def _profile_context_snapshot_payload(
+        self,
+        profile_context_snapshot: ProfileContextSnapshot | None,
+    ) -> dict[str, Any] | None:
+        if profile_context_snapshot is None:
+            return None
+        return {
+            "present": profile_context_snapshot.present,
+            "source": profile_context_snapshot.source,
+            "values": dict(profile_context_snapshot.values),
+            "presentation_profile": profile_context_snapshot.presentation_profile,
+            "fit_preferences": list(profile_context_snapshot.fit_preferences),
+            "silhouette_preferences": list(profile_context_snapshot.silhouette_preferences),
+            "comfort_preferences": list(profile_context_snapshot.comfort_preferences),
+            "formality_preferences": list(profile_context_snapshot.formality_preferences),
+            "color_preferences": list(profile_context_snapshot.color_preferences),
+            "color_avoidances": list(profile_context_snapshot.color_avoidances),
+            "preferred_items": list(profile_context_snapshot.preferred_items),
+            "avoided_items": list(profile_context_snapshot.avoided_items),
+        }
+
+    def _scheduled_profile_context(
+        self,
+        *,
+        raw_profile_context: dict[str, Any] | None,
+        metadata_sources: list[dict[str, Any] | None],
+    ) -> dict[str, Any]:
+        for metadata in metadata_sources:
+            if not isinstance(metadata, dict):
+                continue
+            snapshot = metadata.get("profile_context_snapshot")
+            if isinstance(snapshot, dict):
+                values = snapshot.get("values")
+                if isinstance(values, dict):
+                    return dict(values)
+        if not isinstance(raw_profile_context, dict):
+            return {}
+        return dict(raw_profile_context)
 
     def build_clarification_decision(self, *, context: ChatModeContext, text: str) -> DecisionResult:
         return DecisionResult(
@@ -311,8 +377,12 @@ class GenerationRequestBuilder:
         return any(keyword in lowered for keyword in GENERATION_HINTS)
 
     def _looks_like_fashion_brief(self, value: dict[str, Any]) -> bool:
-        return any(key in value for key in ("brief_mode", "style_identity", "style_direction")) and any(
-            key in value for key in ("garment_list", "hero_garments", "palette", "composition_rules")
+        return any(
+            self._fashion_brief_value_present(value.get(key))
+            for key in ("brief_mode", "style_identity", "style_direction")
+        ) and any(
+            self._fashion_brief_value_present(value.get(key))
+            for key in ("garment_list", "hero_garments", "palette", "composition_rules")
         )
 
     def _resolve_generation_trigger(self, *, command: ChatCommand, context: ChatModeContext) -> str:
@@ -330,6 +400,16 @@ class GenerationRequestBuilder:
             if locale == "ru"
             else "This conversation became too long for the current step. Try a shorter request or start a new flow."
         )
+
+
+    def _fashion_brief_value_present(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, tuple, set, dict)):
+            return bool(value)
+        return True
 
 
 class DefaultPromptBuilder:

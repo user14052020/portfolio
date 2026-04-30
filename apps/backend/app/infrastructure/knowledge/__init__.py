@@ -8,6 +8,7 @@ from .repositories import (
     DatabaseTailoringPrinciplesRepository,
 )
 from .search import DefaultKnowledgeSearchAdapter
+from .style_distilled_knowledge_provider import StyleDistilledKnowledgeProvider
 
 __all__ = [
     "DatabaseStyleCatalogRepository",
@@ -18,4 +19,5 @@ __all__ = [
     "DatabaseFlatlayPatternsRepository",
     "DefaultKnowledgeSearchAdapter",
     "InMemoryKnowledgeCache",
+    "StyleDistilledKnowledgeProvider",
 ]

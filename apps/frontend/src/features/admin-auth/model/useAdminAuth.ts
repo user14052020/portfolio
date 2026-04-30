@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { getCurrentUser, loginAdmin } from "@/shared/api/client";
+import { getCurrentUser, loginAdmin } from "@/shared/api/browser-client";
 import type { TokenPair, User } from "@/shared/api/types";
 import { browserAdminTokenStore } from "@/shared/auth/adminTokenStore";
 

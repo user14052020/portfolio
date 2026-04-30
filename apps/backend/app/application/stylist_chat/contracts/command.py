@@ -20,7 +20,7 @@ class ChatCommand(BaseModel):
     command_id: str | None = None
     correlation_id: str | None = None
     user_message_id: int | None = None
-    profile_context: dict[str, str | int | None] = Field(default_factory=dict)
+    profile_context: dict[str, Any] = Field(default_factory=dict)
     asset_metadata: dict[str, Any] = Field(default_factory=dict)
     fallback_history: list[dict[str, str]] = Field(default_factory=list)
 

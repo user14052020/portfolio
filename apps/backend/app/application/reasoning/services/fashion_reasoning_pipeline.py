@@ -65,16 +65,21 @@ class DefaultFashionReasoningPipeline:
             reasoning_output=reasoning_output,
         )
         generation_ready = reasoning_output.response_type == "generation_ready" and reasoning_input.can_generate_now
-        observability = _pipeline_observability(
-            reasoning_input=reasoning_input,
-            reasoning_output=reasoning_output,
-            fashion_brief_built=True,
-            generation_ready=generation_ready,
-        )
-        return reasoning_output.model_copy(
+        final_output = reasoning_output.model_copy(
             update={
                 "fashion_brief": brief,
                 "generation_ready": generation_ready,
+            },
+            deep=True,
+        )
+        observability = _pipeline_observability(
+            reasoning_input=reasoning_input,
+            reasoning_output=final_output,
+            fashion_brief_built=True,
+            generation_ready=generation_ready,
+        )
+        return final_output.model_copy(
+            update={
                 "reasoning_metadata": ReasoningMetadata.from_observability(observability),
                 "observability": observability,
             },
@@ -91,6 +96,7 @@ def _pipeline_observability(
 ) -> dict[str, object]:
     return {
         **reasoning_output.observability,
+        **dict(reasoning_input.knowledge_context.observability),
         "routing_mode": reasoning_input.mode,
         "retrieval_profile": reasoning_input.retrieval_profile,
         "used_providers": list(reasoning_input.knowledge_context.providers_used),
@@ -101,5 +107,7 @@ def _pipeline_observability(
         "fashion_brief_built": fashion_brief_built,
         "cta_offered": reasoning_output.can_offer_visualization,
         "generation_ready": generation_ready,
+        "generation_blocked_reason": reasoning_output.generation_blocked_reason(),
+        **reasoning_output.signal_counts(),
         **reasoning_input.observability_counts(),
     }

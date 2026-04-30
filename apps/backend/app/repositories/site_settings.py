@@ -9,6 +9,7 @@ from app.domain.stylist_runtime_settings import (
     DEFAULT_MESSAGE_COOLDOWN_SECONDS,
     DEFAULT_TRY_OTHER_STYLE_COOLDOWN_SECONDS,
 )
+from app.domain.knowledge_runtime_settings import DEFAULT_KNOWLEDGE_PROVIDER_PRIORITIES
 from app.models import SiteSettings
 from app.repositories.base import BaseRepository
 
@@ -37,6 +38,9 @@ def build_default_site_settings_payload() -> dict[str, Any]:
         "daily_chat_seconds_limit_non_admin": DEFAULT_DAILY_CHAT_SECONDS_LIMIT_NON_ADMIN,
         "message_cooldown_seconds": DEFAULT_MESSAGE_COOLDOWN_SECONDS,
         "try_other_style_cooldown_seconds": DEFAULT_TRY_OTHER_STYLE_COOLDOWN_SECONDS,
+        "knowledge_runtime_flags_json": {},
+        "knowledge_provider_priorities_json": dict(DEFAULT_KNOWLEDGE_PROVIDER_PRIORITIES),
+        "voice_runtime_flags_json": {},
     }
 
 

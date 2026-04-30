@@ -63,6 +63,10 @@ class ChatModeContext(BaseModel):
     last_decision_type: str | None = None
     generation_intent: GenerationIntent | None = None
     visualization_offer: VisualizationOffer | None = None
+    session_profile_context: dict[str, Any] = Field(default_factory=dict)
+    profile_context_snapshot: dict[str, Any] | None = None
+    profile_recent_updates: dict[str, Any] = Field(default_factory=dict)
+    profile_completeness_state: str | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_by_message_id: int | None = None
 
@@ -107,5 +111,13 @@ class ChatModeContext(BaseModel):
             conversation_memory=[item.model_copy(deep=True) for item in self.conversation_memory[-MAX_CONVERSATION_MEMORY:]],
             command_context=command_context,
             visualization_offer=None,
+            session_profile_context=dict(self.session_profile_context),
+            profile_context_snapshot=(
+                dict(self.profile_context_snapshot)
+                if isinstance(self.profile_context_snapshot, dict)
+                else None
+            ),
+            profile_recent_updates=dict(self.profile_recent_updates),
+            profile_completeness_state=self.profile_completeness_state,
             updated_at=datetime.now(timezone.utc),
         )

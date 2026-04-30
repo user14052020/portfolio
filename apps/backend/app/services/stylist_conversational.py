@@ -35,6 +35,8 @@ from app.services.chat_context_store import chat_context_store
 from app.services.client_request_meta import ClientRequestMeta
 from app.services.generation import generation_service
 from app.services.interaction_throttle import InteractionThrottleService
+from app.services.profile_context_payloads import merge_profile_context_sources
+from app.services.profile_session_state import ProfileSessionStateService
 from app.services.stylist_orchestrator import build_stylist_chat_orchestrator
 from app.services.usage_access_policy import UsageAccessPolicyService
 
@@ -46,10 +48,12 @@ class StylistService:
         usage_access_policy_service: UsageAccessPolicyService | None = None,
         interaction_throttle_service: InteractionThrottleService | None = None,
         runtime_policy_observability: RuntimePolicyObservability | None = None,
+        profile_session_state_service: ProfileSessionStateService | None = None,
     ) -> None:
         self.usage_access_policy_service = usage_access_policy_service or UsageAccessPolicyService()
         self.interaction_throttle_service = interaction_throttle_service or InteractionThrottleService()
         self.runtime_policy_observability = runtime_policy_observability or RuntimePolicyObservability()
+        self.profile_session_state_service = profile_session_state_service or ProfileSessionStateService()
 
     async def process_message(
         self,
@@ -62,6 +66,11 @@ class StylistService:
         locale = "ru" if payload.locale == "ru" else "en"
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
         context = await self._sync_context_generation_state(session, context)
+        profile_session_state = await self.profile_session_state_service.resolve(
+            context=context,
+            explicit_profile_context=payload.profile_context,
+            metadata=payload.metadata,
+        )
         usage_subject = self.usage_access_policy_service.build_subject(
             current_user=current_user,
             session_id=payload.session_id,
@@ -125,6 +134,16 @@ class StylistService:
             surface="stylist_message",
         )
         self._raise_for_throttle_denial(decision=throttle_decision, locale=locale)
+        derived_profile_context = self._collect_profile_context(
+            messages=recent_messages_before,
+            explicit_gender=self._normalize_gender(payload.profile_gender),
+            explicit_height_cm=payload.body_height_cm,
+            explicit_weight_kg=payload.body_weight_kg,
+        )
+        profile_context = self._build_runtime_profile_context(
+            session_profile_context=profile_session_state.session_profile_context,
+            derived_profile_context=derived_profile_context,
+        )
 
         user_message = await chat_messages_repository.create(
             session,
@@ -146,6 +165,10 @@ class StylistService:
                     "profile_gender": self._normalize_gender(payload.profile_gender),
                     "body_height_cm": payload.body_height_cm,
                     "body_weight_kg": payload.body_weight_kg,
+                    "profile_context": dict(profile_context),
+                    "session_profile_context": dict(profile_session_state.session_profile_context),
+                    "profile_context_snapshot": profile_session_state.profile_context_snapshot,
+                    "profile_recent_updates": dict(profile_session_state.profile_recent_updates),
                     "asset_id": payload.asset_id or payload.uploaded_asset_id,
                     "throttle_action_type": throttle_action_type,
                     **self.usage_access_policy_service.subject_to_metadata(usage_subject),
@@ -159,12 +182,6 @@ class StylistService:
             limit=20,
             created_at_from=retention_cutoff,
         )
-        profile_context = self._collect_profile_context(
-            messages=recent_messages,
-            explicit_gender=self._normalize_gender(payload.profile_gender),
-            explicit_height_cm=payload.body_height_cm,
-            explicit_weight_kg=payload.body_weight_kg,
-        )
         command = ChatCommand(
             session_id=payload.session_id,
             locale=locale,
@@ -175,6 +192,9 @@ class StylistService:
             asset_id=payload.asset_id or payload.uploaded_asset_id,
             metadata={
                 **payload.metadata,
+                "session_profile_context": dict(profile_session_state.session_profile_context),
+                "profile_context_snapshot": profile_session_state.profile_context_snapshot,
+                "profile_recent_updates": dict(profile_session_state.profile_recent_updates),
                 **self.usage_access_policy_service.subject_to_metadata(usage_subject),
             },
             client_message_id=resolved_client_message_id,
@@ -242,6 +262,11 @@ class StylistService:
             )
 
         context.remember(role="assistant", content=assistant_text)
+        self._apply_profile_session_state(
+            context=context,
+            profile_session_state=profile_session_state,
+            decision_telemetry=decision.telemetry,
+        )
         context.touch(message_id=assistant_message.id)
         session_state_record = await chat_context_store.save(
             session,
@@ -285,6 +310,11 @@ class StylistService:
         locale = "ru" if payload.locale == "ru" else "en"
         session_state_record, context = await chat_context_store.load(session, payload.session_id)
         context = await self._sync_context_generation_state(session, context)
+        profile_session_state = await self.profile_session_state_service.resolve(
+            context=context,
+            explicit_profile_context=payload.profile_context,
+            metadata=payload.metadata,
+        )
         usage_subject = self.usage_access_policy_service.build_subject(
             current_user=current_user,
             session_id=payload.session_id,
@@ -343,8 +373,21 @@ class StylistService:
             **payload.metadata,
             "source": source,
             "visualization_type": payload.visualization_type,
+            "session_profile_context": dict(profile_session_state.session_profile_context),
+            "profile_context_snapshot": profile_session_state.profile_context_snapshot,
+            "profile_recent_updates": dict(profile_session_state.profile_recent_updates),
             **self.usage_access_policy_service.subject_to_metadata(usage_subject),
         }
+        derived_profile_context = self._collect_profile_context(
+            messages=recent_messages_before,
+            explicit_gender=None,
+            explicit_height_cm=None,
+            explicit_weight_kg=None,
+        )
+        profile_context = self._build_runtime_profile_context(
+            session_profile_context=profile_session_state.session_profile_context,
+            derived_profile_context=derived_profile_context,
+        )
 
         user_message = await chat_messages_repository.create(
             session,
@@ -365,6 +408,10 @@ class StylistService:
                     "source": source,
                     "asset_id": payload.asset_id or payload.uploaded_asset_id,
                     "visualization_type": payload.visualization_type,
+                    "profile_context": dict(profile_context),
+                    "session_profile_context": dict(profile_session_state.session_profile_context),
+                    "profile_context_snapshot": profile_session_state.profile_context_snapshot,
+                    "profile_recent_updates": dict(profile_session_state.profile_recent_updates),
                     "throttle_action_type": THROTTLE_ACTION_MESSAGE,
                     **self.usage_access_policy_service.subject_to_metadata(usage_subject),
                 },
@@ -376,12 +423,6 @@ class StylistService:
             payload.session_id,
             limit=20,
             created_at_from=retention_cutoff,
-        )
-        profile_context = self._collect_profile_context(
-            messages=recent_messages,
-            explicit_gender=None,
-            explicit_height_cm=None,
-            explicit_weight_kg=None,
         )
         command = ChatCommand(
             session_id=payload.session_id,
@@ -457,6 +498,11 @@ class StylistService:
             )
 
         context.remember(role="assistant", content=assistant_text)
+        self._apply_profile_session_state(
+            context=context,
+            profile_session_state=profile_session_state,
+            decision_telemetry=decision.telemetry,
+        )
         context.touch(message_id=assistant_message.id)
         session_state_record = await chat_context_store.save(
             session,
@@ -717,14 +763,14 @@ class StylistService:
             return
         if decision.action_type == THROTTLE_ACTION_TRY_OTHER_STYLE:
             message = (
-                "РџРѕРєР° РЅРµР»СЊР·СЏ СЃРЅРѕРІР° Р·Р°РїСѓСЃС‚РёС‚СЊ РїРѕРїС‹С‚РєСѓ СЃ РґСЂСѓРіРёРј СЃС‚РёР»РµРј. РџРѕРґРѕР¶РґРёС‚Рµ РЅРµРјРЅРѕРіРѕ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР°."
+                "Пока нельзя снова запустить попытку с другим стилем. Подождите немного и попробуйте снова."
                 if locale == "ru"
                 else "You can't try another style again yet. Please wait a moment and try again."
             )
             code = "try_other_style_cooldown"
         else:
             message = (
-                "РћС‚РїСЂР°РІР»СЏС‚СЊ РЅРѕРІС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ РјРѕР¶РЅРѕ РЅРµ С‡Р°С‰Рµ РѕРґРЅРѕРіРѕ СЂР°Р·Р° РІ РјРёРЅСѓС‚Сѓ. РџРѕРґРѕР¶РґРёС‚Рµ РЅРµРјРЅРѕРіРѕ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР°."
+                "Отправлять новые сообщения можно не чаще одного раза в минуту. Подождите немного и попробуйте снова."
                 if locale == "ru"
                 else "Messages can only be sent once per minute. Please wait a moment and try again."
             )
@@ -807,6 +853,49 @@ class StylistService:
 
     def _fallback_empty_reply(self, locale: str) -> str:
         return "Продолжаем." if locale == "ru" else "Let's continue."
+
+    def _merge_profile_context(
+        self,
+        *,
+        explicit_profile_context: dict[str, Any] | None,
+        derived_profile_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return merge_profile_context_sources(
+            explicit_profile_context=explicit_profile_context,
+            derived_profile_context=derived_profile_context,
+        )
+
+    def _build_runtime_profile_context(
+        self,
+        *,
+        session_profile_context: dict[str, Any] | None,
+        derived_profile_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return self._merge_profile_context(
+            explicit_profile_context=session_profile_context,
+            derived_profile_context=derived_profile_context,
+        )
+
+    def _apply_profile_session_state(
+        self,
+        *,
+        context: ChatModeContext,
+        profile_session_state,
+        decision_telemetry: dict[str, Any] | None,
+    ) -> None:
+        context.session_profile_context = dict(profile_session_state.session_profile_context)
+        context.profile_context_snapshot = (
+            dict(profile_session_state.profile_context_snapshot)
+            if isinstance(profile_session_state.profile_context_snapshot, dict)
+            else None
+        )
+        context.profile_recent_updates = dict(profile_session_state.profile_recent_updates)
+        context.profile_completeness_state = profile_session_state.profile_completeness_state
+        completeness_state = None
+        if isinstance(decision_telemetry, dict):
+            completeness_state = decision_telemetry.get("reasoning_profile_completeness_state")
+        if isinstance(completeness_state, str):
+            context.profile_completeness_state = completeness_state
 
     def _collect_profile_context(
         self,

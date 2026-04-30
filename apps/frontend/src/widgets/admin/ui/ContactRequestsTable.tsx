@@ -4,7 +4,7 @@ import { Select } from "@mantine/core";
 import { useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
-import { getContactRequests, updateContactRequest } from "@/shared/api/client";
+import { getContactRequests, updateContactRequest } from "@/shared/api/browser-client";
 import type { ContactRequest } from "@/shared/api/types";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";

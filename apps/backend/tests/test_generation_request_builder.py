@@ -6,10 +6,15 @@ from app.application.stylist_chat.results.decision_result import DecisionResult,
 from app.application.stylist_chat.services.generation_request_builder import GenerationRequestBuilder
 from app.domain.chat_context import ChatModeContext
 from app.domain.chat_modes import ChatMode, FlowState
+from app.domain.reasoning import ProfileContextSnapshot
 
 
 class FakePromptBuilder:
+    def __init__(self) -> None:
+        self.last_brief: dict[str, object] | None = None
+
     async def build(self, *, brief: dict[str, object]) -> dict[str, object]:
+        self.last_brief = dict(brief)
         mode = str(brief.get("mode") or "general_advice")
         workflow_name = {
             "garment_matching": "garment_matching_variation",
@@ -69,6 +74,12 @@ class FakePromptBuilder:
                 "visual_preset": visual_preset,
                 "layout_archetype": layout_archetype,
                 "background_family": background_family,
+                "profile_context_snapshot": brief.get("profile_context_snapshot"),
+                "profile_constraints": (
+                    brief.get("fashion_brief", {}) or {}
+                ).get("profile_constraints")
+                if isinstance(brief.get("fashion_brief"), dict)
+                else None,
             },
         }
 
@@ -237,3 +248,74 @@ class GenerationRequestBuilderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.decision_type, DecisionType.TEXT_AND_GENERATE)
         assert decision.generation_payload is not None
         self.assertEqual(decision.generation_payload.prompt, "prompt::black leather jacket outfit flat lay")
+
+    async def test_build_from_reasoning_passes_normalized_profile_snapshot_through_generation_handoff(self) -> None:
+        prompt_builder = FakePromptBuilder()
+        builder = GenerationRequestBuilder(prompt_builder=prompt_builder)
+        context = ChatModeContext(active_mode=ChatMode.STYLE_EXPLORATION, should_auto_generate=True)
+        profile_snapshot = ProfileContextSnapshot(
+            presentation_profile="androgynous",
+            fit_preferences=("relaxed",),
+            silhouette_preferences=("structured",),
+            preferred_items=("long coat",),
+            legacy_values={"height_cm": 172},
+            source="profile_context_service",
+        )
+
+        decision = await builder.build_from_reasoning(
+            command=ChatCommand(
+                session_id="profile-handoff-1",
+                locale="en",
+                message="Try another tailored direction",
+                profile_context={"presentation_profile": "feminine"},
+            ),
+            context=context,
+            reasoning_output=ReasoningOutput(
+                reply_text="Let's try a cleaner androgynous direction.",
+                image_brief_en="androgynous tailored flat lay",
+                route="text_and_generation",
+                provider="fake-vllm",
+            ),
+            asset_id=None,
+            must_generate=True,
+            style_seed=None,
+            previous_style_directions=[],
+            occasion_context=None,
+            anti_repeat_constraints={},
+            structured_outfit_brief={
+                "brief_mode": "style_exploration",
+                "style_identity": "Tailored Androgyny",
+                "garment_list": ["long coat", "wide trousers"],
+                "hero_garments": ["long coat"],
+                "palette": ["graphite"],
+                "composition_rules": ["clean spacing"],
+                "profile_constraints": {"presentation_profile": "androgynous"},
+            },
+            profile_context_snapshot=profile_snapshot,
+        )
+
+        assert prompt_builder.last_brief is not None
+        self.assertEqual(
+            prompt_builder.last_brief["profile_context"]["presentation_profile"],
+            "androgynous",
+        )
+        self.assertEqual(prompt_builder.last_brief["profile_context"]["height_cm"], 172)
+        self.assertEqual(
+            prompt_builder.last_brief["profile_context_snapshot"]["source"],
+            "profile_context_service",
+        )
+
+        request = builder.build_schedule_request(
+            command=ChatCommand(
+                session_id="profile-handoff-1",
+                locale="en",
+                message="Try another tailored direction",
+                profile_context={"presentation_profile": "feminine"},
+            ),
+            context=context,
+            decision=decision,
+        )
+
+        assert request is not None
+        self.assertEqual(request.profile_context["presentation_profile"], "androgynous")
+        self.assertEqual(request.profile_context["height_cm"], 172)

@@ -115,6 +115,23 @@ class RoutingContextBuilderTests(unittest.TestCase):
         self.assertTrue(router_context.last_visual_cta_offered)
         self.assertTrue(router_context.profile_context_present)
 
+    def test_build_context_treats_session_profile_sources_as_profile_hints(self) -> None:
+        command = ChatCommand(
+            session_id="s1",
+            message="show me more",
+            metadata={
+                "session_profile_context": {
+                    "presentation_profile": "androgynous",
+                    "fit_preferences": ["relaxed"],
+                }
+            },
+        )
+        context = ChatModeContext(active_mode=ChatMode.GENERAL_ADVICE)
+
+        router_context = self.builder.build_context(command=command, context=context)
+
+        self.assertTrue(router_context.profile_context_present)
+
 
 if __name__ == "__main__":
     unittest.main()

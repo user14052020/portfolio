@@ -193,11 +193,21 @@ test("admin parser timing settings uses premium surfaces and saves every timing 
 
 test("browser API requests reuse persisted admin token for runtime policy surfaces", () => {
   const base = readSource("shared/api/base.ts");
+  const envConfig = readSource("shared/config/env.ts");
+  const serverEnvConfig = readSource("shared/config/server-env.ts");
+  const serverBase = readSource("shared/api/server-base.ts");
   const tokenStore = readSource("shared/auth/adminTokenStore.ts");
   const adminAuth = readSource("features/admin-auth/model/useAdminAuth.ts");
 
   assert.match(base, /browserAdminTokenStore\.getAccessToken\(\)/);
   assert.match(base, /headers\.set\("Authorization", `Bearer \$\{storedToken\}`\)/);
+  assert.match(base, /BROWSER_API_BASE_PATH = \"\/api\/v1\"/);
+  assert.match(base, /Browser API client cannot be used on the server/);
+  assert.doesNotMatch(base, /NEXT_PUBLIC_API_URL|browserApiUrl|INTERNAL_API_URL/);
+  assert.doesNotMatch(envConfig, /NEXT_PUBLIC_API_URL/);
+  assert.doesNotMatch(envConfig, /process\.env\.INTERNAL_API_URL/);
+  assert.match(serverEnvConfig, /process\.env\.INTERNAL_API_URL/);
+  assert.match(serverBase, /requestFromServer/);
   assert.match(tokenStore, /ADMIN_TOKENS_STORAGE_KEY = "portfolio-admin-tokens"/);
   assert.match(adminAuth, /browserAdminTokenStore\.readTokenPair\(\)/);
   assert.match(adminAuth, /browserAdminTokenStore\.writeTokenPair\(nextTokens\)/);
@@ -421,7 +431,7 @@ test("local chat retention prunes messages images and active jobs older than ten
       lastUserActionType: null,
       lastVisualCtaShown: null,
       lastVisualCtaConfirmed: null,
-      presentationProfile: {},
+      profileContext: {},
     },
     now,
   );

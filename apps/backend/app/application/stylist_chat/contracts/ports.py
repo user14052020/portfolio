@@ -105,7 +105,7 @@ class GenerationScheduleRequest:
     prompt: str
     negative_prompt: str | None
     input_asset_id: int | None
-    profile_context: dict[str, str | int | None]
+    profile_context: dict[str, Any]
     generation_intent: GenerationIntent | None
     idempotency_key: str
     workflow_name: str | None = None

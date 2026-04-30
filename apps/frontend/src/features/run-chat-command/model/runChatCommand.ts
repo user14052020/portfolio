@@ -1,5 +1,7 @@
 import type { ChatResponse } from "@/entities/chat-session/model/types";
 import type { ChatCommandPayload, CommandName } from "@/entities/command/model/types";
+import { buildProfileRequestEnvelope } from "@/entities/profile/model/profileContext";
+import type { FrontendProfileContext } from "@/entities/profile/model/types";
 import { commandGateway, type CommandGateway } from "@/shared/api/gateways/commandGateway";
 import type { Locale } from "@/shared/api/types";
 
@@ -43,13 +45,17 @@ export function buildQuickActionCommandPayload({
   locale,
   action,
   clientMessageId,
+  profileContext = null,
 }: {
   sessionId: string;
   locale: Locale;
   action: QuickActionDefinition;
   assetId?: number | string | null;
   clientMessageId?: string;
+  profileContext?: FrontendProfileContext | null;
 }): ChatCommandPayload {
+  const profileEnvelope = buildProfileRequestEnvelope({ profileContext });
+
   return {
     sessionId,
     locale,
@@ -58,10 +64,12 @@ export function buildQuickActionCommandPayload({
     commandStep: action.commandStep,
     message: null,
     assetId: null,
+    profileContext: profileEnvelope.profileContext ?? null,
     metadata: {
       source: "quick_action",
       clientMessageId,
       uiLocale: locale,
+      ...profileEnvelope.metadata,
     },
   };
 }

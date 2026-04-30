@@ -102,9 +102,13 @@ class ReasoningContextBuilder:
         context: ChatModeContext,
         mode: str,
     ) -> dict[str, Any]:
+        profile_context = command.profile_context
         return {
             "mode": mode,
             "message": command.normalized_message(),
+            "profile_context": profile_context,
+            "body_height_cm": self._coerce_int(profile_context.get("height_cm")),
+            "body_weight_kg": self._coerce_int(profile_context.get("weight_kg")),
             "current_style_name": context.current_style_name,
             "anchor_garment": context.anchor_garment.model_dump(exclude_none=True) if context.anchor_garment else None,
             "occasion_context": context.occasion_context.model_dump(exclude_none=True) if context.occasion_context else None,

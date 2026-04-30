@@ -3,6 +3,13 @@ import test from "node:test";
 
 import { adaptChatResponse } from "@/entities/chat-session/model/adapters";
 import {
+  buildProfileClarificationSuggestions,
+  buildProfileRequestEnvelope,
+  extractProfileUpdateFromClarification,
+  mergeProfileContext,
+  normalizeProfileContext,
+} from "@/entities/profile/model/profileContext";
+import {
   buildQuickActionCommandPayload,
   getQuickActionDefinitions,
 } from "@/features/run-chat-command/model/runChatCommand";
@@ -29,6 +36,9 @@ test("style quick action builds a typed payload without asset coupling", () => {
     locale: "en",
     action,
     assetId: "asset-88",
+    profileContext: {
+      presentation_profile: "androgynous",
+    },
   });
 
   assert.equal(payload.requestedIntent, "style_exploration");
@@ -36,6 +46,12 @@ test("style quick action builds a typed payload without asset coupling", () => {
   assert.equal(payload.commandStep, "start");
   assert.equal(payload.message, null);
   assert.equal(payload.assetId, null);
+  assert.deepEqual(payload.profileContext, {
+    presentation_profile: "androgynous",
+  });
+  assert.deepEqual(payload.metadata?.session_profile_context, {
+    presentation_profile: "androgynous",
+  });
 });
 
 test("follow-up payload keeps source metadata and does not override mode locally", () => {
@@ -48,6 +64,139 @@ test("follow-up payload keeps source metadata and does not override mode locally
 
   assert.equal(payload.metadata?.source, "followup");
   assert.equal(payload.requestedIntent, undefined);
+});
+
+test("profile envelope ships normalized session profile and recent updates together", () => {
+  const envelope = buildProfileRequestEnvelope({
+    profileContext: {
+      presentation_profile: "androgynous",
+      comfort_preferences: ["balanced"],
+    },
+    recentUpdate: {
+      fit_preferences: ["relaxed"],
+    },
+  });
+
+  assert.deepEqual(envelope.profileContext, {
+    presentation_profile: "androgynous",
+    fit_preferences: ["relaxed"],
+    comfort_preferences: ["balanced"],
+  });
+  assert.deepEqual(envelope.metadata.session_profile_context, envelope.profileContext);
+  assert.deepEqual(envelope.metadata.profile_recent_updates, {
+    fit_preferences: ["relaxed"],
+  });
+});
+
+test("profile normalization preserves future extension fields", () => {
+  const normalized = normalizeProfileContext({
+    presentation_profile: "androgynous",
+    height_cm: 176,
+    wardrobe_constraints: {
+      avoid_micro_bags: true,
+    },
+  });
+
+  assert.deepEqual(normalized, {
+    presentation_profile: "androgynous",
+    height_cm: 176,
+    wardrobe_constraints: {
+      avoid_micro_bags: true,
+    },
+  });
+});
+
+test("profile envelope keeps extension-only profile fields", () => {
+  const envelope = buildProfileRequestEnvelope({
+    profileContext: {
+      height_cm: 176,
+    },
+    recentUpdate: {
+      wardrobe_constraints: {
+        avoid_micro_bags: true,
+      },
+    },
+  });
+
+  assert.deepEqual(envelope.profileContext, {
+    height_cm: 176,
+    wardrobe_constraints: {
+      avoid_micro_bags: true,
+    },
+  });
+  assert.deepEqual(envelope.metadata.session_profile_context, envelope.profileContext);
+  assert.deepEqual(envelope.metadata.profile_recent_updates, {
+    wardrobe_constraints: {
+      avoid_micro_bags: true,
+    },
+  });
+});
+
+test("profile clarification extraction recognizes silhouette follow-ups", () => {
+  const update = extractProfileUpdateFromClarification({
+    questionText: "Do you prefer a relaxed, fitted, or oversized silhouette for this look?",
+    answerText: "Oversized please",
+  });
+
+  assert.deepEqual(update, {
+    fit_preferences: ["oversized"],
+  });
+});
+
+test("profile clarification extraction recognizes universal presentation replies", () => {
+  const update = extractProfileUpdateFromClarification({
+    questionText:
+      "Which presentation direction should guide this look: feminine, masculine, androgynous, or universal?",
+    answerText: "Universal please",
+  });
+
+  assert.deepEqual(update, {
+    presentation_profile: "unisex",
+  });
+});
+
+test("profile clarification suggestions expose quick picks for profile questions", () => {
+  const suggestions = buildProfileClarificationSuggestions(
+    "en",
+    "Do you prefer a relaxed, fitted, or oversized silhouette for this look?",
+  );
+
+  assert.deepEqual(
+    suggestions.map((suggestion) => suggestion.label),
+    ["Relaxed", "Fitted", "Oversized"],
+  );
+});
+
+test("presentation clarification suggestions align with universal wording", () => {
+  const suggestions = buildProfileClarificationSuggestions(
+    "en",
+    "Which presentation direction should guide this look: feminine, masculine, androgynous, or universal?",
+  );
+
+  assert.deepEqual(
+    suggestions.map((suggestion) => suggestion.label),
+    ["Feminine", "Masculine", "Androgynous", "Universal"],
+  );
+});
+
+test("profile context merge keeps normalized persistent preferences", () => {
+  const merged = mergeProfileContext(
+    normalizeProfileContext({
+      presentation_profile: "feminine",
+      preferred_items: ["Blazer", "Blazer"],
+    }),
+    {
+      formality_preferences: ["smart casual"],
+      color_preferences: ["Navy", "navy"],
+    },
+  );
+
+  assert.deepEqual(merged, {
+    presentation_profile: "feminine",
+    formality_preferences: ["smart_casual"],
+    color_preferences: ["navy"],
+    preferred_items: ["blazer"],
+  });
 });
 
 test("composer uses follow-up mode only while a clarification is pending", () => {

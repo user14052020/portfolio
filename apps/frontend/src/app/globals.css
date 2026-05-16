@@ -72,7 +72,7 @@ h3,
 .font-display {
   font-family: var(--font-aa-stetica), sans-serif;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .font-display-italic {
@@ -84,7 +84,7 @@ h3,
 .font-g8-display {
   font-family: var(--font-g8-display), sans-serif;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 a {
@@ -166,4 +166,105 @@ body::-webkit-scrollbar-thumb:hover {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-soft-md);
+}
+
+.chair-stage {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  filter: drop-shadow(0 30px 38px rgba(0, 0, 0, 0.46));
+}
+
+.chair-back {
+  position: absolute;
+  left: 18%;
+  top: 4%;
+  height: 58%;
+  width: 64%;
+  transform: skewX(-12deg) rotate(-8deg);
+  border-radius: 44% 44% 38% 38%;
+  background:
+    linear-gradient(108deg, rgba(255, 255, 255, 0.24), transparent 28%),
+    repeating-linear-gradient(82deg, rgba(255, 255, 255, 0.07) 0 2px, transparent 2px 18px),
+    linear-gradient(135deg, #707277, #22252a 58%, #0e1013);
+}
+
+.chair-seat {
+  position: absolute;
+  left: 20%;
+  top: 48%;
+  height: 24%;
+  width: 62%;
+  transform: perspective(440px) rotateX(58deg) rotate(-5deg);
+  border-radius: 50% 50% 42% 42%;
+  background:
+    radial-gradient(circle at 45% 28%, rgba(255, 255, 255, 0.24), transparent 34%),
+    linear-gradient(135deg, #5c5f65, #17191d);
+}
+
+.chair-leg {
+  position: absolute;
+  top: 66%;
+  width: 7px;
+  height: 31%;
+  transform-origin: top center;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #8a5d2c, #3b2412);
+}
+
+.chair-leg-left {
+  left: 34%;
+  transform: rotate(16deg);
+}
+
+.chair-leg-right {
+  right: 31%;
+  transform: rotate(-18deg);
+}
+
+.chair-leg-back-left {
+  left: 42%;
+  height: 26%;
+  transform: rotate(-9deg);
+  opacity: 0.72;
+}
+
+.chair-leg-back-right {
+  right: 41%;
+  height: 26%;
+  transform: rotate(9deg);
+  opacity: 0.72;
+}
+
+.chair-mini {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.chair-mini::before {
+  content: "";
+  position: absolute;
+  left: 14%;
+  top: 12%;
+  height: 45%;
+  width: 64%;
+  transform: rotate(-10deg);
+  border-radius: 40% 40% 30% 30%;
+  background: linear-gradient(135deg, #7a7e84, #24272b);
+}
+
+.chair-mini::after {
+  content: "";
+  position: absolute;
+  left: 20%;
+  top: 50%;
+  height: 18%;
+  width: 58%;
+  transform: rotate(-6deg);
+  border-radius: 50%;
+  background: linear-gradient(135deg, #60646a, #191b1f);
+  box-shadow:
+    7px 17px 0 -6px #7a4f22,
+    24px 18px 0 -6px #7a4f22;
 }

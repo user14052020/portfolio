@@ -66,7 +66,7 @@ async def update_project(
     project = await projects_repository.get(session, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    data = {key: value for key, value in payload.model_dump().items() if value is not None}
+    data = {key: value for key, value in payload.model_dump(exclude_unset=True).items() if value is not None}
     if data.get("title_en") and not data.get("slug"):
         data["slug"] = build_slug(data["title_en"])
     project = await projects_repository.update(session, project, data)

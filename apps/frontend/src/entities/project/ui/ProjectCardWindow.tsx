@@ -69,7 +69,7 @@ export function ProjectCardWindow({
                 </PillBadge>
               ) : null}
             </div>
-            <h3 className="text-3xl font-semibold leading-tight tracking-[-0.03em] text-[var(--text-primary)]">
+            <h3 className="text-3xl font-semibold leading-tight tracking-normal text-[var(--text-primary)]">
               {pickLocalized(project, "title", locale)}
             </h3>
             <p className="text-sm leading-7 text-[var(--text-secondary)]">{pickLocalized(project, "summary", locale)}</p>

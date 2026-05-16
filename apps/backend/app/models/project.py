@@ -1,3 +1,5 @@
+from typing import Any
+
 from sqlalchemy import Boolean, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +20,7 @@ class Project(Base, TimestampedMixin):
     description_ru: Mapped[str] = mapped_column(Text)
     description_en: Mapped[str] = mapped_column(Text)
     stack: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    showcase_meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     cover_image: Mapped[str | None] = mapped_column(String(512), nullable=True)
     preview_video_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     repository_url: Mapped[str | None] = mapped_column(String(512), nullable=True)

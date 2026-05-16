@@ -385,6 +385,7 @@ export async function stopStyleIngestionWorker(token: string) {
 export async function loginAdmin(email: string, password: string) {
   return request<TokenPair>("/auth/login", {
     method: "POST",
+    useStoredAuth: false,
     body: JSON.stringify({ email, password })
   });
 }

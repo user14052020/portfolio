@@ -1,11 +1,12 @@
 "use client";
 
-import { Textarea, TextInput } from "@mantine/core";
+import { Select, Switch, Textarea, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
 import { getSiteSettings, updateSiteSettings } from "@/shared/api/client";
-import type { SiteSettings } from "@/shared/api/types";
+import type { HomepageContent, SiteSettings } from "@/shared/api/types";
+import { normalizeHomepageContent, showcaseVisualOptions } from "@/shared/config/homepageContent";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";
 import { SoftButton } from "@/shared/ui/SoftButton";
@@ -23,9 +24,13 @@ type SiteSettingsTextField = keyof Pick<
   | "hero_title_en"
   | "hero_subtitle_ru"
   | "hero_subtitle_en"
+  | "about_title_ru"
+  | "about_title_en"
   | "about_text_ru"
   | "about_text_en"
 >;
+
+type HomepageContentTextField = keyof Omit<HomepageContent, "hero_eyebrow_items" | "hero_preview">;
 
 export function SettingsManager() {
   const { tokens } = useAdminAuth();
@@ -41,7 +46,10 @@ export function SettingsManager() {
         if (cancelled) {
           return;
         }
-        setSettings(nextSettings);
+        setSettings({
+          ...nextSettings,
+          homepage_content: normalizeHomepageContent(nextSettings.homepage_content),
+        });
         setError(null);
       })
       .catch((nextError) => {
@@ -74,6 +82,72 @@ export function SettingsManager() {
     );
   }
 
+  function updateSocial(field: string, value: string) {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            socials: {
+              ...current.socials,
+              [field]: value,
+            },
+          }
+        : current
+    );
+  }
+
+  function updateHomepageEyebrowItems(value: string) {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            homepage_content: {
+              ...current.homepage_content,
+              hero_eyebrow_items: value
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean),
+            },
+          }
+        : current
+    );
+  }
+
+  function updateHomepageField(field: HomepageContentTextField, value: string) {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            homepage_content: {
+              ...current.homepage_content,
+              [field]: value,
+            },
+          }
+        : current
+    );
+  }
+
+  function updateHeroPreview(field: "visual_variant" | "video_duration", value: string) {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            homepage_content: {
+              ...current.homepage_content,
+              hero_preview: {
+                ...current.homepage_content.hero_preview,
+                [field]: value,
+              },
+            },
+          }
+        : current
+    );
+  }
+
+  function updateChatEnabled(value: boolean) {
+    setSettings((current) => (current ? { ...current, chat_bot_enabled: value } : current));
+  }
+
   async function handleSave() {
     if (!tokens?.access_token || !settings) {
       return;
@@ -98,10 +172,15 @@ export function SettingsManager() {
           about_text_en: settings.about_text_en,
           socials: settings.socials,
           skills: settings.skills,
+          homepage_content: normalizeHomepageContent(settings.homepage_content),
+          chat_bot_enabled: settings.chat_bot_enabled,
         },
         tokens.access_token
       );
-      setSettings(updated);
+      setSettings({
+        ...updated,
+        homepage_content: normalizeHomepageContent(updated.homepage_content),
+      });
       setError(null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to save site settings");
@@ -160,6 +239,16 @@ export function SettingsManager() {
               onChange={(event) => updateTextField("brand_name", event.currentTarget.value)}
             />
             <TextInput
+              label="Brand name RU"
+              value={settings.homepage_content.brand_name_ru}
+              onChange={(event) => updateHomepageField("brand_name_ru", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Brand name EN"
+              value={settings.homepage_content.brand_name_en}
+              onChange={(event) => updateHomepageField("brand_name_en", event.currentTarget.value)}
+            />
+            <TextInput
               label="Contact email"
               value={settings.contact_email}
               onChange={(event) => updateTextField("contact_email", event.currentTarget.value)}
@@ -173,6 +262,16 @@ export function SettingsManager() {
               label="Assistant name EN"
               value={settings.assistant_name_en}
               onChange={(event) => updateTextField("assistant_name_en", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Telegram URL"
+              value={settings.socials.telegram ?? ""}
+              onChange={(event) => updateSocial("telegram", event.currentTarget.value)}
+            />
+            <TextInput
+              label="GitHub URL"
+              value={settings.socials.github ?? ""}
+              onChange={(event) => updateSocial("github", event.currentTarget.value)}
             />
           </div>
         </SurfaceCard>
@@ -215,6 +314,151 @@ export function SettingsManager() {
       </div>
 
       <SurfaceCard
+        variant="elevated"
+        header={
+          <SettingsCardHeader
+            eyebrow="Homepage showcase"
+            title="Hero, contact CTA and chatbot"
+            description="Editable content for the new portfolio layout and the paused chatbot block."
+          />
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid gap-4 lg:grid-cols-[0.85fr_0.75fr_0.75fr]">
+            <TextInput
+              label="Hero eyebrow items"
+              description="Comma-separated list"
+              value={settings.homepage_content.hero_eyebrow_items.join(", ")}
+              onChange={(event) => updateHomepageEyebrowItems(event.currentTarget.value)}
+            />
+            <Select
+              label="Hero preview visual"
+              data={showcaseVisualOptions}
+              value={settings.homepage_content.hero_preview.visual_variant}
+              onChange={(value) => updateHeroPreview("visual_variant", value ?? "dashboard-dark")}
+            />
+            <TextInput
+              label="Hero preview duration"
+              value={settings.homepage_content.hero_preview.video_duration}
+              onChange={(event) => updateHeroPreview("video_duration", event.currentTarget.value)}
+            />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <TextInput
+              label="Technologies label RU"
+              value={settings.homepage_content.technologies_label_ru}
+              onChange={(event) => updateHomepageField("technologies_label_ru", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Technologies label EN"
+              value={settings.homepage_content.technologies_label_en}
+              onChange={(event) => updateHomepageField("technologies_label_en", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Project stack label RU"
+              value={settings.homepage_content.project_stack_label_ru}
+              onChange={(event) => updateHomepageField("project_stack_label_ru", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Project stack label EN"
+              value={settings.homepage_content.project_stack_label_en}
+              onChange={(event) => updateHomepageField("project_stack_label_en", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Header CTA RU"
+              value={settings.homepage_content.header_cta_label_ru}
+              onChange={(event) => updateHomepageField("header_cta_label_ru", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Header CTA EN"
+              value={settings.homepage_content.header_cta_label_en}
+              onChange={(event) => updateHomepageField("header_cta_label_en", event.currentTarget.value)}
+            />
+            <Textarea
+              label="Contact title RU"
+              minRows={3}
+              value={settings.homepage_content.contact_title_ru}
+              onChange={(event) => updateHomepageField("contact_title_ru", event.currentTarget.value)}
+            />
+            <Textarea
+              label="Contact title EN"
+              minRows={3}
+              value={settings.homepage_content.contact_title_en}
+              onChange={(event) => updateHomepageField("contact_title_en", event.currentTarget.value)}
+            />
+            <Textarea
+              label="Contact description RU"
+              minRows={3}
+              value={settings.homepage_content.contact_description_ru}
+              onChange={(event) => updateHomepageField("contact_description_ru", event.currentTarget.value)}
+            />
+            <Textarea
+              label="Contact description EN"
+              minRows={3}
+              value={settings.homepage_content.contact_description_en}
+              onChange={(event) => updateHomepageField("contact_description_en", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Telegram button RU"
+              value={settings.homepage_content.telegram_label_ru}
+              onChange={(event) => updateHomepageField("telegram_label_ru", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Telegram button EN"
+              value={settings.homepage_content.telegram_label_en}
+              onChange={(event) => updateHomepageField("telegram_label_en", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Email button RU"
+              value={settings.homepage_content.email_label_ru}
+              onChange={(event) => updateHomepageField("email_label_ru", event.currentTarget.value)}
+            />
+            <TextInput
+              label="Email button EN"
+              value={settings.homepage_content.email_label_en}
+              onChange={(event) => updateHomepageField("email_label_en", event.currentTarget.value)}
+            />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[0.5fr_1fr_1fr]">
+            <Switch
+              label="Chatbot enabled"
+              description="Shows the chatbot block at the end of the homepage."
+              checked={settings.chat_bot_enabled}
+              onChange={(event) => updateChatEnabled(event.currentTarget.checked)}
+            />
+            <Textarea
+              label="Chat section title RU"
+              minRows={2}
+              value={settings.homepage_content.chat_section_title_ru}
+              onChange={(event) => updateHomepageField("chat_section_title_ru", event.currentTarget.value)}
+            />
+            <Textarea
+              label="Chat section title EN"
+              minRows={2}
+              value={settings.homepage_content.chat_section_title_en}
+              onChange={(event) => updateHomepageField("chat_section_title_en", event.currentTarget.value)}
+            />
+            <div className="lg:col-start-2">
+              <Textarea
+                label="Chat section description RU"
+                minRows={3}
+                value={settings.homepage_content.chat_section_description_ru}
+                onChange={(event) => updateHomepageField("chat_section_description_ru", event.currentTarget.value)}
+              />
+            </div>
+            <Textarea
+              label="Chat section description EN"
+              minRows={3}
+              value={settings.homepage_content.chat_section_description_en}
+              onChange={(event) => updateHomepageField("chat_section_description_en", event.currentTarget.value)}
+            />
+          </div>
+        </div>
+      </SurfaceCard>
+
+      <SurfaceCard
         variant="soft"
         header={
           <SettingsCardHeader
@@ -225,6 +469,16 @@ export function SettingsManager() {
         }
       >
         <div className="grid gap-4 lg:grid-cols-[1fr_1fr_0.9fr]">
+          <TextInput
+            label="About title RU"
+            value={settings.about_title_ru}
+            onChange={(event) => updateTextField("about_title_ru", event.currentTarget.value)}
+          />
+          <TextInput
+            label="About title EN"
+            value={settings.about_title_en}
+            onChange={(event) => updateTextField("about_title_en", event.currentTarget.value)}
+          />
           <Textarea
             label="About text RU"
             minRows={5}

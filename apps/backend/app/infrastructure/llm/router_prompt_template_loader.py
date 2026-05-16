@@ -24,6 +24,7 @@ def load_router_system_prompt(*, allowed_modes: Sequence[str]) -> str:
         "Set should_reset_to_general=true when the previous mode is stale, the flow is effectively complete, "
         "or the new message clearly returns to normal conversation. "
         "Keep reasoning_depth light for simple chat, normal for ordinary styling tasks, and deep only for clearly complex reasoning. "
+        "Set retrieval_profile to light, style_focused, occasion_focused, or visual_heavy when the downstream retrieval need is clear; otherwise use null. "
         "Do not include persona prose. "
         "Do not include long fashion knowledge. "
         "Do not include image generation instructions. "

@@ -27,6 +27,7 @@ class RoutingContractsTests(unittest.TestCase):
         self.assertFalse(decision.generation_intent)
         self.assertFalse(decision.continue_existing_flow)
         self.assertFalse(decision.should_reset_to_general)
+        self.assertIsNone(decision.retrieval_profile)
 
     def test_conversation_router_context_carries_compact_router_state(self) -> None:
         context = ConversationRouterContext(

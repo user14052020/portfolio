@@ -42,7 +42,7 @@ export function HomeHeroAssistantStage({
             </div>
 
             <div className="space-y-5">
-              <h1 className="font-display max-w-4xl text-5xl leading-[0.96] tracking-[-0.045em] text-[var(--text-primary)] md:text-7xl">
+              <h1 className="font-display max-w-4xl text-5xl leading-[0.96] tracking-normal text-[var(--text-primary)] md:text-7xl">
                 {pickLocalized(settings, "hero_title", locale)}
               </h1>
               <p className="max-w-2xl text-lg leading-8 text-[var(--text-secondary)]">

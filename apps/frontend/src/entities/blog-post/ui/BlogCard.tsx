@@ -29,7 +29,7 @@ export function BlogCard({ post, locale }: { post: BlogPost; locale: Locale }) {
               </PillBadge>
             ))}
           </div>
-          <h3 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-[var(--text-primary)]">
+          <h3 className="text-2xl font-semibold leading-tight tracking-normal text-[var(--text-primary)]">
             {pickLocalized(post, "title", locale)}
           </h3>
           <p className="text-sm leading-7 text-[var(--text-secondary)]">{pickLocalized(post, "excerpt", locale)}</p>

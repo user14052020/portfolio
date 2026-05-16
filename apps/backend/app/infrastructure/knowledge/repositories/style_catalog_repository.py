@@ -303,6 +303,7 @@ class DatabaseStyleCatalogRepository:
             profile.visual_summary if profile is not None else None,
         ) or None
         metadata: dict[str, Any] = {
+            "style_numeric_id": style.id,
             "style_slug": style.slug,
             "style_name": style.display_name,
             "canonical_name": style.canonical_name,

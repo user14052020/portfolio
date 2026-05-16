@@ -223,6 +223,7 @@ class StyleCatalogRepositoryTests(unittest.IsolatedAsyncioTestCase):
             "Soft Retro Prep reframes collegiate dressing through warmer colors and softer structure.",
         )
         self.assertEqual(card.metadata["palette"], ["camel", "cream", "navy"])
+        self.assertEqual(card.metadata["style_numeric_id"], 1)
         self.assertEqual(card.metadata["hero_garments"], ["camel blazer", "oxford shirt"])
         self.assertEqual(card.metadata["core_style_logic"], ["Blend collegiate structure with softened warmth."])
         self.assertEqual(

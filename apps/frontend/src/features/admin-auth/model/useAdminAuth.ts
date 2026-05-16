@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 
 import { getCurrentUser, loginAdmin } from "@/shared/api/client";
 import type { TokenPair, User } from "@/shared/api/types";
-
-const STORAGE_KEY = "portfolio-admin-tokens";
+import { browserAdminTokenStore } from "@/shared/auth/adminTokenStore";
 
 export function useAdminAuth() {
   const [tokens, setTokens] = useState<TokenPair | null>(null);
@@ -14,19 +13,18 @@ export function useAdminAuth() {
 
   useEffect(() => {
     const restoreSession = async () => {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      const parsed = browserAdminTokenStore.readTokenPair();
+      if (!parsed) {
         setIsReady(true);
         return;
       }
 
       try {
-        const parsed = JSON.parse(raw) as TokenPair;
         const me = await getCurrentUser(parsed.access_token);
         setTokens(parsed);
         setUser(me);
       } catch {
-        window.localStorage.removeItem(STORAGE_KEY);
+        browserAdminTokenStore.clear();
         setTokens(null);
         setUser(null);
       } finally {
@@ -39,11 +37,7 @@ export function useAdminAuth() {
 
   const persistTokens = (nextTokens: TokenPair | null) => {
     setTokens(nextTokens);
-    if (nextTokens) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextTokens));
-    } else {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
+    browserAdminTokenStore.writeTokenPair(nextTokens);
   };
 
   const login = async (email: string, password: string) => {

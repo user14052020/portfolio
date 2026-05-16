@@ -185,6 +185,7 @@ class StylistChatOrchestrator:
                 "routing_continue_existing_flow": dispatch.routing.decision.continue_existing_flow,
                 "routing_should_reset_to_general": dispatch.routing.decision.should_reset_to_general,
                 "routing_reasoning_depth": dispatch.routing.decision.reasoning_depth.value,
+                "routing_retrieval_profile": dispatch.routing.decision.retrieval_profile,
                 "routing_used_fallback": dispatch.routing.used_fallback,
                 "routing_failure_reason": (
                     dispatch.routing.failure_reason.value if dispatch.routing.failure_reason else None
@@ -286,6 +287,7 @@ class StylistChatOrchestrator:
                 "continue_existing_flow": routing.decision.continue_existing_flow,
                 "should_reset_to_general": routing.decision.should_reset_to_general,
                 "reasoning_depth": routing.decision.reasoning_depth.value,
+                "retrieval_profile": routing.decision.retrieval_profile,
                 "requires_style_retrieval": routing.decision.requires_style_retrieval,
                 "requires_historical_layer": routing.decision.requires_historical_layer,
                 "requires_stylist_guidance": routing.decision.requires_stylist_guidance,

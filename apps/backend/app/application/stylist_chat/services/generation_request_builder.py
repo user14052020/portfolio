@@ -5,10 +5,18 @@ from app.application.product_behavior.services.generation_policy_service import 
     GenerationPolicyInput,
     GenerationPolicyService,
 )
-from app.application.prompt_building.services.prompt_pipeline_builder import (
-    PromptPipelineBuilder,
-    PromptPipelineValidationError,
-)
+try:
+    from app.application.prompt_building.services.prompt_pipeline_builder import (
+        PromptPipelineBuilder,
+        PromptPipelineValidationError,
+    )
+except ModuleNotFoundError:
+    PromptPipelineBuilder = None
+
+    class PromptPipelineValidationError(RuntimeError):
+        def __init__(self, *, errors: list[str]) -> None:
+            super().__init__("Prompt pipeline validation failed")
+            self.errors = errors
 from app.application.stylist_chat.contracts.command import ChatCommand
 from app.application.stylist_chat.contracts.ports import (
     GenerationScheduleRequest,
@@ -87,6 +95,12 @@ class GenerationRequestBuilder:
                     "anti_repeat_constraints": anti_repeat_constraints or {},
                     "occasion_context": occasion_context.model_dump(exclude_none=True) if occasion_context else None,
                     "structured_outfit_brief": structured_outfit_brief,
+                    "fashion_brief": (
+                        structured_outfit_brief
+                        if isinstance(structured_outfit_brief, dict)
+                        and self._looks_like_fashion_brief(structured_outfit_brief)
+                        else None
+                    ),
                     "garment_outfit_brief": structured_outfit_brief,
                     "style_exploration_brief": (
                         structured_outfit_brief
@@ -296,6 +310,11 @@ class GenerationRequestBuilder:
         lowered = text.lower()
         return any(keyword in lowered for keyword in GENERATION_HINTS)
 
+    def _looks_like_fashion_brief(self, value: dict[str, Any]) -> bool:
+        return any(key in value for key in ("brief_mode", "style_identity", "style_direction")) and any(
+            key in value for key in ("garment_list", "hero_garments", "palette", "composition_rules")
+        )
+
     def _resolve_generation_trigger(self, *, command: ChatCommand, context: ChatModeContext) -> str:
         if command.source == "quick_action" and command.command_name == ChatMode.STYLE_EXPLORATION.value:
             return ChatMode.STYLE_EXPLORATION.value
@@ -315,6 +334,8 @@ class GenerationRequestBuilder:
 
 class DefaultPromptBuilder:
     def __init__(self) -> None:
+        if PromptPipelineBuilder is None:
+            raise RuntimeError("Prompt pipeline dependencies are unavailable")
         self.prompt_pipeline_builder = PromptPipelineBuilder()
 
     async def build(self, *, brief: dict[str, Any]) -> dict[str, Any]:

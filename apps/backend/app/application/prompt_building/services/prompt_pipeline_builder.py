@@ -11,6 +11,7 @@ from app.application.prompt_building.services.prompt_validator import PromptVali
 from app.application.prompt_building.use_cases.build_fashion_brief import BuildFashionBriefUseCase
 from app.application.prompt_building.use_cases.compile_image_prompt import CompileImagePromptUseCase
 from app.application.prompt_building.use_cases.validate_prompt_pipeline import ValidatePromptPipelineUseCase
+from app.domain.prompt_building.entities.fashion_brief import FashionBrief
 from app.infrastructure.comfy.comfy_generation_payload_adapter import ComfyGenerationPayloadAdapter
 
 
@@ -57,6 +58,34 @@ class PromptPipelineBuilder:
         }
 
     async def preview_pipeline(self, *, brief: dict[str, Any]) -> dict[str, Any]:
+        direct_fashion_brief = self._direct_fashion_brief(brief)
+        if direct_fashion_brief is not None:
+            fashion_brief = direct_fashion_brief
+            validation_errors = await self.validate_prompt_pipeline.validate_brief(brief=fashion_brief)
+            if validation_errors:
+                return {
+                    "fashion_brief": fashion_brief,
+                    "compiled_prompt": None,
+                    "generation_payload": None,
+                    "validation_errors": validation_errors,
+                }
+            compiled_prompt = await self.compile_image_prompt.execute(brief=fashion_brief)
+            validation_errors = await self.validate_prompt_pipeline.execute(
+                brief=fashion_brief,
+                compiled_prompt=compiled_prompt,
+            )
+            generation_payload = await self.generation_payload_builder.build(
+                fashion_brief=fashion_brief,
+                compiled_prompt=compiled_prompt,
+                validation_errors=validation_errors,
+            )
+            return {
+                "fashion_brief": fashion_brief,
+                "compiled_prompt": compiled_prompt,
+                "generation_payload": generation_payload,
+                "validation_errors": validation_errors,
+            }
+
         style_brief = brief.get("style_exploration_brief") if isinstance(brief.get("style_exploration_brief"), dict) else {}
         reasoning_input = FashionReasoningInput.model_validate(
             {
@@ -120,3 +149,19 @@ class PromptPipelineBuilder:
             "generation_payload": generation_payload,
             "validation_errors": validation_errors,
         }
+
+    def _direct_fashion_brief(self, brief: dict[str, Any]) -> FashionBrief | None:
+        payload = brief.get("fashion_brief")
+        if payload is None and _looks_like_fashion_brief(brief.get("structured_outfit_brief")):
+            payload = brief.get("structured_outfit_brief")
+        if not isinstance(payload, dict):
+            return None
+        return FashionBrief.model_validate(payload)
+
+
+def _looks_like_fashion_brief(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return any(key in value for key in ("brief_mode", "style_identity", "style_direction")) and any(
+        key in value for key in ("garment_list", "hero_garments", "palette", "composition_rules")
+    )

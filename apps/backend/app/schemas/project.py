@@ -13,6 +13,11 @@ class ProjectMediaRead(TimestampedRead):
     sort_order: int
 
 
+class ProjectShowcaseMeta(BaseModel):
+    visual_variant: str = "dashboard-light"
+    video_duration: str = "0:40"
+
+
 class ProjectBase(BaseModel):
     slug: str | None = None
     title_ru: str
@@ -22,6 +27,7 @@ class ProjectBase(BaseModel):
     description_ru: str
     description_en: str
     stack: list[str] = Field(default_factory=list)
+    showcase_meta: ProjectShowcaseMeta = Field(default_factory=ProjectShowcaseMeta)
     cover_image: str | None = None
     preview_video_url: str | None = None
     repository_url: str | None = None
@@ -59,6 +65,7 @@ class ProjectRead(TimestampedRead):
     description_ru: str
     description_en: str
     stack: list[str]
+    showcase_meta: ProjectShowcaseMeta
     cover_image: str | None = None
     preview_video_url: str | None = None
     repository_url: str | None = None
@@ -72,4 +79,3 @@ class ProjectRead(TimestampedRead):
     is_featured: bool
     is_published: bool
     media_items: list[ProjectMediaRead] = Field(default_factory=list)
-

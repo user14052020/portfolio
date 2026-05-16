@@ -1,4 +1,6 @@
-from sqlalchemy import JSON, Integer, String, Text
+from typing import Any
+
+from sqlalchemy import Boolean, JSON, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.stylist_runtime_settings import (
@@ -29,6 +31,8 @@ class SiteSettings(Base, TimestampedMixin):
     about_text_en: Mapped[str] = mapped_column(Text)
     socials: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, nullable=False)
     skills: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    homepage_content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    chat_bot_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     daily_generation_limit_non_admin: Mapped[int] = mapped_column(
         Integer,
         default=DEFAULT_DAILY_GENERATION_LIMIT_NON_ADMIN,

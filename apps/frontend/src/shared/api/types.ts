@@ -238,6 +238,11 @@ export interface ProjectMedia {
   updated_at: string;
 }
 
+export interface ProjectShowcaseMeta {
+  visual_variant: string;
+  video_duration: string;
+}
+
 export interface Project {
   id: number;
   slug: string;
@@ -248,6 +253,7 @@ export interface Project {
   description_ru: string;
   description_en: string;
   stack: string[];
+  showcase_meta: ProjectShowcaseMeta;
   cover_image?: string | null;
   preview_video_url?: string | null;
   repository_url?: string | null;
@@ -299,6 +305,36 @@ export interface BlogPost {
   updated_at: string;
 }
 
+export interface HomepagePreviewContent {
+  visual_variant: string;
+  video_duration: string;
+}
+
+export interface HomepageContent {
+  brand_name_ru: string;
+  brand_name_en: string;
+  hero_eyebrow_items: string[];
+  technologies_label_ru: string;
+  technologies_label_en: string;
+  project_stack_label_ru: string;
+  project_stack_label_en: string;
+  hero_preview: HomepagePreviewContent;
+  header_cta_label_ru: string;
+  header_cta_label_en: string;
+  contact_title_ru: string;
+  contact_title_en: string;
+  contact_description_ru: string;
+  contact_description_en: string;
+  telegram_label_ru: string;
+  telegram_label_en: string;
+  email_label_ru: string;
+  email_label_en: string;
+  chat_section_title_ru: string;
+  chat_section_title_en: string;
+  chat_section_description_ru: string;
+  chat_section_description_en: string;
+}
+
 export interface SiteSettings {
   id: number;
   brand_name: string;
@@ -316,6 +352,8 @@ export interface SiteSettings {
   about_text_en: string;
   socials: Record<string, string>;
   skills: string[];
+  homepage_content: HomepageContent;
+  chat_bot_enabled: boolean;
   message_cooldown_seconds: number;
   try_other_style_cooldown_seconds: number;
   created_at: string;

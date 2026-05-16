@@ -6,22 +6,22 @@ import type { GenerationJob, Locale } from "@/shared/api/types";
 
 function getStatusLabel(locale: Locale, job: GenerationJob | null, isPreparing: boolean) {
   if (isPreparing && !job) {
-    return locale === "ru" ? "РџРѕРґРіРѕС‚Р°РІР»РёРІР°СЋ" : "Preparing";
+    return locale === "ru" ? "Подготавливаю" : "Preparing";
   }
 
   switch (job?.status) {
     case "pending":
-      return locale === "ru" ? "РћР¶РёРґР°РЅРёРµ" : "Pending";
+      return locale === "ru" ? "Ожидание" : "Pending";
     case "queued":
-      return locale === "ru" ? "Р’ РѕС‡РµСЂРµРґРё" : "Queued";
+      return locale === "ru" ? "В очереди" : "Queued";
     case "running":
-      return locale === "ru" ? "Р“РµРЅРµСЂРёСЂСѓСЋ" : "Generating";
+      return locale === "ru" ? "Генерирую" : "Generating";
     case "completed":
-      return locale === "ru" ? "Р“РѕС‚РѕРІРѕ" : "Done";
+      return locale === "ru" ? "Готово" : "Done";
     case "failed":
-      return locale === "ru" ? "РћС€РёР±РєР°" : "Failed";
+      return locale === "ru" ? "Ошибка" : "Failed";
     default:
-      return locale === "ru" ? "РџРѕРґРіРѕС‚Р°РІР»РёРІР°СЋ" : "Preparing";
+      return locale === "ru" ? "Подготавливаю" : "Preparing";
   }
 }
 
@@ -52,28 +52,30 @@ export function GenerationResultCard({
   const recommendation = job ? (locale === "ru" ? job.recommendation_ru : job.recommendation_en) : null;
   const waitingText = isPreparing
     ? locale === "ru"
-      ? "РћС‚РїСЂР°РІР»СЏСЋ Р·Р°РїСЂРѕСЃ РЅР° СЃРµСЂРІРµСЂ Рё РїРѕРґРіРѕС‚Р°РІР»РёРІР°СЋ РіРµРЅРµСЂР°С†РёСЋ РѕР±СЂР°Р·Р°."
+      ? "Отправляю запрос на сервер и подготавливаю генерацию образа."
       : "Sending the request to the server and preparing the outfit generation."
     : locale === "ru"
-      ? "РР·РѕР±СЂР°Р¶РµРЅРёРµ РїРѕСЏРІРёС‚СЃСЏ Р·РґРµСЃСЊ, РєР°Рє С‚РѕР»СЊРєРѕ backend РїРѕР»СѓС‡РёС‚ РїРµСЂРІС‹Р№ СЂРµР·СѓР»СЊС‚Р°С‚ РѕС‚ РіРµРЅРµСЂР°С‚РѕСЂР°."
+      ? "Изображение появится здесь, как только backend получит первый результат от генератора."
       : "The image will appear here as soon as the backend receives the first result from the generator.";
 
   return (
     <div className="max-w-[620px] space-y-2">
-      <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{assistantLabel}</p>
-      <div className="w-full max-w-[620px] rounded-[28px] border border-slate-200 bg-white/95 p-4 shadow-[0_18px_42px_rgba(15,23,42,0.08)]">
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">{assistantLabel}</p>
+      <div className="w-full max-w-[620px] rounded-[28px] border border-[var(--border-soft)] bg-white/95 p-4 shadow-[var(--shadow-soft-md)]">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
-            {locale === "ru" ? "Р“РµРЅРµСЂР°С†РёСЏ РѕР±СЂР°Р·Р°" : "Outfit generation"}
+          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
+            {locale === "ru" ? "Генерация образа" : "Outfit generation"}
           </p>
-          <p className="text-xs text-slate-500">{statusLabel}</p>
+          <p className="rounded-[var(--radius-pill)] bg-[var(--surface-secondary)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
+            {statusLabel}
+          </p>
         </div>
 
         {job?.result_url ? (
-          <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
+          <div className="overflow-hidden rounded-[24px] border border-[var(--border-soft)] bg-white shadow-[var(--shadow-soft-sm)]">
             <Image
               src={job.result_url}
-              alt={locale === "ru" ? "РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅС‹Р№ РѕР±СЂР°Р·" : "Generated outfit"}
+              alt={locale === "ru" ? "Сгенерированный образ" : "Generated outfit"}
               width={1024}
               height={1024}
               className="h-auto w-full object-cover"
@@ -81,11 +83,11 @@ export function GenerationResultCard({
             />
           </div>
         ) : (
-          <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-[22px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(208,164,109,0.22),_transparent_45%),linear-gradient(135deg,_#f8fafc,_#eef2f7)]">
+          <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-[24px] border border-[var(--border-soft)] bg-[radial-gradient(circle_at_top,_rgba(208,164,109,0.22),_transparent_45%),linear-gradient(135deg,_#fffdfa,_#f3f1ed)]">
             <div className="absolute inset-0 animate-pulse bg-[linear-gradient(135deg,rgba(255,255,255,0.1),rgba(255,255,255,0.45),rgba(255,255,255,0.08))]" />
             <div className="relative z-10 flex flex-col items-center gap-3 px-6 text-center">
               <Loader size="sm" color="dark" />
-              <p className="max-w-[280px] text-sm leading-6 text-slate-600">{waitingText}</p>
+              <p className="max-w-[280px] text-sm leading-6 text-[var(--text-secondary)]">{waitingText}</p>
             </div>
           </div>
         )}
@@ -96,7 +98,7 @@ export function GenerationResultCard({
           </div>
         ) : null}
 
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/10">
           <div
             className="h-full rounded-full bg-gradient-to-r from-[#d0a46d] to-[#8fae98] transition-all duration-500"
             style={{ width: `${progress}%` }}
@@ -105,8 +107,8 @@ export function GenerationResultCard({
 
         <div className="mt-3 space-y-2">
           {recommendation ? (
-            <p className="text-sm leading-6 text-slate-600">
-              {locale === "ru" ? "Р РµРєРѕРјРµРЅРґР°С†РёСЏ:" : "Recommendation:"} {recommendation}
+            <p className="text-sm leading-6 text-[var(--text-secondary)]">
+              {locale === "ru" ? "Рекомендация:" : "Recommendation:"} {recommendation}
             </p>
           ) : null}
           {job?.error_message ? <p className="text-sm leading-6 text-rose-600">{job.error_message}</p> : null}

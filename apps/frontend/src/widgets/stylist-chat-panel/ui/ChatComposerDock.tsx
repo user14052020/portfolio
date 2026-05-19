@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import type { Ref } from "react";
 
 import { ChatCooldownSendControl } from "@/features/chat-cooldown/ui/ChatCooldownSendControl";
 import { InputSurface } from "@/shared/ui/InputSurface";
@@ -20,7 +20,7 @@ export function ChatComposerDock({
   onInputChange,
   onSubmit,
 }: {
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  textareaRef: Ref<HTMLTextAreaElement>;
   input: string;
   placeholder: string;
   title?: string;

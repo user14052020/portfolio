@@ -1,12 +1,15 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { IconBrandTelegram, IconMail, IconSend } from "@tabler/icons-react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { IconMail, IconSend } from "@tabler/icons-react";
 
 import type { Locale, Project, SiteSettings } from "@/shared/api/types";
 import { normalizeHomepageContent, normalizeProjectShowcaseMeta } from "@/shared/config/homepageContent";
+import { contactSocialLinks, resolveExternalUrl, type ContactSocialKey } from "@/shared/config/socialLinks";
 import { pickLocalized } from "@/shared/i18n/dictionaries";
 import { cn } from "@/shared/lib/cn";
+import { BrandSocialIcon } from "@/shared/ui/BrandSocialIcon";
+import { ProjectScreenshotGallery } from "@/widgets/home-showcase/ui/ProjectScreenshotGallery";
 import { ShowcaseVideoFrame, getProjectFallbackVariant } from "@/widgets/home-showcase/ui/ShowcaseVideoFrame";
 
 export function HomeShowcase({
@@ -24,13 +27,13 @@ export function HomeShowcase({
 }) {
   const content = normalizeHomepageContent(settings.homepage_content);
   const brandName = pickLocalized(content, "brand_name", locale) || settings.brand_name;
+  const heroEyebrowItems = locale === "ru" ? content.hero_eyebrow_items_ru : content.hero_eyebrow_items_en;
   const technologiesLabel = pickLocalized(content, "technologies_label", locale);
   const projectStackLabel = pickLocalized(content, "project_stack_label", locale);
+  const projectDemoCtaLabel = pickLocalized(content, "project_demo_cta_label", locale);
   const headerCtaLabel = pickLocalized(content, "header_cta_label", locale);
   const contactTitle = pickLocalized(content, "contact_title", locale);
   const contactDescription = pickLocalized(content, "contact_description", locale);
-  const telegramLabel = pickLocalized(content, "telegram_label", locale);
-  const emailLabel = pickLocalized(content, "email_label", locale);
   const chatTitle = pickLocalized(content, "chat_section_title", locale);
   const chatDescription = pickLocalized(content, "chat_section_description", locale);
 
@@ -54,16 +57,22 @@ export function HomeShowcase({
         <section className="grid gap-10 pb-9 pt-16 lg:grid-cols-[0.66fr_1fr] lg:items-center lg:gap-12 lg:pt-20">
           <div className="max-w-[520px]">
             <div className="mb-9 flex flex-wrap items-center gap-3 text-xs font-medium uppercase tracking-normal text-[#7a7f89]">
-              {content.hero_eyebrow_items.map((item, index) => (
+              {heroEyebrowItems.map((item, index) => (
                 <span key={`${item}-${index}`} className="flex items-center gap-3">
                   <span>{item}</span>
-                  {index < content.hero_eyebrow_items.length - 1 ? <span className="text-[#b6bac1]">/</span> : null}
+                  {index < heroEyebrowItems.length - 1 ? <span className="text-[#b6bac1]">/</span> : null}
                 </span>
               ))}
             </div>
 
             <h1 className="max-w-[520px] text-[40px] font-semibold leading-[1.28] tracking-normal text-[#111318] sm:text-5xl lg:text-[46px]">
-              {pickLocalized(settings, "hero_title", locale)}
+              <RotatingHeroTitle
+                title={pickLocalized(settings, "hero_title", locale)}
+                items={locale === "ru" ? content.hero_title_rotating_items_ru : content.hero_title_rotating_items_en}
+                intervalMs={content.hero_title_rotating_interval_ms}
+                animationMs={content.hero_title_rotating_animation_ms}
+                accentColor={content.hero_title_rotating_accent_color}
+              />
             </h1>
             <p className="mt-9 max-w-[430px] text-lg leading-8 text-[#30343b]">
               {pickLocalized(settings, "hero_subtitle", locale)}
@@ -86,6 +95,8 @@ export function HomeShowcase({
             variant={content.hero_preview.visual_variant}
             duration={content.hero_preview.video_duration}
             title={pickLocalized(settings, "hero_title", locale)}
+            mediaUrl={content.hero_preview.video_url}
+            coverImage={content.hero_preview.cover_image}
             className="lg:mt-2"
           />
         </section>
@@ -99,6 +110,7 @@ export function HomeShowcase({
                 index={index}
                 locale={locale}
                 stackLabel={projectStackLabel}
+                demoCtaLabel={projectDemoCtaLabel}
               />
             ))}
           </section>
@@ -108,8 +120,6 @@ export function HomeShowcase({
           settings={settings}
           title={contactTitle}
           description={contactDescription}
-          telegramLabel={telegramLabel}
-          emailLabel={emailLabel}
         />
 
         {settings.chat_bot_enabled && chatSlot ? (
@@ -127,6 +137,61 @@ export function HomeShowcase({
   );
 }
 
+function RotatingHeroTitle({
+  title,
+  items,
+  intervalMs,
+  animationMs,
+  accentColor,
+}: {
+  title: string;
+  items: string[];
+  intervalMs: number;
+  animationMs: number;
+  accentColor: string;
+}) {
+  const rotatingItems = useMemo(() => items.map((item) => item.trim()).filter(Boolean), [items]);
+  const rotatingItemsKey = useMemo(() => rotatingItems.join("\n"), [rotatingItems]);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [rotatingItemsKey]);
+
+  useEffect(() => {
+    if (rotatingItems.length < 2) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setActiveIndex((current) => (current + 1) % rotatingItems.length);
+    }, Math.max(600, intervalMs));
+
+    return () => window.clearInterval(timer);
+  }, [intervalMs, rotatingItems.length]);
+
+  const activeItem = rotatingItems[activeIndex] ?? rotatingItems[0];
+
+  if (!activeItem) {
+    return <>{title}</>;
+  }
+
+  return (
+    <span className="block">
+      <span>{title}</span>{" "}
+      <span className="inline-grid overflow-hidden align-baseline pb-1" style={{ color: accentColor }}>
+        <span
+          key={`${activeItem}-${activeIndex}`}
+          className="animate-[hero-title-word-in_var(--hero-title-word-animation)_cubic-bezier(0.22,1,0.36,1)_both]"
+          style={{ "--hero-title-word-animation": `${Math.max(200, animationMs)}ms` } as CSSProperties}
+        >
+          {activeItem}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function LanguageControl({
   locale,
   onLocaleChange,
@@ -135,7 +200,7 @@ function LanguageControl({
   onLocaleChange: (locale: Locale) => void;
 }) {
   return (
-    <div className="inline-grid h-12 grid-cols-2 overflow-hidden rounded-lg border border-[#d0d3d8] bg-white/50">
+    <div className="inline-grid h-12 w-24 shrink-0 grid-cols-2 overflow-hidden rounded-lg border border-[#d0d3d8] bg-white/50">
       {(["ru", "en"] as Locale[]).map((item) => {
         const isActive = item === locale;
 
@@ -145,7 +210,7 @@ function LanguageControl({
             type="button"
             onClick={() => onLocaleChange(item)}
             className={cn(
-              "min-w-12 px-3 text-xs font-semibold uppercase transition",
+              "grid h-full min-w-0 place-items-center px-0 text-center text-xs font-semibold uppercase leading-none tracking-normal transition",
               isActive ? "bg-[#111318] text-white" : "text-[#5f646d] hover:bg-white hover:text-[#111318]",
             )}
           >
@@ -162,16 +227,19 @@ function ProjectShowcaseRow({
   index,
   locale,
   stackLabel,
+  demoCtaLabel,
 }: {
   project: Project;
   index: number;
   locale: Locale;
   stackLabel: string;
+  demoCtaLabel: string;
 }) {
   const showcaseMeta = normalizeProjectShowcaseMeta(project.showcase_meta, {
     visual_variant: getProjectFallbackVariant(index),
     video_duration: ["0:40", "0:35", "0:30"][index] ?? "0:40",
   });
+  const screenshotItems = buildProjectScreenshots(project, locale);
 
   return (
     <article className="grid gap-7 lg:grid-cols-[370px_1fr] lg:gap-9">
@@ -196,14 +264,24 @@ function ProjectShowcaseRow({
         </div>
       </div>
 
-      <ShowcaseVideoFrame
-        variant={showcaseMeta.visual_variant}
-        duration={showcaseMeta.video_duration}
-        title={pickLocalized(project, "title", locale)}
-        mediaUrl={project.preview_video_url}
-        coverImage={project.cover_image}
-        className={cn(index === 0 && "bg-white")}
-      />
+      {screenshotItems.length > 0 ? (
+        <ProjectScreenshotGallery
+          screenshots={screenshotItems}
+          title={pickLocalized(project, "title", locale)}
+          demoUrlToken={project.live_url}
+          demoLabel={demoCtaLabel}
+          className={cn(index === 0 && "bg-white")}
+        />
+      ) : (
+        <ShowcaseVideoFrame
+          variant={showcaseMeta.visual_variant}
+          duration={showcaseMeta.video_duration}
+          title={pickLocalized(project, "title", locale)}
+          mediaUrl={project.preview_video_url}
+          coverImage={project.cover_image}
+          className={cn(index === 0 && "bg-white")}
+        />
+      )}
     </article>
   );
 }
@@ -212,17 +290,11 @@ function ContactCta({
   settings,
   title,
   description,
-  telegramLabel,
-  emailLabel,
 }: {
   settings: SiteSettings;
   title: string;
   description: string;
-  telegramLabel: string;
-  emailLabel: string;
 }) {
-  const telegramUrl = settings.socials.telegram;
-
   return (
     <section className="grid gap-8 py-11 lg:grid-cols-[0.3fr_1px_0.35fr_0.35fr] lg:items-center">
       <h2 className="whitespace-pre-line text-4xl font-semibold leading-tight tracking-normal text-[#111318]">
@@ -230,26 +302,89 @@ function ContactCta({
       </h2>
       <div className="hidden h-20 w-px bg-[#c8ccd3] lg:block" />
       <p className="max-w-[360px] whitespace-pre-line text-base leading-7 text-[#4b5059]">{description}</p>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2">
-        {telegramUrl ? (
-          <a
-            href={telegramUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-h-14 items-center justify-center gap-3 rounded-lg border border-[#111318] bg-[#111318] px-5 text-base font-medium text-white transition hover:bg-black"
-          >
-            <IconBrandTelegram className="h-5 w-5" aria-hidden />
-            {telegramLabel}
-          </a>
-        ) : null}
-        <a
-          href={`mailto:${settings.contact_email}`}
-          className="inline-flex min-h-14 items-center justify-center gap-3 rounded-lg border border-[#aeb2ba] bg-transparent px-5 text-base font-medium text-[#111318] transition hover:border-[#111318] hover:bg-white"
-        >
-          <IconMail className="h-5 w-5" aria-hidden />
-          {emailLabel}
-        </a>
-      </div>
+      <ContactLinksGroup socials={settings.socials} email={settings.contact_email} />
     </section>
   );
+}
+
+function ContactLinksGroup({ socials, email }: { socials: SiteSettings["socials"]; email: string }) {
+  return (
+    <div className="inline-grid min-h-10 grid-cols-6 gap-2 justify-self-start lg:min-h-9 lg:justify-self-end">
+      {contactSocialLinks.map((item) => {
+        const href = resolveExternalUrl(socials[item.key]);
+
+        if (!href) {
+          return (
+            <span
+              key={item.key}
+              title={`${item.label} is not configured`}
+              className={cn(contactIconClassName, "border-[#d7dbe2] bg-white/40 text-[#a1a7b1]")}
+            >
+              <SocialMark socialKey={item.key} />
+            </span>
+          );
+        }
+
+        return (
+          <a
+            key={item.key}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={item.label}
+            title={item.label}
+            className={cn(
+              contactIconClassName,
+              "group border-[#111318] bg-[#111318] text-white hover:bg-white hover:text-[#111318]",
+            )}
+          >
+            <SocialMark socialKey={item.key} />
+          </a>
+        );
+      })}
+      <a
+        href={`mailto:${email}`}
+        aria-label="Email"
+        title="Email"
+        className={cn(
+          contactIconClassName,
+          "border-[#aeb2ba] bg-white text-[#111318] hover:border-[#111318] hover:bg-[#111318] hover:text-white",
+        )}
+      >
+        <IconMail className="h-5 w-5 lg:h-4 lg:w-4" aria-hidden />
+      </a>
+    </div>
+  );
+}
+
+const contactIconClassName =
+  "grid h-10 w-10 min-w-0 place-items-center rounded-lg border text-sm font-semibold uppercase leading-none tracking-normal transition lg:h-9 lg:w-9";
+
+function SocialMark({ socialKey }: { socialKey: ContactSocialKey }) {
+  return <BrandSocialIcon socialKey={socialKey} className="h-5 w-5 lg:h-4 lg:w-4" />;
+}
+
+function buildProjectScreenshots(project: Project, locale: Locale) {
+  const mediaScreenshots = project.media_items
+    .filter((item) => item.asset_type === "image")
+    .sort((first, second) => first.sort_order - second.sort_order)
+    .map((item) => ({
+      id: item.id,
+      url: item.url,
+      alt: pickLocalized(item, "alt", locale) || pickLocalized(project, "title", locale),
+    }));
+
+  if (mediaScreenshots.length > 0) {
+    return mediaScreenshots;
+  }
+
+  return project.cover_image
+    ? [
+        {
+          id: 0,
+          url: project.cover_image,
+          alt: pickLocalized(project, "title", locale),
+        },
+      ]
+    : [];
 }

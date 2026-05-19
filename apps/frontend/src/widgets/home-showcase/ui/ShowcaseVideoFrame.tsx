@@ -1,5 +1,7 @@
 "use client";
 
+import type { MouseEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   IconCalendar,
   IconChartLine,
@@ -7,11 +9,13 @@ import {
   IconDotsVertical,
   IconLayoutDashboard,
   IconMaximize,
+  IconPlayerPauseFilled,
   IconPlayerPlayFilled,
   IconSettings,
   IconShoppingBag,
   IconUsers,
   IconVolume,
+  IconVolumeOff,
 } from "@tabler/icons-react";
 
 import { cn } from "@/shared/lib/cn";
@@ -42,6 +46,7 @@ export function ShowcaseVideoFrame({
   const normalizedVariant = variant || "dashboard-light";
   const shouldUseUploadedMedia = normalizedVariant === "uploaded-media" && (mediaUrl || coverImage);
   const visualVariant = shouldUseUploadedMedia ? "uploaded-media" : normalizedVariant;
+  const hasPlayableVideo = visualVariant === "uploaded-media" && Boolean(mediaUrl);
 
   return (
     <div
@@ -52,7 +57,7 @@ export function ShowcaseVideoFrame({
     >
       <div className="aspect-[16/9] min-h-[250px] w-full overflow-hidden">
         {visualVariant === "uploaded-media" ? (
-          <UploadedMedia mediaUrl={mediaUrl} coverImage={coverImage} title={title} />
+          <UploadedMedia mediaUrl={mediaUrl} coverImage={coverImage} title={title} duration={duration} />
         ) : visualVariant === "chair-3d" ? (
           <ChairConfiguratorScene />
         ) : visualVariant === "finance-motion" ? (
@@ -62,15 +67,17 @@ export function ShowcaseVideoFrame({
         )}
       </div>
 
-      <button
-        type="button"
-        aria-label={`Play ${title}`}
-        className="absolute left-1/2 top-1/2 z-20 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-[#111318] shadow-[0_18px_50px_rgba(0,0,0,0.24)] transition duration-200 group-hover:scale-105"
-      >
-        <IconPlayerPlayFilled className="ml-1 h-8 w-8" aria-hidden />
-      </button>
+      {hasPlayableVideo ? null : (
+        <button
+          type="button"
+          aria-label={`Play ${title}`}
+          className="absolute left-1/2 top-1/2 z-20 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-[#111318] shadow-[0_18px_50px_rgba(0,0,0,0.24)] transition duration-200 group-hover:scale-105"
+        >
+          <IconPlayerPlayFilled className="ml-1 h-8 w-8" aria-hidden />
+        </button>
+      )}
 
-      <VideoControls duration={duration} />
+      {hasPlayableVideo ? null : <VideoControls duration={duration} />}
     </div>
   );
 }
@@ -79,23 +86,15 @@ function UploadedMedia({
   mediaUrl,
   coverImage,
   title,
+  duration,
 }: {
   mediaUrl?: string | null;
   coverImage?: string | null;
   title: string;
+  duration: string;
 }) {
   if (mediaUrl) {
-    return (
-      <video
-        className="h-full w-full object-cover"
-        src={mediaUrl}
-        poster={coverImage ?? undefined}
-        autoPlay
-        muted
-        loop
-        playsInline
-      />
-    );
+    return <UploadedVideoPlayer mediaUrl={mediaUrl} coverImage={coverImage} title={title} fallbackDuration={duration} />;
   }
 
   if (coverImage) {
@@ -107,6 +106,175 @@ function UploadedMedia({
       {title}
     </div>
   );
+}
+
+function UploadedVideoPlayer({
+  mediaUrl,
+  coverImage,
+  title,
+  fallbackDuration,
+}: {
+  mediaUrl: string;
+  coverImage?: string | null;
+  title: string;
+  fallbackDuration: string;
+}) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+
+  useEffect(() => {
+    const currentVideo = videoRef.current;
+    if (!currentVideo) {
+      return;
+    }
+    const videoElement: HTMLVideoElement = currentVideo;
+
+    function syncTime() {
+      setCurrentTime(videoElement.currentTime);
+      if (Number.isFinite(videoElement.duration)) {
+        setDurationSeconds(videoElement.duration);
+      }
+    }
+
+    function syncPlaying() {
+      setIsPlaying(!videoElement.paused && !videoElement.ended);
+    }
+
+    videoElement.addEventListener("timeupdate", syncTime);
+    videoElement.addEventListener("loadedmetadata", syncTime);
+    videoElement.addEventListener("play", syncPlaying);
+    videoElement.addEventListener("pause", syncPlaying);
+    videoElement.addEventListener("ended", syncPlaying);
+
+    return () => {
+      videoElement.removeEventListener("timeupdate", syncTime);
+      videoElement.removeEventListener("loadedmetadata", syncTime);
+      videoElement.removeEventListener("play", syncPlaying);
+      videoElement.removeEventListener("pause", syncPlaying);
+      videoElement.removeEventListener("ended", syncPlaying);
+    };
+  }, []);
+
+  async function togglePlayback() {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    if (video.paused) {
+      await video.play();
+      return;
+    }
+
+    video.pause();
+  }
+
+  function toggleMuted() {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    video.muted = !video.muted;
+    setIsMuted(video.muted);
+  }
+
+  function seek(event: MouseEvent<HTMLButtonElement>) {
+    const video = videoRef.current;
+    const duration = durationSeconds || video?.duration;
+    if (!video || !duration || !Number.isFinite(duration)) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+    video.currentTime = ratio * duration;
+    setCurrentTime(video.currentTime);
+  }
+
+  async function requestFullscreen() {
+    const target = frameRef.current;
+    if (!target || !target.requestFullscreen) {
+      return;
+    }
+
+    await target.requestFullscreen();
+  }
+
+  const progress = durationSeconds > 0 ? Math.min((currentTime / durationSeconds) * 100, 100) : 0;
+  const timelineLabel = `${formatVideoTime(currentTime)} / ${
+    durationSeconds > 0 ? formatVideoTime(durationSeconds) : fallbackDuration
+  }`;
+
+  return (
+    <div ref={frameRef} className="group/video relative h-full w-full bg-[#080a0f]">
+      <video
+        ref={videoRef}
+        className="h-full w-full object-cover"
+        src={mediaUrl}
+        poster={coverImage ?? undefined}
+        preload="metadata"
+        playsInline
+      />
+
+      {!isPlaying ? (
+        <button
+          type="button"
+          aria-label={`Play ${title}`}
+          onClick={() => void togglePlayback()}
+          className="absolute left-1/2 top-1/2 z-20 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-[#111318] shadow-[0_18px_50px_rgba(0,0,0,0.24)] transition duration-200 hover:scale-105"
+        >
+          <IconPlayerPlayFilled className="ml-1 h-8 w-8" aria-hidden />
+        </button>
+      ) : null}
+
+      <div className="absolute inset-x-4 bottom-3 z-30 text-white">
+        <div className="mb-2 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button type="button" aria-label={isPlaying ? "Pause video" : "Play video"} onClick={() => void togglePlayback()}>
+              {isPlaying ? (
+                <IconPlayerPauseFilled className="h-4 w-4" aria-hidden />
+              ) : (
+                <IconPlayerPlayFilled className="h-4 w-4" aria-hidden />
+              )}
+            </button>
+            <span className="text-sm font-medium">{timelineLabel}</span>
+          </div>
+          <div className="flex items-center gap-5">
+            <button type="button" aria-label={isMuted ? "Unmute video" : "Mute video"} onClick={toggleMuted}>
+              {isMuted ? <IconVolumeOff className="h-5 w-5" aria-hidden /> : <IconVolume className="h-5 w-5" aria-hidden />}
+            </button>
+            <button type="button" aria-label="Open fullscreen" onClick={() => void requestFullscreen()}>
+              <IconMaximize className="h-5 w-5" aria-hidden />
+            </button>
+            <IconDotsVertical className="h-5 w-5" aria-hidden />
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Seek video"
+          onClick={seek}
+          className="block h-1 w-full overflow-hidden rounded-full bg-white/20 text-left"
+        >
+          <span className="block h-full rounded-full bg-white" style={{ width: `${progress}%` }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatVideoTime(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0:00";
+  }
+
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.floor(value % 60);
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function VideoControls({ duration }: { duration: string }) {

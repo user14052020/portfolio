@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CommandName } from "@/entities/command/model/types";
 import type { ThreadMessage } from "@/entities/chat-message/model/types";
@@ -160,6 +160,7 @@ export function useStylistChatProcess(
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [chatCooldown, setChatCooldown] = useState<ChatCooldownState | null>(null);
   const messagesRef = useRef(messages);
+  const activeJobRef = useRef(activeJob);
   const chatAvailability: ChatAvailability = backendState === "error" ? "offline" : "online";
   const queueRefreshAvailableAt = activeJob?.queue_refresh_available_at
     ? Date.parse(activeJob.queue_refresh_available_at)
@@ -180,68 +181,81 @@ export function useStylistChatProcess(
     !isGenerationActionLocked &&
     !isChatCooldownActive;
 
-  const armChatCooldown = (actionType: ChatCooldownActionType, cooldownSeconds: number, endsAt?: number | null) => {
-    if (cooldownSeconds <= 0) {
-      setChatCooldown(null);
-      return;
-    }
-    const resolvedEndsAt = endsAt ?? Date.now() + cooldownSeconds * 1000;
-    if (!Number.isFinite(resolvedEndsAt) || resolvedEndsAt <= Date.now()) {
-      setChatCooldown(null);
-      return;
-    }
-    setChatCooldown({
-      actionType,
-      endsAt: resolvedEndsAt,
-      cooldownSeconds,
-    });
-  };
+  const armChatCooldown = useCallback(
+    (actionType: ChatCooldownActionType, cooldownSeconds: number, endsAt?: number | null) => {
+      if (cooldownSeconds <= 0) {
+        setChatCooldown(null);
+        return;
+      }
+      const resolvedEndsAt = endsAt ?? Date.now() + cooldownSeconds * 1000;
+      if (!Number.isFinite(resolvedEndsAt) || resolvedEndsAt <= Date.now()) {
+        setChatCooldown(null);
+        return;
+      }
+      setChatCooldown({
+        actionType,
+        endsAt: resolvedEndsAt,
+        cooldownSeconds,
+      });
+    },
+    []
+  );
 
-  const syncCooldownFromErrorDetail = (detail: Record<string, unknown> | null) => {
-    if (!detail) {
-      return false;
-    }
-    const actionType = resolveCooldownActionType(detail);
-    if (!actionType) {
-      return false;
-    }
-    const nextAllowedAt =
-      typeof detail.next_allowed_at === "string" ? Date.parse(detail.next_allowed_at) : Number.NaN;
-    const fallbackCooldownSeconds =
-      actionType === "try_other_style"
-        ? cooldownConfig.tryOtherStyleCooldownSeconds
-        : cooldownConfig.messageCooldownSeconds;
-    const cooldownSeconds =
-      typeof detail.cooldown_seconds === "number" && Number.isFinite(detail.cooldown_seconds)
-        ? detail.cooldown_seconds
-        : fallbackCooldownSeconds;
-    const endsAt = Number.isFinite(nextAllowedAt)
-      ? nextAllowedAt
-      : typeof detail.retry_after_seconds === "number"
-        ? Date.now() + detail.retry_after_seconds * 1000
-        : null;
-    armChatCooldown(actionType, cooldownSeconds, endsAt);
-    return true;
-  };
+  const syncCooldownFromErrorDetail = useCallback(
+    (detail: Record<string, unknown> | null) => {
+      if (!detail) {
+        return false;
+      }
+      const actionType = resolveCooldownActionType(detail);
+      if (!actionType) {
+        return false;
+      }
+      const nextAllowedAt =
+        typeof detail.next_allowed_at === "string" ? Date.parse(detail.next_allowed_at) : Number.NaN;
+      const fallbackCooldownSeconds =
+        actionType === "try_other_style"
+          ? cooldownConfig.tryOtherStyleCooldownSeconds
+          : cooldownConfig.messageCooldownSeconds;
+      const cooldownSeconds =
+        typeof detail.cooldown_seconds === "number" && Number.isFinite(detail.cooldown_seconds)
+          ? detail.cooldown_seconds
+          : fallbackCooldownSeconds;
+      const endsAt = Number.isFinite(nextAllowedAt)
+        ? nextAllowedAt
+        : typeof detail.retry_after_seconds === "number"
+          ? Date.now() + detail.retry_after_seconds * 1000
+          : null;
+      armChatCooldown(actionType, cooldownSeconds, endsAt);
+      return true;
+    },
+    [armChatCooldown, cooldownConfig.messageCooldownSeconds, cooldownConfig.tryOtherStyleCooldownSeconds]
+  );
 
-  const syncCooldownFromRuntimePolicy = (policyState: ChatRuntimePolicyState) => {
-    const cooldown = policyState.cooldown;
-    if (cooldown.is_allowed || cooldown.retry_after_seconds <= 0) {
-      setChatCooldown(null);
-      return;
-    }
+  const syncCooldownFromRuntimePolicy = useCallback(
+    (policyState: ChatRuntimePolicyState) => {
+      const cooldown = policyState.cooldown;
+      if (cooldown.is_allowed || cooldown.retry_after_seconds <= 0) {
+        setChatCooldown(null);
+        return;
+      }
 
-    const nextAllowedAt =
-      typeof cooldown.next_allowed_at === "string" ? Date.parse(cooldown.next_allowed_at) : Number.NaN;
-    const endsAt = Number.isFinite(nextAllowedAt)
-      ? nextAllowedAt
-      : Date.now() + cooldown.retry_after_seconds * 1000;
-    armChatCooldown(cooldown.action_type, cooldown.cooldown_seconds, endsAt);
-  };
+      const nextAllowedAt =
+        typeof cooldown.next_allowed_at === "string" ? Date.parse(cooldown.next_allowed_at) : Number.NaN;
+      const endsAt = Number.isFinite(nextAllowedAt)
+        ? nextAllowedAt
+        : Date.now() + cooldown.retry_after_seconds * 1000;
+      armChatCooldown(cooldown.action_type, cooldown.cooldown_seconds, endsAt);
+    },
+    [armChatCooldown]
+  );
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    activeJobRef.current = activeJob;
+  }, [activeJob]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -325,7 +339,7 @@ export function useStylistChatProcess(
     return () => {
       isMounted = false;
     };
-  }, [sessionId, locale]);
+  }, [sessionId, locale, syncCooldownFromRuntimePolicy]);
 
   useEffect(() => {
     writePersistedStylistChatUiState(sessionId, {
@@ -351,11 +365,12 @@ export function useStylistChatProcess(
   ]);
 
   useEffect(() => {
+    const currentJob = activeJobRef.current;
     if (
-      !activeJob ||
-      activeJob.status === "completed" ||
-      activeJob.status === "failed" ||
-      activeJob.status === "cancelled"
+      !currentJob ||
+      currentJob.status === "completed" ||
+      currentJob.status === "failed" ||
+      currentJob.status === "cancelled"
     ) {
       return;
     }
@@ -363,12 +378,23 @@ export function useStylistChatProcess(
     let isCancelled = false;
 
     const syncActiveJob = async () => {
+      const jobSnapshot = activeJobRef.current;
+      if (
+        !jobSnapshot ||
+        jobSnapshot.status === "completed" ||
+        jobSnapshot.status === "failed" ||
+        jobSnapshot.status === "cancelled"
+      ) {
+        return;
+      }
+
       try {
-        const nextJob = await generationGateway.getStatus(activeJob.public_id);
+        const nextJob = await generationGateway.getStatus(jobSnapshot.public_id);
         if (isCancelled) {
           return;
         }
-        const mergedJob = mergeQueuedJobState(activeJob, nextJob);
+        const mergedJob = mergeQueuedJobState(jobSnapshot, nextJob);
+        activeJobRef.current = mergedJob;
         setBackendState("connected");
         setErrorMessage(null);
         setActiveJob(mergedJob);

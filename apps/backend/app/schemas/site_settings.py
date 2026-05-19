@@ -6,6 +6,32 @@ from app.schemas.common import TimestampedRead
 class HomepagePreviewContent(BaseModel):
     visual_variant: str = "dashboard-dark"
     video_duration: str = "0:45"
+    video_url: str | None = None
+    cover_image: str | None = None
+
+
+class SiteMetaContent(BaseModel):
+    title_ru: str = "Вадим Махаррам - веб-продукты с 3D и motion"
+    title_en: str = "Vadim Makharram - web products with 3D and motion"
+    description_ru: str = (
+        "Разрабатываю быстрые веб-продукты с 3D-графикой, motion-интерфейсами и продуманной архитектурой."
+    )
+    description_en: str = (
+        "I build fast web products with 3D graphics, motion interfaces and thoughtful architecture."
+    )
+    keywords: list[str] = Field(
+        default_factory=lambda: ["frontend", "3d", "motion", "next.js", "three.js", "portfolio"]
+    )
+    canonical_url: str | None = "https://maharram.ru"
+    og_title_ru: str = "Вадим Махаррам"
+    og_title_en: str = "Vadim Makharram"
+    og_description_ru: str = "Веб-продукты с 3D-графикой и motion-интерфейсами."
+    og_description_en: str = "Web products with 3D graphics and motion interfaces."
+    og_image: str | None = None
+    twitter_card: str = "summary_large_image"
+    theme_color: str = "#f7f7f5"
+    robots_index: bool = True
+    robots_follow: bool = True
 
 
 class HomepageContent(BaseModel):
@@ -14,10 +40,39 @@ class HomepageContent(BaseModel):
     hero_eyebrow_items: list[str] = Field(
         default_factory=lambda: ["FRONTEND", "3D", "MOTION"]
     )
+    hero_eyebrow_items_ru: list[str] = Field(
+        default_factory=lambda: ["ФРОНТЕНД", "3D", "МОУШЕН"]
+    )
+    hero_eyebrow_items_en: list[str] = Field(
+        default_factory=lambda: ["FRONTEND", "3D", "MOTION"]
+    )
+    hero_title_rotating_items_ru: list[str] = Field(
+        default_factory=lambda: [
+            "сайты",
+            "мобильные приложения",
+            "десктопные приложения",
+            "3D-анимацию",
+            "графический дизайн для видео",
+        ]
+    )
+    hero_title_rotating_items_en: list[str] = Field(
+        default_factory=lambda: [
+            "websites",
+            "mobile apps",
+            "desktop apps",
+            "3D animation",
+            "video graphic design",
+        ]
+    )
+    hero_title_rotating_interval_ms: int = 1800
+    hero_title_rotating_animation_ms: int = 900
+    hero_title_rotating_accent_color: str = "#4f63f6"
     technologies_label_ru: str = "Технологии"
     technologies_label_en: str = "Technologies"
     project_stack_label_ru: str = "Стек"
     project_stack_label_en: str = "Stack"
+    project_demo_cta_label_ru: str = "Нажмите, чтобы увидеть демо"
+    project_demo_cta_label_en: str = "Click to view demo"
     hero_preview: HomepagePreviewContent = Field(default_factory=HomepagePreviewContent)
     header_cta_label_ru: str = "Связаться со мной"
     header_cta_label_en: str = "Contact me"
@@ -37,6 +92,7 @@ class HomepageContent(BaseModel):
     chat_section_title_en: str = "AI stylist"
     chat_section_description_ru: str = "Чат-бот временно вынесен в конец страницы."
     chat_section_description_en: str = "The chatbot block is temporarily placed at the end of the page."
+    site_meta: SiteMetaContent = Field(default_factory=SiteMetaContent)
 
 
 class SiteSettingsUpdate(BaseModel):

@@ -1,5 +1,5 @@
-import { ParserAdminPanel } from "@/widgets/admin/ui/ParserAdminPanel";
+import { redirect } from "next/navigation";
 
 export default function AdminParserPage() {
-  return <ParserAdminPanel />;
+  redirect("/admin/runtime");
 }

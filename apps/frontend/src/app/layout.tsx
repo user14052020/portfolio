@@ -1,10 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ColorSchemeScript } from "@mantine/core";
 import { cookies, headers } from "next/headers";
 import localFont from "next/font/local";
 
 import type { Locale } from "@/shared/api/types";
 import { AppProviders } from "@/providers/AppProviders";
+import { getSiteSettings } from "@/shared/api/client";
+import { env } from "@/shared/config/env";
+import { normalizeHomepageContent } from "@/shared/config/homepageContent";
+import { pickLocalized } from "@/shared/i18n/dictionaries";
+import { fallbackSettings } from "@/shared/mock/content";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "@/app/globals.css";
@@ -78,11 +83,6 @@ const g8Display = localFont({
   display: "swap"
 });
 
-export const metadata: Metadata = {
-  title: "Creative full-stack portfolio with AI stylist",
-  description: "Portfolio, blog, admin panel and AI stylist integration powered by FastAPI and Next.js."
-};
-
 function resolveInitialLocale(): Locale {
   const cookieStore = cookies();
   const localeFromCookie = cookieStore.get("portfolio-locale")?.value;
@@ -92,6 +92,90 @@ function resolveInitialLocale(): Locale {
 
   const acceptLanguage = headers().get("accept-language")?.toLowerCase() ?? "";
   return acceptLanguage.includes("ru") ? "ru" : "en";
+}
+
+function resolveUrl(value?: string | null): URL | undefined {
+  const normalizedValue = value?.trim();
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  try {
+    return new URL(normalizedValue);
+  } catch {
+    try {
+      return new URL(normalizedValue, env.siteUrl);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+async function resolveMetadataSettings() {
+  try {
+    return await getSiteSettings({ next: { revalidate: 60 } });
+  } catch {
+    return fallbackSettings;
+  }
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = resolveInitialLocale();
+  const settings = await resolveMetadataSettings();
+  const homepageContent = normalizeHomepageContent(settings.homepage_content);
+  const siteMeta = homepageContent.site_meta;
+  const title = pickLocalized(siteMeta, "title", locale) || pickLocalized(homepageContent, "brand_name", locale);
+  const description = pickLocalized(siteMeta, "description", locale) || pickLocalized(settings, "hero_subtitle", locale);
+  const openGraphTitle = pickLocalized(siteMeta, "og_title", locale) || title;
+  const openGraphDescription = pickLocalized(siteMeta, "og_description", locale) || description;
+  const siteName = pickLocalized(homepageContent, "brand_name", locale) || settings.brand_name;
+  const metadataBase = resolveUrl(env.siteUrl);
+  const canonical = resolveUrl(siteMeta.canonical_url);
+  const openGraphImage = resolveUrl(siteMeta.og_image);
+
+  return {
+    metadataBase,
+    title,
+    description,
+    keywords: siteMeta.keywords.length > 0 ? siteMeta.keywords : undefined,
+    alternates: canonical
+      ? {
+          canonical,
+        }
+      : undefined,
+    openGraph: {
+      title: openGraphTitle,
+      description: openGraphDescription,
+      url: canonical,
+      siteName,
+      images: openGraphImage ? [{ url: openGraphImage }] : undefined,
+      locale: locale === "ru" ? "ru_RU" : "en_US",
+      type: "website",
+    },
+    twitter: {
+      card: siteMeta.twitter_card,
+      title: openGraphTitle,
+      description: openGraphDescription,
+      images: openGraphImage ? [openGraphImage] : undefined,
+    },
+    robots: {
+      index: siteMeta.robots_index,
+      follow: siteMeta.robots_follow,
+      googleBot: {
+        index: siteMeta.robots_index,
+        follow: siteMeta.robots_follow,
+      },
+    },
+  };
+}
+
+export async function generateViewport(): Promise<Viewport> {
+  const settings = await resolveMetadataSettings();
+  const siteMeta = normalizeHomepageContent(settings.homepage_content).site_meta;
+
+  return {
+    themeColor: siteMeta.theme_color,
+  };
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

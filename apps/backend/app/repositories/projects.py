@@ -16,6 +16,12 @@ class ProjectsRepository(BaseRepository[Project]):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id_with_media(self, session: AsyncSession, project_id: int) -> Project | None:
+        result = await session.execute(
+            select(Project).options(selectinload(Project.media_items)).where(Project.id == project_id)
+        )
+        return result.scalar_one_or_none()
+
     async def list_projects(
         self,
         session: AsyncSession,
@@ -44,4 +50,3 @@ class ProjectsRepository(BaseRepository[Project]):
 
 
 projects_repository = ProjectsRepository()
-

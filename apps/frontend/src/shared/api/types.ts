@@ -308,16 +308,45 @@ export interface BlogPost {
 export interface HomepagePreviewContent {
   visual_variant: string;
   video_duration: string;
+  video_url?: string | null;
+  cover_image?: string | null;
+}
+
+export interface SiteMetaContent {
+  title_ru: string;
+  title_en: string;
+  description_ru: string;
+  description_en: string;
+  keywords: string[];
+  canonical_url?: string | null;
+  og_title_ru: string;
+  og_title_en: string;
+  og_description_ru: string;
+  og_description_en: string;
+  og_image?: string | null;
+  twitter_card: "summary" | "summary_large_image";
+  theme_color: string;
+  robots_index: boolean;
+  robots_follow: boolean;
 }
 
 export interface HomepageContent {
   brand_name_ru: string;
   brand_name_en: string;
   hero_eyebrow_items: string[];
+  hero_eyebrow_items_ru: string[];
+  hero_eyebrow_items_en: string[];
+  hero_title_rotating_items_ru: string[];
+  hero_title_rotating_items_en: string[];
+  hero_title_rotating_interval_ms: number;
+  hero_title_rotating_animation_ms: number;
+  hero_title_rotating_accent_color: string;
   technologies_label_ru: string;
   technologies_label_en: string;
   project_stack_label_ru: string;
   project_stack_label_en: string;
+  project_demo_cta_label_ru: string;
+  project_demo_cta_label_en: string;
   hero_preview: HomepagePreviewContent;
   header_cta_label_ru: string;
   header_cta_label_en: string;
@@ -333,6 +362,7 @@ export interface HomepageContent {
   chat_section_title_en: string;
   chat_section_description_ru: string;
   chat_section_description_en: string;
+  site_meta: SiteMetaContent;
 }
 
 export interface SiteSettings {

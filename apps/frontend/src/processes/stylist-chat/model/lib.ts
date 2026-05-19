@@ -362,7 +362,7 @@ export function buildOptimisticDraftMessage(
   }
 
   if (uploadedAsset) {
-    return locale === "ru"
+    return (locale as Locale) === "ru"
       ? `Р¤РѕС‚Рѕ РІРµС‰Рё: ${uploadedAsset.original_filename}`
       : `Item photo: ${uploadedAsset.original_filename}`;
   }
@@ -414,30 +414,30 @@ export function getScenarioPlaceholder(
   }
 
   if (context.pendingClarification) {
-    return locale === "ru"
+    return (locale as Locale) === "ru"
       ? "РћС‚РІРµС‚СЊС‚Рµ РЅР° СѓС‚РѕС‡РЅРµРЅРёРµ СЃС‚РёР»РёСЃС‚Р°..."
       : "Answer the stylist follow-up...";
   }
 
   if (context.activeMode === "occasion_outfit") {
-    return locale === "ru"
+    return (locale as Locale) === "ru"
       ? "РќР°РїСЂРёРјРµСЂ: РІРµС‡РµСЂРЅСЏСЏ РІС‹СЃС‚Р°РІРєР° СЃРѕРІСЂРµРјРµРЅРЅРѕРіРѕ РёСЃРєСѓСЃСЃС‚РІР° РѕСЃРµРЅСЊСЋ, С…РѕС‡Сѓ РІС‹РіР»СЏРґРµС‚СЊ РёРЅС‚РµР»Р»РµРєС‚СѓР°Р»СЊРЅРѕ Рё РЅРµРјРЅРѕРіРѕ СЃРјРµР»Рѕ"
       : "For example: an evening contemporary art exhibition in autumn, I want to look thoughtful and a little bold";
   }
 
   if (context.activeMode === "garment_matching") {
-    return locale === "ru"
+    return (locale as Locale) === "ru"
       ? "РќР°РїСЂРёРјРµСЂ: С‚С‘РјРЅРѕ-СЃРёРЅСЏСЏ РґР¶РёРЅСЃРѕРІР°СЏ СЂСѓР±Р°С€РєР° oversize"
       : "For example: a dark indigo oversized denim shirt";
   }
 
   if (context.activeMode === "style_exploration") {
-    return locale === "ru"
+    return (locale as Locale) === "ru"
       ? "Например: попробуем что-то мягче и теплее, без повторения прошлой палитры"
       : "For example: something softer and warmer, with a different palette and silhouette";
   }
 
-  return locale === "ru"
+  return (locale as Locale) === "ru"
     ? "РћРїРёС€РёС‚Рµ РІРµС‰СЊ, СЃРѕР±С‹С‚РёРµ РёР»Рё Р¶РµР»Р°РµРјС‹Р№ СЃС‚РёР»СЊ..."
     : "Describe the garment, occasion, or style direction...";
 }

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_optional_current_user, require_admin
 from app.db.session import get_db_session
-from app.models import Project, User
+from app.models import Project, ProjectMedia, User
 from app.models.enums import RoleCode
 from app.repositories.projects import projects_repository
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
@@ -14,6 +14,18 @@ from app.utils.slug import build_slug
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+PROJECT_NULLABLE_UPDATE_FIELDS = {
+    "cover_image",
+    "preview_video_url",
+    "repository_url",
+    "live_url",
+    "page_scene_key",
+    "seo_title_ru",
+    "seo_title_en",
+    "seo_description_ru",
+    "seo_description_en",
+}
 
 
 @router.get("/", response_model=list[ProjectRead])
@@ -49,8 +61,10 @@ async def create_project(
     _: Annotated[User, Depends(require_admin)],
 ) -> Project:
     data = payload.model_dump()
+    media_items = data.pop("media_items", [])
     data["slug"] = data.get("slug") or build_slug(payload.title_en)
     project = await projects_repository.create(session, data)
+    sync_project_media_items(project, media_items)
     await session.commit()
     await search_service.index_project(project)
     return await projects_repository.get_by_slug(session, project.slug)  # type: ignore[return-value]
@@ -63,13 +77,23 @@ async def update_project(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     _: Annotated[User, Depends(require_admin)],
 ) -> Project:
-    project = await projects_repository.get(session, project_id)
+    project = await projects_repository.get_by_id_with_media(session, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    data = {key: value for key, value in payload.model_dump(exclude_unset=True).items() if value is not None}
+    data = {
+        key: value
+        for key, value in payload.model_dump(exclude_unset=True).items()
+        if value is not None or key in PROJECT_NULLABLE_UPDATE_FIELDS
+    }
+    media_items = data.pop("media_items", None)
     if data.get("title_en") and not data.get("slug"):
         data["slug"] = build_slug(data["title_en"])
-    project = await projects_repository.update(session, project, data)
+    for key, value in data.items():
+        setattr(project, key, value)
+    if media_items is not None:
+        sync_project_media_items(project, media_items)
+    session.add(project)
+    await session.flush()
     await session.commit()
     await search_service.index_project(project)
     return await projects_repository.get_by_slug(session, project.slug)  # type: ignore[return-value]
@@ -89,3 +113,17 @@ async def delete_project(
     await session.commit()
     await search_service.delete_document("projects", slug)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def sync_project_media_items(project: Project, media_items: list[dict]) -> None:
+    project.media_items = [
+        ProjectMedia(
+            asset_type=item["asset_type"],
+            url=item["url"],
+            alt_ru=item.get("alt_ru"),
+            alt_en=item.get("alt_en"),
+            sort_order=item.get("sort_order", index),
+        )
+        for index, item in enumerate(media_items)
+        if item.get("url")
+    ]

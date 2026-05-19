@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
 import { cancelGenerationJob, deleteGenerationJob, getGenerationJobs } from "@/shared/api/client";
@@ -66,7 +66,7 @@ export function GenerationJobsControlPanel() {
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function refreshJobs() {
+  const refreshJobs = useCallback(async () => {
     if (!tokens?.access_token) {
       return;
     }
@@ -82,17 +82,19 @@ export function GenerationJobsControlPanel() {
     } finally {
       setIsLoadingJobs(false);
     }
-  }
+  }, [tokens?.access_token]);
 
   useEffect(() => {
     if (!tokens?.access_token) {
       return;
     }
 
-    refreshJobs();
-    const timer = window.setInterval(refreshJobs, 5000);
+    void refreshJobs();
+    const timer = window.setInterval(() => {
+      void refreshJobs();
+    }, 5000);
     return () => window.clearInterval(timer);
-  }, [tokens?.access_token]);
+  }, [tokens?.access_token, refreshJobs]);
 
   async function handleCancel(job: GenerationJob) {
     if (!tokens?.access_token) {

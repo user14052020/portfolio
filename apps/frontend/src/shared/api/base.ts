@@ -11,37 +11,32 @@ export type RequestOptions = RequestInit & {
   };
 };
 
+function isAbsoluteUrl(value: string) {
+  return value.startsWith("http://") || value.startsWith("https://");
+}
+
+function getApiBaseUrl() {
+  return typeof window === "undefined" ? env.internalApiUrl : env.apiUrl;
+}
+
 export function buildUrl(path: string, query?: RequestOptions["query"]) {
-
-  const baseUrl = env.apiUrl;
-
+  const baseUrl = getApiBaseUrl();
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-
-  const url =
-
-    baseUrl.startsWith("http://") || baseUrl.startsWith("https://")
-
-      ? new URL(`${baseUrl}${normalizedPath}`)
-
-      : new URL(`${baseUrl}${normalizedPath}`, window.location.origin);
+  const url = isAbsoluteUrl(baseUrl)
+    ? new URL(`${baseUrl}${normalizedPath}`)
+    : new URL(`${baseUrl}${normalizedPath}`, typeof window === "undefined" ? env.siteUrl : window.location.origin);
 
   if (query) {
-
     Object.entries(query).forEach(([key, value]) => {
-
       if (value !== undefined && value !== null && value !== "") {
-
         url.searchParams.set(key, String(value));
-
       }
-
     });
-
   }
 
   return url.toString();
-
 }
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -62,7 +57,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const response = await fetch(buildUrl(path, options.query), {
     ...options,
     headers,
-    cache: options.cache ?? "no-store",
+    cache: options.cache ?? (options.next ? undefined : "no-store"),
     next: options.next,
   });
 

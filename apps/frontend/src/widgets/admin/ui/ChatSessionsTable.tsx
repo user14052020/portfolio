@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
@@ -48,7 +48,7 @@ export function ChatSessionsTable() {
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadDetails(sessionId: string) {
+  const loadDetails = useCallback(async (sessionId: string) => {
     if (!tokens?.access_token) {
       return;
     }
@@ -66,9 +66,9 @@ export function ChatSessionsTable() {
     } finally {
       setIsLoadingDetails(false);
     }
-  }
+  }, [tokens?.access_token]);
 
-  async function loadSessions(nextQuery = appliedQuery, preferredSessionId?: string | null) {
+  const loadSessions = useCallback(async (nextQuery = appliedQuery, preferredSessionId?: string | null) => {
     if (!tokens?.access_token) {
       return;
     }
@@ -103,14 +103,14 @@ export function ChatSessionsTable() {
     } finally {
       setIsLoadingSessions(false);
     }
-  }
+  }, [appliedQuery, loadDetails, selectedSessionId, tokens?.access_token]);
 
   useEffect(() => {
     if (!tokens?.access_token) {
       return;
     }
-    loadSessions("", sessionFromQuery);
-  }, [tokens?.access_token, sessionFromQuery]);
+    void loadSessions("", sessionFromQuery);
+  }, [tokens?.access_token, sessionFromQuery, loadSessions]);
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

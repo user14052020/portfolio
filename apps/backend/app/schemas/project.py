@@ -13,6 +13,15 @@ class ProjectMediaRead(TimestampedRead):
     sort_order: int
 
 
+class ProjectMediaInput(BaseModel):
+    id: int | None = None
+    asset_type: MediaType = MediaType.IMAGE
+    url: str
+    alt_ru: str | None = None
+    alt_en: str | None = None
+    sort_order: int = 0
+
+
 class ProjectShowcaseMeta(BaseModel):
     visual_variant: str = "dashboard-light"
     video_duration: str = "0:40"
@@ -40,6 +49,7 @@ class ProjectBase(BaseModel):
     sort_order: int = 0
     is_featured: bool = True
     is_published: bool = True
+    media_items: list[ProjectMediaInput] = Field(default_factory=list)
 
 
 class ProjectCreate(ProjectBase):

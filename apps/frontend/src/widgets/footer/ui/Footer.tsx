@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import type { SiteSettings } from "@/shared/api/types";
+import { resolveExternalUrl } from "@/shared/config/socialLinks";
 
 export function Footer({ settings }: { settings: SiteSettings }) {
   return (
@@ -11,11 +12,18 @@ export function Footer({ settings }: { settings: SiteSettings }) {
           <p className="text-sm text-[var(--text-muted)]">{settings.contact_email}</p>
         </div>
         <div className="flex flex-wrap gap-4">
-          {Object.entries(settings.socials).map(([key, value]) => (
-            <Link key={key} href={value} className="text-sm text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
-              {key}
-            </Link>
-          ))}
+          {Object.entries(settings.socials)
+            .map(([key, value]) => [key, resolveExternalUrl(value)] as const)
+            .filter(([, value]) => value)
+            .map(([key, value]) => (
+              <Link
+                key={key}
+                href={value}
+                className="text-sm text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+              >
+                {key}
+              </Link>
+            ))}
         </div>
       </div>
     </footer>

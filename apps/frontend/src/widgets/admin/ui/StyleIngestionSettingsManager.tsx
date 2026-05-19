@@ -29,20 +29,22 @@ function formatSeconds(seconds: number) {
 
 export function StyleIngestionSettingsManager() {
   const { tokens } = useAdminAuth();
+  const accessToken = tokens?.access_token ?? null;
   const [settings, setSettings] = useState<StyleIngestionRuntimeSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (!tokens?.access_token) {
+    if (!accessToken) {
       return;
     }
 
     let cancelled = false;
+    const token = accessToken;
 
     async function loadSettings() {
       try {
-        const nextSettings = await getStyleIngestionSettings(STYLE_INGESTION_SOURCE_NAME, tokens.access_token);
+        const nextSettings = await getStyleIngestionSettings(STYLE_INGESTION_SOURCE_NAME, token);
         if (cancelled) {
           return;
         }
@@ -60,7 +62,7 @@ export function StyleIngestionSettingsManager() {
     return () => {
       cancelled = true;
     };
-  }, [tokens?.access_token]);
+  }, [accessToken]);
 
   function updateParserField(field: StyleIngestionNumberField, value: string | number) {
     setSettings((current) =>
@@ -74,7 +76,7 @@ export function StyleIngestionSettingsManager() {
   }
 
   async function handleSave() {
-    if (!tokens?.access_token || !settings) {
+    if (!accessToken || !settings) {
       return;
     }
     setIsSaving(true);
@@ -82,7 +84,7 @@ export function StyleIngestionSettingsManager() {
       const updated = await updateStyleIngestionSettings(
         settings.source_name,
         buildStyleIngestionSettingsUpdatePayload(settings),
-        tokens.access_token,
+        accessToken,
       );
       setSettings(updated);
       setError(null);
@@ -93,7 +95,7 @@ export function StyleIngestionSettingsManager() {
     }
   }
 
-  if (!tokens?.access_token) {
+  if (!accessToken) {
     return (
       <SurfaceCard variant="soft">
         <ParserTimingHeader />

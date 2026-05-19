@@ -2,7 +2,7 @@
 
 import { NumberInput, TextInput } from "@mantine/core";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
 import {
@@ -90,7 +90,7 @@ export function ParserAdminPanel() {
     title_contains: "",
   });
 
-  async function refreshOverview() {
+  const refreshOverview = useCallback(async () => {
     if (!tokens?.access_token) {
       return;
     }
@@ -101,7 +101,7 @@ export function ParserAdminPanel() {
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to load parser overview");
     }
-  }
+  }, [tokens?.access_token]);
 
   useEffect(() => {
     if (!tokens?.access_token) {
@@ -112,7 +112,7 @@ export function ParserAdminPanel() {
       void refreshOverview();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [tokens?.access_token]);
+  }, [tokens?.access_token, refreshOverview]);
 
   const commands = useMemo(() => {
     return buildManualCommands(form, overview?.process.pid_file_path ?? DEFAULT_PID_FILE_PATH);

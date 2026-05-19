@@ -23,8 +23,9 @@ from app.core.config import get_settings
 from app.core.security import get_password_hash
 from app.db.session import SessionLocal
 from app.integrations.elasticsearch import close_elasticsearch_client
-from app.models import BlogCategory, BlogPost, PageScene, Project, ProjectMedia, Role, SiteSettings, User
-from app.models.enums import BlogPostType, MediaType, RoleCode
+from app.models import BlogCategory, BlogPost, PageScene, Project, Role, SiteSettings, User
+from app.models.enums import BlogPostType, RoleCode
+from app.seed_data.showcase_projects import DEFAULT_SHOWCASE_PROJECTS
 from app.services.search import search_service
 from app.utils.slug import build_slug
 
@@ -79,6 +80,10 @@ async def seed_site_settings(session) -> None:
             about_text_en="Senior full-stack architect and lead developer. I work with FastAPI, Next.js, real-time UI, creative coding and AI pipelines.",
             socials={
                 "telegram": "https://t.me/example",
+                "vk": "",
+                "youtube": "",
+                "rutube": "",
+                "dzen": "",
                 "github": "https://github.com/example",
                 "linkedin": "https://linkedin.com/in/example",
             },
@@ -87,13 +92,36 @@ async def seed_site_settings(session) -> None:
                 "brand_name_ru": "Вадим Махаррам",
                 "brand_name_en": "Vadim Makharram",
                 "hero_eyebrow_items": ["FRONTEND", "3D", "MOTION"],
+                "hero_eyebrow_items_ru": ["ФРОНТЕНД", "3D", "МОУШЕН"],
+                "hero_eyebrow_items_en": ["FRONTEND", "3D", "MOTION"],
+                "hero_title_rotating_items_ru": [
+                    "сайты",
+                    "мобильные приложения",
+                    "десктопные приложения",
+                    "3D-анимацию",
+                    "графический дизайн для видео",
+                ],
+                "hero_title_rotating_items_en": [
+                    "websites",
+                    "mobile apps",
+                    "desktop apps",
+                    "3D animation",
+                    "video graphic design",
+                ],
+                "hero_title_rotating_interval_ms": 1800,
+                "hero_title_rotating_animation_ms": 900,
+                "hero_title_rotating_accent_color": "#4f63f6",
                 "technologies_label_ru": "Технологии",
                 "technologies_label_en": "Technologies",
                 "project_stack_label_ru": "Стек",
                 "project_stack_label_en": "Stack",
+                "project_demo_cta_label_ru": "Нажмите, чтобы увидеть демо",
+                "project_demo_cta_label_en": "Click to view demo",
                 "hero_preview": {
                     "visual_variant": "dashboard-dark",
                     "video_duration": "0:45",
+                    "video_url": None,
+                    "cover_image": None,
                 },
                 "header_cta_label_ru": "Связаться со мной",
                 "header_cta_label_en": "Contact me",
@@ -109,6 +137,23 @@ async def seed_site_settings(session) -> None:
                 "chat_section_title_en": "AI stylist",
                 "chat_section_description_ru": "Чат-бот временно вынесен в конец страницы.",
                 "chat_section_description_en": "The chatbot block is temporarily placed at the end of the page.",
+                "site_meta": {
+                    "title_ru": "Вадим Махаррам - веб-продукты с 3D и motion",
+                    "title_en": "Vadim Makharram - web products with 3D and motion",
+                    "description_ru": "Разрабатываю быстрые веб-продукты с 3D-графикой, motion-интерфейсами и продуманной архитектурой.",
+                    "description_en": "I build fast web products with 3D graphics, motion interfaces and thoughtful architecture.",
+                    "keywords": ["frontend", "3d", "motion", "next.js", "three.js", "portfolio"],
+                    "canonical_url": "https://maharram.ru",
+                    "og_title_ru": "Вадим Махаррам",
+                    "og_title_en": "Vadim Makharram",
+                    "og_description_ru": "Веб-продукты с 3D-графикой и motion-интерфейсами.",
+                    "og_description_en": "Web products with 3D graphics and motion interfaces.",
+                    "og_image": None,
+                    "twitter_card": "summary_large_image",
+                    "theme_color": "#f7f7f5",
+                    "robots_index": True,
+                    "robots_follow": True,
+                },
             },
             chat_bot_enabled=False,
         )
@@ -120,68 +165,9 @@ async def seed_projects(session) -> list[Project]:
     if existing:
         return existing
 
-    projects = [
-        Project(
-            slug=build_slug("AI Stylist Studio"),
-            title_ru="AI Stylist Studio",
-            title_en="AI Stylist Studio",
-            summary_ru="Платформа персонального стилиста с генерацией fashion flat-lay через локальный ComfyUI.",
-            summary_en="Personal stylist platform with fashion flat-lay generation via local-network ComfyUI.",
-            description_ru="Full-stack продукт с chat UX, upload пайплайном, генерацией образов и админкой для управления контентом и задачами.",
-            description_en="A full-stack product with chat UX, upload pipeline, outfit generation and an admin panel for content and jobs management.",
-            stack=["FastAPI", "Next.js", "PostgreSQL", "Redis", "ComfyUI", "Mantine"],
-            showcase_meta={"visual_variant": "dashboard-light", "video_duration": "0:40"},
-            cover_image="https://placehold.co/1600x960/e8ddd2/111827?text=AI+Stylist+Studio",
-            preview_video_url="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
-            repository_url="https://github.com/example/ai-stylist-studio",
-            live_url="https://example.com/ai-stylist",
-            page_scene_key="project-hero-orb",
-            seo_title_ru="AI Stylist Studio",
-            seo_title_en="AI Stylist Studio",
-            seo_description_ru="AI-стилист с генерацией образов и creative portfolio UI.",
-            seo_description_en="AI stylist with outfit generation and creative portfolio UI.",
-            sort_order=1,
-            is_featured=True,
-            is_published=True,
-        ),
-        Project(
-            slug=build_slug("Creative Motion Dashboard"),
-            title_ru="Creative Motion Dashboard",
-            title_en="Creative Motion Dashboard",
-            summary_ru="Платформа для презентации motion-дизайна и 3D-контента в виде creative studio dashboard.",
-            summary_en="Platform for showcasing motion design and 3D content inside a creative studio dashboard.",
-            description_ru="Собственный дизайн-системный слой, видеопревью, мультиязычный CMS-контур и 3D placeholder сцены на странице проекта.",
-            description_en="Custom design-system layer, video previews, multilingual CMS flow and 3D placeholder scenes on project pages.",
-            stack=["Next.js", "TypeScript", "Mantine", "Tailwind", "React Three Fiber"],
-            showcase_meta={"visual_variant": "chair-3d", "video_duration": "0:35"},
-            cover_image="https://placehold.co/1600x960/f3efe6/111827?text=Creative+Motion+Dashboard",
-            preview_video_url="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
-            repository_url="https://github.com/example/creative-motion-dashboard",
-            live_url="https://example.com/motion-dashboard",
-            page_scene_key="project-motion-ribbon",
-            seo_title_ru="Creative Motion Dashboard",
-            seo_title_en="Creative Motion Dashboard",
-            seo_description_ru="Motion и portfolio UX в стилистике studio dashboard.",
-            seo_description_en="Motion and portfolio UX in a creative studio dashboard language.",
-            sort_order=2,
-            is_featured=True,
-            is_published=True,
-        ),
-    ]
+    projects = [Project(**project_payload) for project_payload in DEFAULT_SHOWCASE_PROJECTS]
     session.add_all(projects)
     await session.flush()
-
-    for project in projects:
-        session.add(
-            ProjectMedia(
-                project_id=project.id,
-                asset_type=MediaType.VIDEO,
-                url=project.preview_video_url or "",
-                alt_ru=f"Превью проекта {project.title_ru}",
-                alt_en=f"{project.title_en} project preview",
-                sort_order=1,
-            )
-        )
     return projects
 
 

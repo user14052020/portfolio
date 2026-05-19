@@ -12,13 +12,14 @@ import { SoftButton } from "@/shared/ui/SoftButton";
 
 const links = [
   { href: "/admin", key: "dashboard", accent: "Overview" },
+  { href: "/admin/settings", key: "settings", accent: "Content" },
   { href: "/admin/projects", key: "projects", accent: "Portfolio" },
   { href: "/admin/posts", key: "posts", accent: "Editorial" },
+  { href: "/admin/meta", key: "meta", accent: "SEO" },
   { href: "/admin/contacts", key: "contacts", accent: "Inbox" },
   { href: "/admin/chats", key: "chats", accent: "Audit" },
   { href: "/admin/jobs", key: "jobs", accent: "Queue" },
-  { href: "/admin/parser", key: "parser", accent: "Ingestion" },
-  { href: "/admin/settings", key: "settings", accent: "Runtime" }
+  { href: "/admin/runtime", key: "runtime", accent: "Ops" }
 ] as const;
 
 export function AdminLayoutShell({ children }: { children: React.ReactNode }) {

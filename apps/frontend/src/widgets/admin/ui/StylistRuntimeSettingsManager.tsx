@@ -37,20 +37,22 @@ function formatSeconds(seconds: number) {
 
 export function StylistRuntimeSettingsManager() {
   const { tokens } = useAdminAuth();
+  const accessToken = tokens?.access_token ?? null;
   const [settings, setSettings] = useState<StylistRuntimeSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (!tokens?.access_token) {
+    if (!accessToken) {
       return;
     }
 
     let cancelled = false;
+    const token = accessToken;
 
     async function loadSettings() {
       try {
-        const nextSettings = await getStylistRuntimeSettings(tokens.access_token);
+        const nextSettings = await getStylistRuntimeSettings(token);
         if (cancelled) {
           return;
         }
@@ -68,7 +70,7 @@ export function StylistRuntimeSettingsManager() {
     return () => {
       cancelled = true;
     };
-  }, [tokens?.access_token]);
+  }, [accessToken]);
 
   function updateRuntimeField(field: RuntimeField, value: string | number, min: number, max: number) {
     setSettings((current) =>
@@ -82,14 +84,14 @@ export function StylistRuntimeSettingsManager() {
   }
 
   async function handleSave() {
-    if (!tokens?.access_token || !settings) {
+    if (!accessToken || !settings) {
       return;
     }
     setIsSaving(true);
     try {
       const updated = await updateStylistRuntimeSettings(
         buildStylistRuntimeSettingsUpdatePayload(settings),
-        tokens.access_token
+        accessToken
       );
       setSettings(updated);
       setError(null);
@@ -100,7 +102,7 @@ export function StylistRuntimeSettingsManager() {
     }
   }
 
-  if (!tokens?.access_token) {
+  if (!accessToken) {
     return (
       <SurfaceCard variant="soft">
         <RuntimeHeader />

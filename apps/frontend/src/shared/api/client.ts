@@ -101,7 +101,7 @@ export async function getProject(slug: string) {
   return request<Project>(`/projects/${slug}`);
 }
 
-export async function createProject(payload: Partial<Project>, token: string) {
+export async function createProject(payload: object, token: string) {
   return request<Project>("/projects", {
     method: "POST",
     token,
@@ -109,7 +109,7 @@ export async function createProject(payload: Partial<Project>, token: string) {
   });
 }
 
-export async function updateProject(id: number, payload: Partial<Project>, token: string) {
+export async function updateProject(id: number, payload: object, token: string) {
   return request<Project>(`/projects/${id}`, {
     method: "PUT",
     token,

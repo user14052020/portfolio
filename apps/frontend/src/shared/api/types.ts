@@ -212,6 +212,11 @@ export interface User {
   updated_at: string;
 }
 
+export interface UserPasswordChangePayload {
+  current_password: string;
+  new_password: string;
+}
+
 export interface UploadedAsset {
   id: number;
   original_filename: string;

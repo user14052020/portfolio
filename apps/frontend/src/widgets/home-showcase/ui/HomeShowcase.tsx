@@ -456,8 +456,7 @@ function ProjectShowcaseRow({
 
   return (
     <article className="space-y-6 lg:space-y-7">
-      <header className="grid gap-4 lg:grid-cols-[86px_minmax(0,1fr)] lg:items-end">
-        <p className="text-4xl font-light tracking-normal text-[#a6abb3]">{String(index + 1).padStart(2, "0")}</p>
+      <header>
         <div className="min-w-0">
           <h2 className="flex items-baseline gap-3 overflow-x-auto pb-1 text-3xl font-semibold tracking-normal text-[#111318] lg:whitespace-nowrap">
             <span className="shrink-0">{projectTitle}</span>

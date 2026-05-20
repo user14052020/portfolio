@@ -21,7 +21,8 @@ import type {
   StylistMessageResponse,
   TokenPair,
   UploadedAsset,
-  User
+  User,
+  UserPasswordChangePayload
 } from "@/shared/api/types";
 
 export async function getSiteSettings(fetchOptions?: Pick<RequestOptions, "cache" | "next">) {
@@ -444,4 +445,12 @@ export async function loginAdmin(email: string, password: string) {
 
 export async function getCurrentUser(token: string) {
   return request<User>("/auth/me", { token });
+}
+
+export async function changeCurrentUserPassword(payload: UserPasswordChangePayload, token: string) {
+  return request<User>("/users/me/password", {
+    method: "PUT",
+    token,
+    body: JSON.stringify(payload)
+  });
 }

@@ -14,6 +14,7 @@ const links = [
   { href: "/admin", key: "dashboard", accent: "Overview" },
   { href: "/admin/settings", key: "settings", accent: "Content" },
   { href: "/admin/projects", key: "projects", accent: "Portfolio" },
+  { href: "/admin/reviews", key: "reviews", accent: "Proof" },
   { href: "/admin/posts", key: "posts", accent: "Editorial" },
   { href: "/admin/meta", key: "meta", accent: "SEO" },
   { href: "/admin/contacts", key: "contacts", accent: "Inbox" },

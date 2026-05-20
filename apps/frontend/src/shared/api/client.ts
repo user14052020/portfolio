@@ -8,6 +8,10 @@ import type {
   ChatHistoryPage,
   ContactRequest,
   GenerationJob,
+  KworkReview,
+  KworkReviewsPage,
+  KworkReviewsSyncPayload,
+  KworkReviewsSyncResult,
   ParserAdminOverview,
   ParserAdminStartPayload,
   Project,
@@ -21,11 +25,11 @@ import type {
 } from "@/shared/api/types";
 
 export async function getSiteSettings(fetchOptions?: Pick<RequestOptions, "cache" | "next">) {
-  return request<SiteSettings>("/site-settings", fetchOptions);
+  return request<SiteSettings>("/site-settings/", fetchOptions);
 }
 
 export async function updateSiteSettings(payload: Record<string, unknown>, token: string) {
-  return request<SiteSettings>("/site-settings", {
+  return request<SiteSettings>("/site-settings/", {
     method: "PUT",
     token,
     body: JSON.stringify(payload)
@@ -33,13 +37,13 @@ export async function updateSiteSettings(payload: Record<string, unknown>, token
 }
 
 export async function getStylistRuntimeSettings(token: string) {
-  return request<StylistRuntimeSettings>("/stylist-runtime-settings", {
+  return request<StylistRuntimeSettings>("/stylist-runtime-settings/", {
     token
   });
 }
 
 export async function updateStylistRuntimeSettings(payload: Record<string, unknown>, token: string) {
-  return request<StylistRuntimeSettings>("/stylist-runtime-settings", {
+  return request<StylistRuntimeSettings>("/stylist-runtime-settings/", {
     method: "PUT",
     token,
     body: JSON.stringify(payload)
@@ -69,7 +73,7 @@ export async function getProjects(params?: {
   featuredOnly?: boolean;
   includeDrafts?: boolean;
 }, token?: string) {
-  return request<Project[]>("/projects", {
+  return request<Project[]>("/projects/", {
     token,
     query: {
       q: params?.q,
@@ -87,7 +91,7 @@ export async function getProjectsCached(
   },
   fetchOptions?: Pick<RequestOptions, "cache" | "next">
 ) {
-  return request<Project[]>("/projects", {
+  return request<Project[]>("/projects/", {
     ...fetchOptions,
     query: {
       q: params?.q,
@@ -102,7 +106,7 @@ export async function getProject(slug: string) {
 }
 
 export async function createProject(payload: object, token: string) {
-  return request<Project>("/projects", {
+  return request<Project>("/projects/", {
     method: "POST",
     token,
     body: JSON.stringify(payload)
@@ -124,13 +128,61 @@ export async function deleteProject(id: number, token: string) {
   });
 }
 
+export async function getKworkReviews(
+  params?: {
+    offset?: number;
+    limit?: number;
+  },
+  fetchOptions?: Pick<RequestOptions, "cache" | "next">
+) {
+  return request<KworkReviewsPage>("/reviews/", {
+    ...fetchOptions,
+    query: {
+      offset: params?.offset,
+      limit: params?.limit
+    }
+  });
+}
+
+export async function getAdminKworkReviews(
+  token: string,
+  params?: {
+    offset?: number;
+    limit?: number;
+  }
+) {
+  return request<KworkReviewsPage>("/reviews/admin/", {
+    token,
+    query: {
+      offset: params?.offset,
+      limit: params?.limit
+    }
+  });
+}
+
+export async function syncKworkReviews(payload: KworkReviewsSyncPayload, token: string) {
+  return request<KworkReviewsSyncResult>("/reviews/sync", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateKworkReview(id: number, payload: Partial<KworkReview>, token: string) {
+  return request<KworkReview>(`/reviews/${id}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function getBlogPosts(params?: {
   q?: string;
   categorySlug?: string;
   postType?: string;
   includeDrafts?: boolean;
 }, token?: string) {
-  return request<BlogPost[]>("/blog-posts", {
+  return request<BlogPost[]>("/blog-posts/", {
     token,
     query: {
       q: params?.q,
@@ -150,7 +202,7 @@ export async function getBlogPostsCached(
   },
   fetchOptions?: Pick<RequestOptions, "cache" | "next">
 ) {
-  return request<BlogPost[]>("/blog-posts", {
+  return request<BlogPost[]>("/blog-posts/", {
     ...fetchOptions,
     query: {
       q: params?.q,
@@ -166,7 +218,7 @@ export async function getBlogPost(slug: string) {
 }
 
 export async function createBlogPost(payload: Partial<BlogPost>, token: string) {
-  return request<BlogPost>("/blog-posts", {
+  return request<BlogPost>("/blog-posts/", {
     method: "POST",
     token,
     body: JSON.stringify(payload)
@@ -195,14 +247,14 @@ export async function createContactRequest(payload: {
   locale: string;
   source_page?: string;
 }) {
-  return request<ContactRequest>("/contact-requests", {
+  return request<ContactRequest>("/contact-requests/", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function getContactRequests(token: string) {
-  return request<ContactRequest[]>("/contact-requests", { token });
+  return request<ContactRequest[]>("/contact-requests/", { token });
 }
 
 export async function updateContactRequest(
@@ -231,7 +283,7 @@ export async function uploadAsset(
   if (typeof relatedEntityId === "number") {
     formData.append("related_entity_id", String(relatedEntityId));
   }
-  const response = await request<{ asset: UploadedAsset }>("/uploads", {
+  const response = await request<{ asset: UploadedAsset }>("/uploads/", {
     method: "POST",
     token,
     body: formData
@@ -303,7 +355,7 @@ export async function getStylistSessionContext(sessionId: string) {
 }
 
 export async function createGenerationJob(payload: Record<string, unknown>) {
-  return request<GenerationJob>("/generation-jobs", {
+  return request<GenerationJob>("/generation-jobs/", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -320,7 +372,7 @@ export async function refreshGenerationJobQueue(publicId: string) {
 }
 
 export async function getGenerationJobs(token: string) {
-  return request<GenerationJob[]>("/generation-jobs", { token });
+  return request<GenerationJob[]>("/generation-jobs/", { token });
 }
 
 export async function getAdminChatSessions(
@@ -331,7 +383,7 @@ export async function getAdminChatSessions(
     q?: string;
   }
 ) {
-  return request<AdminChatSessionsPage>("/admin/chats", {
+  return request<AdminChatSessionsPage>("/admin/chats/", {
     token,
     query: {
       offset: params?.offset,

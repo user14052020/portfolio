@@ -1,18 +1,11 @@
 import type { HomepageContent, ProjectShowcaseMeta, SiteMetaContent } from "@/shared/api/types";
 
-export type ShowcaseVisualVariant =
-  | "dashboard-dark"
-  | "dashboard-light"
-  | "chair-3d"
-  | "finance-motion"
-  | "uploaded-media";
+export type ProjectShowcaseMediaMode = "screenshots" | "demo" | "video";
 
-export const showcaseVisualOptions: Array<{ value: ShowcaseVisualVariant; label: string }> = [
-  { value: "dashboard-dark", label: "Dark analytics dashboard" },
-  { value: "dashboard-light", label: "Light analytics dashboard" },
-  { value: "chair-3d", label: "Interactive 3D configurator" },
-  { value: "finance-motion", label: "Purple motion interface" },
-  { value: "uploaded-media", label: "Uploaded video or cover image" },
+export const projectShowcaseMediaModeOptions: Array<{ value: ProjectShowcaseMediaMode; label: string }> = [
+  { value: "screenshots", label: "Screenshots gallery" },
+  { value: "demo", label: "Demo button" },
+  { value: "video", label: "Video player" },
 ];
 
 export const defaultSiteMetaContent: SiteMetaContent = {
@@ -64,12 +57,6 @@ export const defaultHomepageContent: HomepageContent = {
   project_stack_label_en: "Stack",
   project_demo_cta_label_ru: "Нажмите, чтобы увидеть демо",
   project_demo_cta_label_en: "Click to view demo",
-  hero_preview: {
-    visual_variant: "dashboard-dark",
-    video_duration: "0:45",
-    video_url: null,
-    cover_image: null,
-  },
   header_cta_label_ru: "Связаться со мной",
   header_cta_label_en: "Contact me",
   contact_title_ru: "Есть проект?\nДавайте обсудим",
@@ -80,6 +67,10 @@ export const defaultHomepageContent: HomepageContent = {
   telegram_label_en: "Telegram",
   email_label_ru: "Email",
   email_label_en: "Email",
+  kwork_reviews_eyebrow_ru: "Отзывы Kwork",
+  kwork_reviews_eyebrow_en: "Kwork reviews",
+  kwork_reviews_title_ru: "Отзывы о моей работе на площадке kwork.ru",
+  kwork_reviews_title_en: "Reviews of my work on kwork.ru",
   chat_section_title_ru: "AI-стилист",
   chat_section_title_en: "AI stylist",
   chat_section_description_ru: "Чат-бот временно вынесен в конец страницы.",
@@ -88,6 +79,7 @@ export const defaultHomepageContent: HomepageContent = {
 };
 
 export const defaultProjectShowcaseMeta: ProjectShowcaseMeta = {
+  media_mode: "screenshots",
   visual_variant: "dashboard-light",
   video_duration: "0:40",
 };
@@ -115,10 +107,14 @@ export function normalizeHomepageContent(content?: Partial<HomepageContent> | nu
       : defaultHomepageContent.hero_title_rotating_items_en;
   const rotatingInterval = Number(content?.hero_title_rotating_interval_ms);
   const rotatingAnimation = Number(content?.hero_title_rotating_animation_ms);
+  const contentWithoutHeroPreview = { ...(content ?? {}) } as Partial<HomepageContent> & {
+    hero_preview?: unknown;
+  };
+  delete contentWithoutHeroPreview.hero_preview;
 
   return {
     ...defaultHomepageContent,
-    ...content,
+    ...contentWithoutHeroPreview,
     hero_eyebrow_items: heroEyebrowItemsEn,
     hero_eyebrow_items_ru: heroEyebrowItemsRu,
     hero_eyebrow_items_en: heroEyebrowItemsEn,
@@ -135,12 +131,6 @@ export function normalizeHomepageContent(content?: Partial<HomepageContent> | nu
     hero_title_rotating_accent_color:
       content?.hero_title_rotating_accent_color?.trim() ||
       defaultHomepageContent.hero_title_rotating_accent_color,
-    hero_preview: {
-      ...defaultHomepageContent.hero_preview,
-      ...content?.hero_preview,
-      video_url: content?.hero_preview?.video_url?.trim() || null,
-      cover_image: content?.hero_preview?.cover_image?.trim() || null,
-    },
     site_meta: {
       ...defaultSiteMetaContent,
       ...content?.site_meta,
@@ -156,9 +146,17 @@ export function normalizeProjectShowcaseMeta(
   meta?: Partial<ProjectShowcaseMeta> | null,
   fallback?: Partial<ProjectShowcaseMeta>
 ): ProjectShowcaseMeta {
-  return {
+  const merged = {
     ...defaultProjectShowcaseMeta,
     ...fallback,
     ...meta,
+  };
+
+  return {
+    ...merged,
+    media_mode:
+      merged.media_mode === "video" || merged.media_mode === "demo"
+        ? merged.media_mode
+        : "screenshots",
   };
 }

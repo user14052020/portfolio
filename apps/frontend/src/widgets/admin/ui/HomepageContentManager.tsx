@@ -1,12 +1,12 @@
 "use client";
 
-import { FileInput, NumberInput, Select, Textarea, TextInput } from "@mantine/core";
+import { NumberInput, Textarea, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 
 import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
-import { getSiteSettings, updateSiteSettings, uploadAsset } from "@/shared/api/client";
-import type { HomepageContent, HomepagePreviewContent, SiteSettings } from "@/shared/api/types";
-import { normalizeHomepageContent, showcaseVisualOptions } from "@/shared/config/homepageContent";
+import { getSiteSettings, updateSiteSettings } from "@/shared/api/client";
+import type { HomepageContent, SiteSettings } from "@/shared/api/types";
+import { normalizeHomepageContent } from "@/shared/config/homepageContent";
 import { contactSocialLinks } from "@/shared/config/socialLinks";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";
@@ -23,7 +23,6 @@ type HomepageTextField = keyof Omit<
   | "hero_title_rotating_items_en"
   | "hero_title_rotating_interval_ms"
   | "hero_title_rotating_animation_ms"
-  | "hero_preview"
   | "site_meta"
   | "chat_section_title_ru"
   | "chat_section_title_en"
@@ -104,10 +103,6 @@ export function HomepageContentManager() {
   const [listDrafts, setListDrafts] = useState<ListDrafts>(emptyListDrafts);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [uploadingHeroField, setUploadingHeroField] = useState<keyof Pick<
-    HomepagePreviewContent,
-    "cover_image" | "video_url"
-  > | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,57 +179,6 @@ export function HomepageContentManager() {
           }
         : current,
     );
-  }
-
-  function updateHeroPreview(field: keyof HomepagePreviewContent, value: string | null) {
-    setSettings((current) =>
-      current
-        ? {
-            ...current,
-            homepage_content: {
-              ...current.homepage_content,
-              hero_preview: {
-                ...current.homepage_content.hero_preview,
-                [field]: value,
-              },
-            },
-          }
-        : current,
-    );
-  }
-
-  async function handleHeroPreviewUpload(
-    field: keyof Pick<HomepagePreviewContent, "cover_image" | "video_url">,
-    file: File | null,
-  ) {
-    if (!file || !tokens?.access_token || !settings) {
-      return;
-    }
-
-    setUploadingHeroField(field);
-    try {
-      const asset = await uploadAsset(file, tokens.access_token, "site_settings", settings.id);
-      setSettings((current) =>
-        current
-          ? {
-              ...current,
-              homepage_content: {
-                ...current.homepage_content,
-                hero_preview: {
-                  ...current.homepage_content.hero_preview,
-                  visual_variant: "uploaded-media",
-                  [field]: asset.public_url,
-                },
-              },
-            }
-          : current,
-      );
-      setError(null);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Failed to upload hero preview media");
-    } finally {
-      setUploadingHeroField(null);
-    }
   }
 
   function updateListDraft(field: keyof ListDrafts, value: string) {
@@ -341,11 +285,12 @@ export function HomepageContentManager() {
           <ContentCardHeader
             eyebrow="Hero"
             title="Intro, offer and technologies"
-            description="Eyebrow items, main headline, supporting text, technology list and the large preview beside it."
+            description="Eyebrow items, main headline, supporting text and technology list."
           />
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
+          <HeroGroupDivider title="Eyebrow" description="Small tags above the main heading." />
           <TextInput
             label="Hero eyebrow items RU"
             description="Через запятую: ФРОНТЕНД, 3D, МОУШЕН"
@@ -358,12 +303,7 @@ export function HomepageContentManager() {
             value={listDrafts.heroEyebrowEn}
             onChange={(event) => updateListDraft("heroEyebrowEn", event.currentTarget.value)}
           />
-          <TextInput
-            label="Skills / technologies"
-            description="Comma-separated list"
-            value={listDrafts.skills}
-            onChange={(event) => updateListDraft("skills", event.currentTarget.value)}
-          />
+          <HeroGroupDivider title="Title" description="Static beginning of the headline." />
           <Textarea
             label="Hero title RU"
             minRows={3}
@@ -376,6 +316,7 @@ export function HomepageContentManager() {
             value={settings.hero_title_en}
             onChange={(event) => updateRootField("hero_title_en", event.currentTarget.value)}
           />
+          <HeroGroupDivider title="Rotating phrase" description="Words, color and timing for the animated part of the headline." />
           <TextInput
             label="Hero rotating words RU"
             description="Через запятую: сайты, мобильные приложения, десктопные приложения"
@@ -420,6 +361,7 @@ export function HomepageContentManager() {
             value={content.hero_title_rotating_accent_color}
             onChange={(event) => updateHomepageField("hero_title_rotating_accent_color", event.currentTarget.value)}
           />
+          <HeroGroupDivider title="Subtitle" description="Supporting text below the headline." />
           <Textarea
             label="Hero subtitle RU"
             minRows={4}
@@ -432,6 +374,14 @@ export function HomepageContentManager() {
             value={settings.hero_subtitle_en}
             onChange={(event) => updateRootField("hero_subtitle_en", event.currentTarget.value)}
           />
+          <HeroGroupDivider title="Technologies" description="Technology label and comma-separated technology list." />
+          <TextInput
+            label="Skills / technologies"
+            description="Comma-separated list"
+            value={listDrafts.skills}
+            onChange={(event) => updateListDraft("skills", event.currentTarget.value)}
+          />
+          <div className="hidden md:block" />
           <TextInput
             label="Technologies label RU"
             value={content.technologies_label_ru}
@@ -441,47 +391,6 @@ export function HomepageContentManager() {
             label="Technologies label EN"
             value={content.technologies_label_en}
             onChange={(event) => updateHomepageField("technologies_label_en", event.currentTarget.value)}
-          />
-          <Select
-            label="Hero preview visual"
-            data={showcaseVisualOptions}
-            value={content.hero_preview.visual_variant}
-            onChange={(value) => updateHeroPreview("visual_variant", value ?? "dashboard-dark")}
-          />
-          <TextInput
-            label="Hero preview duration"
-            value={content.hero_preview.video_duration}
-            onChange={(event) => updateHeroPreview("video_duration", event.currentTarget.value)}
-          />
-          <TextInput
-            label="Hero preview cover image URL"
-            description="Used as video poster before playback."
-            value={content.hero_preview.cover_image ?? ""}
-            onChange={(event) => updateHeroPreview("cover_image", event.currentTarget.value)}
-          />
-          <FileInput
-            label="Upload hero cover image"
-            description="PNG, JPG, WebP or AVIF."
-            accept="image/*"
-            clearable
-            disabled={uploadingHeroField !== null || !tokens?.access_token}
-            placeholder={uploadingHeroField === "cover_image" ? "Uploading..." : "Choose image"}
-            onChange={(file) => void handleHeroPreviewUpload("cover_image", file)}
-          />
-          <TextInput
-            label="Hero preview video URL"
-            description="When set, the homepage uses the real video player."
-            value={content.hero_preview.video_url ?? ""}
-            onChange={(event) => updateHeroPreview("video_url", event.currentTarget.value)}
-          />
-          <FileInput
-            label="Upload hero video"
-            description="MP4/WebM is recommended."
-            accept="video/*"
-            clearable
-            disabled={uploadingHeroField !== null || !tokens?.access_token}
-            placeholder={uploadingHeroField === "video_url" ? "Uploading..." : "Choose video"}
-            onChange={(file) => void handleHeroPreviewUpload("video_url", file)}
           />
         </div>
       </SurfaceCard>
@@ -600,6 +509,21 @@ function ContentCardHeader({
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">{eyebrow}</p>
       <h2 className="font-display text-2xl text-[var(--text-primary)]">{title}</h2>
       <p className="text-sm text-[var(--text-secondary)]">{description}</p>
+    </div>
+  );
+}
+
+function HeroGroupDivider({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="border-t border-[var(--border-soft)] pt-5 first:border-t-0 first:pt-0 md:col-span-2">
+      <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
+      <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{description}</p>
     </div>
   );
 }

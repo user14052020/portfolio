@@ -23,6 +23,7 @@ class ProjectMediaInput(BaseModel):
 
 
 class ProjectShowcaseMeta(BaseModel):
+    media_mode: str = "screenshots"
     visual_variant: str = "dashboard-light"
     video_duration: str = "0:40"
 

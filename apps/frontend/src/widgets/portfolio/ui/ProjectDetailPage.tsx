@@ -25,7 +25,9 @@ export function ProjectDetailPage({ project }: { project: Project }) {
             <h1 className="text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">
               {pickLocalized(project, "title", locale)}
             </h1>
-            <p className="text-lg leading-8 text-slate-600">{pickLocalized(project, "description", locale)}</p>
+            <p className="whitespace-pre-line text-lg leading-8 text-slate-600">
+              {pickLocalized(project, "description", locale)}
+            </p>
             <div className="flex flex-wrap gap-2">
               {project.stack.map((item) => (
                 <span

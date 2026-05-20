@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 
-import type { Project, SiteSettings } from "@/shared/api/types";
+import type { KworkReviewsPage, Project, SiteSettings } from "@/shared/api/types";
 import { useI18n } from "@/shared/i18n/I18nProvider";
 import { HomeShowcase } from "@/widgets/home-showcase/ui/HomeShowcase";
 
@@ -22,9 +22,11 @@ const ChatWindow = dynamic(
 export function HomePageSurface({
   initialSettings,
   initialProjects,
+  initialReviewsPage,
 }: {
   initialSettings: SiteSettings;
   initialProjects: Project[];
+  initialReviewsPage: KworkReviewsPage;
 }) {
   const { locale, setLocale } = useI18n();
 
@@ -32,6 +34,7 @@ export function HomePageSurface({
     <HomeShowcase
       settings={initialSettings}
       projects={initialProjects}
+      initialReviewsPage={initialReviewsPage}
       locale={locale}
       onLocaleChange={setLocale}
       chatSlot={initialSettings.chat_bot_enabled ? <ChatWindow settings={initialSettings} /> : null}

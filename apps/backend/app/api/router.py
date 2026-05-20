@@ -6,6 +6,7 @@ from app.api.routes import (
     blog_posts,
     contact_requests,
     generation_jobs,
+    kwork_reviews,
     projects,
     site_settings,
     style_ingestion_admin,
@@ -21,6 +22,7 @@ api_router = APIRouter()
 api_router.include_router(admin_chats.router)
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
+api_router.include_router(kwork_reviews.router)
 api_router.include_router(projects.router)
 api_router.include_router(blog_posts.router)
 api_router.include_router(contact_requests.router)

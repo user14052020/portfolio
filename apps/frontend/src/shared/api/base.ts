@@ -15,12 +15,40 @@ function isAbsoluteUrl(value: string) {
   return value.startsWith("http://") || value.startsWith("https://");
 }
 
+function stripTrailingSlash(value: string) {
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+function normalizeHost(value: string) {
+  return value.replace(/^www\./, "");
+}
+
+function normalizeBrowserApiBaseUrl(baseUrl: string) {
+  if (typeof window === "undefined" || !isAbsoluteUrl(baseUrl)) {
+    return baseUrl;
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    const isSameSiteHost = normalizeHost(url.hostname) === normalizeHost(window.location.hostname);
+
+    if (url.protocol === "http:" && window.location.protocol === "https:" && isSameSiteHost) {
+      url.protocol = "https:";
+      return stripTrailingSlash(url.toString());
+    }
+  } catch {
+    return baseUrl;
+  }
+
+  return baseUrl;
+}
+
 function getApiBaseUrl() {
-  return typeof window === "undefined" ? env.internalApiUrl : env.apiUrl;
+  return typeof window === "undefined" ? env.internalApiUrl : normalizeBrowserApiBaseUrl(env.apiUrl);
 }
 
 export function buildUrl(path: string, query?: RequestOptions["query"]) {
-  const baseUrl = getApiBaseUrl();
+  const baseUrl = stripTrailingSlash(getApiBaseUrl());
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const url = isAbsoluteUrl(baseUrl)
     ? new URL(`${baseUrl}${normalizedPath}`)

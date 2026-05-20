@@ -29,12 +29,6 @@ type ShowcaseVideoFrameProps = {
   className?: string;
 };
 
-const variantFallbacks = ["dashboard-light", "chair-3d", "finance-motion"];
-
-export function getProjectFallbackVariant(index: number) {
-  return variantFallbacks[index % variantFallbacks.length];
-}
-
 export function ShowcaseVideoFrame({
   variant,
   duration,

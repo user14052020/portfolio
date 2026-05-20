@@ -10,7 +10,7 @@ class HttpAssetGateway implements AssetGateway {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("related_entity", "generation_input");
-    const response = await request<{ asset: UploadedAsset }>("/uploads", {
+    const response = await request<{ asset: UploadedAsset }>("/uploads/", {
       method: "POST",
       body: formData,
     });

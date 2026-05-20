@@ -10,7 +10,8 @@ import { createProject, deleteProject, getProjects, updateProject, uploadAsset }
 import type { Project } from "@/shared/api/types";
 import {
   normalizeProjectShowcaseMeta,
-  showcaseVisualOptions,
+  projectShowcaseMediaModeOptions,
+  type ProjectShowcaseMediaMode,
 } from "@/shared/config/homepageContent";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";
@@ -26,7 +27,7 @@ type ProjectForm = {
   description_ru: string;
   description_en: string;
   stack: string;
-  showcase_visual_variant: string;
+  showcase_media_mode: ProjectShowcaseMediaMode;
   showcase_video_duration: string;
   preview_video_url: string;
   cover_image: string;
@@ -71,7 +72,7 @@ const emptyForm: ProjectForm = {
   description_ru: "",
   description_en: "",
   stack: "",
-  showcase_visual_variant: "dashboard-light",
+  showcase_media_mode: "screenshots",
   showcase_video_duration: "0:40",
   preview_video_url: "",
   cover_image: "",
@@ -100,7 +101,29 @@ function nullableString(value: string) {
   return trimmed ? trimmed : null;
 }
 
+function resolveProjectVisualVariant(mediaMode: ProjectShowcaseMediaMode) {
+  return mediaMode === "screenshots" ? "dashboard-light" : "uploaded-media";
+}
+
+function normalizeSelectedProjectMediaMode(value: string | null): ProjectShowcaseMediaMode {
+  return value === "demo" || value === "video" ? value : "screenshots";
+}
+
 function buildProjectPayload(form: ProjectForm): ProjectPayload {
+  const mediaItems =
+    form.showcase_media_mode === "screenshots"
+      ? form.media_items
+          .filter((item) => item.url.trim())
+          .map((item, index) => ({
+            id: item.id,
+            asset_type: "image" as const,
+            url: item.url.trim(),
+            alt_ru: nullableString(item.alt_ru),
+            alt_en: nullableString(item.alt_en),
+            sort_order: Number.isFinite(item.sort_order) ? item.sort_order : index,
+          }))
+      : [];
+
   return {
     slug: nullableString(form.slug) ?? undefined,
     title_ru: form.title_ru,
@@ -111,13 +134,18 @@ function buildProjectPayload(form: ProjectForm): ProjectPayload {
     description_en: form.description_en,
     stack: parseCommaList(form.stack),
     showcase_meta: {
-      visual_variant: form.showcase_visual_variant,
+      media_mode: form.showcase_media_mode,
+      visual_variant: resolveProjectVisualVariant(form.showcase_media_mode),
       video_duration: form.showcase_video_duration,
     },
-    preview_video_url: nullableString(form.preview_video_url),
-    cover_image: nullableString(form.cover_image),
+    preview_video_url:
+      form.showcase_media_mode === "video" ? nullableString(form.preview_video_url) : null,
+    cover_image:
+      form.showcase_media_mode === "demo" || form.showcase_media_mode === "video"
+        ? nullableString(form.cover_image)
+        : null,
     repository_url: nullableString(form.repository_url),
-    live_url: nullableString(form.live_url),
+    live_url: form.showcase_media_mode === "demo" ? nullableString(form.live_url) : null,
     page_scene_key: nullableString(form.page_scene_key),
     seo_title_ru: nullableString(form.seo_title_ru),
     seo_title_en: nullableString(form.seo_title_en),
@@ -126,16 +154,7 @@ function buildProjectPayload(form: ProjectForm): ProjectPayload {
     sort_order: form.sort_order,
     is_featured: form.is_featured,
     is_published: form.is_published,
-    media_items: form.media_items
-      .filter((item) => item.url.trim())
-      .map((item, index) => ({
-        id: item.id,
-        asset_type: "image",
-        url: item.url.trim(),
-        alt_ru: nullableString(item.alt_ru),
-        alt_en: nullableString(item.alt_en),
-        sort_order: Number.isFinite(item.sort_order) ? item.sort_order : index,
-      })),
+    media_items: mediaItems,
   };
 }
 
@@ -151,7 +170,10 @@ function buildProjectForm(project: Project): ProjectForm {
     description_ru: project.description_ru,
     description_en: project.description_en,
     stack: project.stack.join(", "),
-    showcase_visual_variant: showcaseMeta.visual_variant,
+    showcase_media_mode:
+      showcaseMeta.media_mode === "video" || showcaseMeta.media_mode === "demo"
+        ? showcaseMeta.media_mode
+        : "screenshots",
     showcase_video_duration: showcaseMeta.video_duration,
     preview_video_url: project.preview_video_url ?? "",
     cover_image: project.cover_image ?? "",
@@ -188,6 +210,10 @@ export function ProjectManager() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [screenshotUploadFile, setScreenshotUploadFile] = useState<File | null>(null);
+  const [isUploadingProjectVideo, setIsUploadingProjectVideo] = useState(false);
+  const [isUploadingProjectCover, setIsUploadingProjectCover] = useState(false);
+  const [projectVideoUploadFile, setProjectVideoUploadFile] = useState<File | null>(null);
+  const [projectCoverUploadFile, setProjectCoverUploadFile] = useState<File | null>(null);
 
   const loadProjects = useCallback(async () => {
     if (!tokens?.access_token) {
@@ -211,12 +237,16 @@ export function ProjectManager() {
     setEditingId(project.id);
     setForm(buildProjectForm(project));
     setScreenshotUploadFile(null);
+    setProjectVideoUploadFile(null);
+    setProjectCoverUploadFile(null);
   }
 
   function resetForm() {
     setEditingId(null);
     setForm(emptyForm);
     setScreenshotUploadFile(null);
+    setProjectVideoUploadFile(null);
+    setProjectCoverUploadFile(null);
   }
 
   async function handleSave() {
@@ -266,6 +296,39 @@ export function ProjectManager() {
     } finally {
       setIsUploadingScreenshot(false);
       setScreenshotUploadFile(null);
+    }
+  }
+
+  async function handleProjectMediaUpload(field: "preview_video_url" | "cover_image", file: File | null) {
+    if (!file || !tokens?.access_token) {
+      return;
+    }
+
+    const isVideoUpload = field === "preview_video_url";
+    if (isVideoUpload) {
+      setIsUploadingProjectVideo(true);
+    } else {
+      setIsUploadingProjectCover(true);
+    }
+
+    try {
+      const asset = await uploadAsset(file, tokens.access_token, "project", editingId ?? undefined);
+      setForm((current) => ({
+        ...current,
+        showcase_media_mode: isVideoUpload ? "video" : current.showcase_media_mode,
+        [field]: asset.public_url,
+      }));
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Failed to upload project media");
+    } finally {
+      if (isVideoUpload) {
+        setIsUploadingProjectVideo(false);
+        setProjectVideoUploadFile(null);
+      } else {
+        setIsUploadingProjectCover(false);
+        setProjectCoverUploadFile(null);
+      }
     }
   }
 
@@ -363,208 +426,305 @@ export function ProjectManager() {
           />
         }
       >
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <TextInput
-              label="Slug"
-              description="Leave empty for a new project to generate it from Title EN."
-              value={form.slug}
-              onChange={(event) => setForm({ ...form, slug: event.currentTarget.value })}
-            />
-            <NumberInput
-              label="Sort order"
-              value={form.sort_order}
-              onChange={(value) => setForm({ ...form, sort_order: typeof value === "number" ? value : 0 })}
-            />
-            <TextInput
-              label="Title RU"
-              value={form.title_ru}
-              onChange={(event) => setForm({ ...form, title_ru: event.currentTarget.value })}
-            />
-            <TextInput
-              label="Title EN"
-              value={form.title_en}
-              onChange={(event) => setForm({ ...form, title_en: event.currentTarget.value })}
-            />
-            <Textarea
-              label="Summary RU"
-              value={form.summary_ru}
-              onChange={(event) => setForm({ ...form, summary_ru: event.currentTarget.value })}
-            />
-            <Textarea
-              label="Summary EN"
-              value={form.summary_en}
-              onChange={(event) => setForm({ ...form, summary_en: event.currentTarget.value })}
-            />
-          </div>
-
-          <Textarea
-            label="Description RU"
-            minRows={4}
-            value={form.description_ru}
-            onChange={(event) => setForm({ ...form, description_ru: event.currentTarget.value })}
-          />
-          <Textarea
-            label="Description EN"
-            minRows={4}
-            value={form.description_en}
-            onChange={(event) => setForm({ ...form, description_en: event.currentTarget.value })}
-          />
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <TextInput
-              label="Stack"
-              placeholder="FastAPI, Next.js, Redis"
-              value={form.stack}
-              onChange={(event) => setForm({ ...form, stack: event.currentTarget.value })}
-            />
-            <TextInput
-              label="Preview video URL"
-              value={form.preview_video_url}
-              onChange={(event) => setForm({ ...form, preview_video_url: event.currentTarget.value })}
-            />
-            <TextInput
-              label="Cover image URL"
-              value={form.cover_image}
-              onChange={(event) => setForm({ ...form, cover_image: event.currentTarget.value })}
-            />
-          </div>
-
-          <section className="space-y-4 border-y border-[var(--border-soft)] py-5">
+        <div className="space-y-5">
+          <section className="space-y-4 rounded-[24px] border border-[var(--border-soft)] bg-[var(--surface-secondary)] p-4">
             <SectionHeader
-              eyebrow="Screenshots"
-              title="Project gallery"
-              description="Upload and order screenshots used by the public project showcase slider."
+              eyebrow="Content"
+              title="Project copy"
+              description="Main bilingual text, stack and publication state."
             />
-            <div className="space-y-4">
-              <FileInput
-                label="Upload screenshot"
-                description="PNG, JPG, WebP or AVIF."
-                accept="image/*"
-                clearable
-                disabled={isUploadingScreenshot || !tokens?.access_token}
-                placeholder={isUploadingScreenshot ? "Uploading..." : "Choose screenshot"}
-                value={screenshotUploadFile}
-                onChange={(file) => {
-                  setScreenshotUploadFile(file);
-                  void handleScreenshotUpload(file);
-                }}
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextInput
+                label="Slug"
+                description="Leave empty for a new project to generate it from Title EN."
+                value={form.slug}
+                onChange={(event) => setForm({ ...form, slug: event.currentTarget.value })}
               />
+              <NumberInput
+                label="Sort order"
+                value={form.sort_order}
+                onChange={(value) => setForm({ ...form, sort_order: typeof value === "number" ? value : 0 })}
+              />
+              <TextInput
+                label="Title RU"
+                value={form.title_ru}
+                onChange={(event) => setForm({ ...form, title_ru: event.currentTarget.value })}
+              />
+              <TextInput
+                label="Title EN"
+                value={form.title_en}
+                onChange={(event) => setForm({ ...form, title_en: event.currentTarget.value })}
+              />
+              <Textarea
+                label="Summary RU"
+                value={form.summary_ru}
+                onChange={(event) => setForm({ ...form, summary_ru: event.currentTarget.value })}
+              />
+              <Textarea
+                label="Summary EN"
+                value={form.summary_en}
+                onChange={(event) => setForm({ ...form, summary_en: event.currentTarget.value })}
+              />
+            </div>
 
-              <div className="space-y-3">
-                {form.media_items.map((item, index) => (
-                  <div key={`${item.id ?? "new"}-${index}`} className="grid gap-3 rounded-[20px] border border-[var(--border-soft)] bg-white/70 p-4 md:grid-cols-[110px_1fr]">
-                    <div className="aspect-video overflow-hidden rounded-md bg-slate-950">
-                      {item.url ? <img src={item.url} alt="" className="h-full w-full object-cover" /> : null}
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <TextInput
-                        label="Screenshot URL"
-                        value={item.url}
-                        onChange={(event) => updateScreenshot(index, { url: event.currentTarget.value })}
-                      />
-                      <NumberInput
-                        label="Sort"
-                        value={item.sort_order}
-                        onChange={(value) =>
-                          updateScreenshot(index, { sort_order: typeof value === "number" ? value : index })
-                        }
-                      />
-                      <TextInput
-                        label="Alt RU"
-                        value={item.alt_ru}
-                        onChange={(event) => updateScreenshot(index, { alt_ru: event.currentTarget.value })}
-                      />
-                      <TextInput
-                        label="Alt EN"
-                        value={item.alt_en}
-                        onChange={(event) => updateScreenshot(index, { alt_en: event.currentTarget.value })}
-                      />
-                      <div className="md:col-span-2">
-                        <SoftButton tone="accent" shape="compact" onClick={() => removeScreenshot(index)}>
-                          Remove screenshot
-                        </SoftButton>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {form.media_items.length === 0 ? (
-                  <p className="text-sm text-[var(--text-secondary)]">
-                    No screenshots yet. The public page will fall back to the cover image or the generated mock preview.
-                  </p>
-                ) : null}
-              </div>
+            <Textarea
+              label="Description RU"
+              minRows={4}
+              value={form.description_ru}
+              onChange={(event) => setForm({ ...form, description_ru: event.currentTarget.value })}
+            />
+            <Textarea
+              label="Description EN"
+              minRows={4}
+              value={form.description_en}
+              onChange={(event) => setForm({ ...form, description_en: event.currentTarget.value })}
+            />
+
+            <div className="grid gap-4 md:grid-cols-[1fr_0.45fr_0.45fr]">
+              <TextInput
+                label="Stack"
+                placeholder="FastAPI, Next.js, Redis"
+                value={form.stack}
+                onChange={(event) => setForm({ ...form, stack: event.currentTarget.value })}
+              />
+              <Switch
+                className="self-end pb-2"
+                label="Featured"
+                checked={form.is_featured}
+                onChange={(event) => setForm({ ...form, is_featured: event.currentTarget.checked })}
+              />
+              <Switch
+                className="self-end pb-2"
+                label="Published"
+                checked={form.is_published}
+                onChange={(event) => setForm({ ...form, is_published: event.currentTarget.checked })}
+              />
             </div>
           </section>
 
-          <div className="grid gap-4 md:grid-cols-[1fr_0.7fr_0.6fr_0.6fr]">
+          <section className="space-y-4 rounded-[24px] border border-[var(--border-soft)] bg-[var(--surface-secondary)] p-4">
+            <SectionHeader
+              eyebrow="Homepage"
+              title="Project media"
+              description="Choose one public media mode. Fields that do not belong to the selected mode are hidden."
+            />
             <Select
-              label="Showcase visual"
-              data={showcaseVisualOptions}
-              value={form.showcase_visual_variant}
-              onChange={(value) => setForm({ ...form, showcase_visual_variant: value ?? "dashboard-light" })}
+              label="Media type"
+              data={projectShowcaseMediaModeOptions}
+              value={form.showcase_media_mode}
+              onChange={(value) =>
+                setForm({
+                  ...form,
+                  showcase_media_mode: normalizeSelectedProjectMediaMode(value),
+                })
+              }
             />
-            <TextInput
-              label="Video duration"
-              value={form.showcase_video_duration}
-              onChange={(event) => setForm({ ...form, showcase_video_duration: event.currentTarget.value })}
-            />
-            <Switch
-              className="self-end pb-2"
-              label="Featured"
-              checked={form.is_featured}
-              onChange={(event) => setForm({ ...form, is_featured: event.currentTarget.checked })}
-            />
-            <Switch
-              className="self-end pb-2"
-              label="Published"
-              checked={form.is_published}
-              onChange={(event) => setForm({ ...form, is_published: event.currentTarget.checked })}
-            />
-          </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <TextInput
-              label="Repository URL"
-              value={form.repository_url}
-              onChange={(event) => setForm({ ...form, repository_url: event.currentTarget.value })}
-            />
-            <TextInput
-              label="Live URL"
-              value={form.live_url}
-              onChange={(event) => setForm({ ...form, live_url: event.currentTarget.value })}
-            />
-            <TextInput
-              label="Page scene key"
-              value={form.page_scene_key}
-              onChange={(event) => setForm({ ...form, page_scene_key: event.currentTarget.value })}
-            />
-          </div>
+            {form.showcase_media_mode === "screenshots" ? (
+              <div className="space-y-4 border-t border-[var(--border-soft)] pt-4">
+                <SectionHeader
+                  eyebrow="Screenshots"
+                  title="Project gallery"
+                  description="Upload and order screenshots used by the public slider."
+                />
+                <FileInput
+                  label="Upload screenshot"
+                  description="PNG, JPG, WebP or AVIF."
+                  accept="image/*"
+                  clearable
+                  disabled={isUploadingScreenshot || !tokens?.access_token}
+                  placeholder={isUploadingScreenshot ? "Uploading..." : "Choose screenshot"}
+                  value={screenshotUploadFile}
+                  onChange={(file) => {
+                    setScreenshotUploadFile(file);
+                    void handleScreenshotUpload(file);
+                  }}
+                />
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <TextInput
-              label="SEO title RU"
-              value={form.seo_title_ru}
-              onChange={(event) => setForm({ ...form, seo_title_ru: event.currentTarget.value })}
+                <div className="space-y-3">
+                  {form.media_items.map((item, index) => (
+                    <div
+                      key={`${item.id ?? "new"}-${index}`}
+                      className="grid gap-3 rounded-[20px] border border-[var(--border-soft)] bg-white/70 p-4 md:grid-cols-[110px_1fr]"
+                    >
+                      <div className="aspect-video overflow-hidden rounded-md bg-slate-950">
+                        {item.url ? <img src={item.url} alt="" className="h-full w-full object-cover" /> : null}
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <TextInput
+                          label="Screenshot URL"
+                          value={item.url}
+                          onChange={(event) => updateScreenshot(index, { url: event.currentTarget.value })}
+                        />
+                        <NumberInput
+                          label="Sort"
+                          value={item.sort_order}
+                          onChange={(value) =>
+                            updateScreenshot(index, { sort_order: typeof value === "number" ? value : index })
+                          }
+                        />
+                        <TextInput
+                          label="Alt RU"
+                          value={item.alt_ru}
+                          onChange={(event) => updateScreenshot(index, { alt_ru: event.currentTarget.value })}
+                        />
+                        <TextInput
+                          label="Alt EN"
+                          value={item.alt_en}
+                          onChange={(event) => updateScreenshot(index, { alt_en: event.currentTarget.value })}
+                        />
+                        <div className="md:col-span-2">
+                          <SoftButton tone="accent" shape="compact" onClick={() => removeScreenshot(index)}>
+                            Remove screenshot
+                          </SoftButton>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {form.media_items.length === 0 ? (
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      No screenshots yet. In screenshots mode the public card stays text-only until images are added.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {form.showcase_media_mode === "demo" ? (
+              <div className="space-y-4 border-t border-[var(--border-soft)] pt-4">
+                <SectionHeader
+                  eyebrow="Demo"
+                  title="Demo preview"
+                  description="The image is used only as a dimmed background for the demo button."
+                />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextInput
+                    label="Demo preview image URL"
+                    value={form.cover_image}
+                    onChange={(event) => setForm({ ...form, cover_image: event.currentTarget.value })}
+                  />
+                  <FileInput
+                    label="Upload demo preview"
+                    description="PNG, JPG, WebP or AVIF."
+                    accept="image/*"
+                    clearable
+                    disabled={isUploadingProjectCover || !tokens?.access_token}
+                    placeholder={isUploadingProjectCover ? "Uploading..." : "Choose image"}
+                    value={projectCoverUploadFile}
+                    onChange={(file) => {
+                      setProjectCoverUploadFile(file);
+                      void handleProjectMediaUpload("cover_image", file);
+                    }}
+                  />
+                  <TextInput
+                    className="md:col-span-2"
+                    label="Demo URL"
+                    description="Rendered as a JS-opened button on the public page, not as a plain HTML link."
+                    value={form.live_url}
+                    onChange={(event) => setForm({ ...form, live_url: event.currentTarget.value })}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {form.showcase_media_mode === "video" ? (
+              <div className="space-y-4 border-t border-[var(--border-soft)] pt-4">
+                <SectionHeader
+                  eyebrow="Video"
+                  title="Project video preview"
+                  description="Upload a demo video and poster image used by the public homepage video player."
+                />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextInput
+                    label="Video URL"
+                    value={form.preview_video_url}
+                    onChange={(event) => setForm({ ...form, preview_video_url: event.currentTarget.value })}
+                  />
+                  <FileInput
+                    label="Upload video"
+                    description="MP4, WebM or MOV."
+                    accept="video/*"
+                    clearable
+                    disabled={isUploadingProjectVideo || !tokens?.access_token}
+                    placeholder={isUploadingProjectVideo ? "Uploading..." : "Choose video"}
+                    value={projectVideoUploadFile}
+                    onChange={(file) => {
+                      setProjectVideoUploadFile(file);
+                      void handleProjectMediaUpload("preview_video_url", file);
+                    }}
+                  />
+                  <TextInput
+                    label="Video preview image URL"
+                    value={form.cover_image}
+                    onChange={(event) => setForm({ ...form, cover_image: event.currentTarget.value })}
+                  />
+                  <FileInput
+                    label="Upload video preview"
+                    description="PNG, JPG, WebP or AVIF."
+                    accept="image/*"
+                    clearable
+                    disabled={isUploadingProjectCover || !tokens?.access_token}
+                    placeholder={isUploadingProjectCover ? "Uploading..." : "Choose image"}
+                    value={projectCoverUploadFile}
+                    onChange={(file) => {
+                      setProjectCoverUploadFile(file);
+                      void handleProjectMediaUpload("cover_image", file);
+                    }}
+                  />
+                  <TextInput
+                    label="Fallback duration"
+                    value={form.showcase_video_duration}
+                    onChange={(event) => setForm({ ...form, showcase_video_duration: event.currentTarget.value })}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="space-y-4 rounded-[24px] border border-[var(--border-soft)] bg-[var(--surface-secondary)] p-4">
+            <SectionHeader
+              eyebrow="Metadata"
+              title="Links and SEO"
+              description="Secondary links and search snippets for project pages."
             />
-            <TextInput
-              label="SEO title EN"
-              value={form.seo_title_en}
-              onChange={(event) => setForm({ ...form, seo_title_en: event.currentTarget.value })}
-            />
-            <Textarea
-              label="SEO description RU"
-              minRows={3}
-              value={form.seo_description_ru}
-              onChange={(event) => setForm({ ...form, seo_description_ru: event.currentTarget.value })}
-            />
-            <Textarea
-              label="SEO description EN"
-              minRows={3}
-              value={form.seo_description_en}
-              onChange={(event) => setForm({ ...form, seo_description_en: event.currentTarget.value })}
-            />
-          </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextInput
+                label="Repository URL"
+                value={form.repository_url}
+                onChange={(event) => setForm({ ...form, repository_url: event.currentTarget.value })}
+              />
+              <TextInput
+                label="Page scene key"
+                value={form.page_scene_key}
+                onChange={(event) => setForm({ ...form, page_scene_key: event.currentTarget.value })}
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextInput
+                label="SEO title RU"
+                value={form.seo_title_ru}
+                onChange={(event) => setForm({ ...form, seo_title_ru: event.currentTarget.value })}
+              />
+              <TextInput
+                label="SEO title EN"
+                value={form.seo_title_en}
+                onChange={(event) => setForm({ ...form, seo_title_en: event.currentTarget.value })}
+              />
+              <Textarea
+                label="SEO description RU"
+                minRows={3}
+                value={form.seo_description_ru}
+                onChange={(event) => setForm({ ...form, seo_description_ru: event.currentTarget.value })}
+              />
+              <Textarea
+                label="SEO description EN"
+                minRows={3}
+                value={form.seo_description_en}
+                onChange={(event) => setForm({ ...form, seo_description_en: event.currentTarget.value })}
+              />
+            </div>
+          </section>
 
           <SoftButton tone="dark" onClick={() => void handleSave()} disabled={isSaving}>
             {isSaving ? "Saving..." : editingId ? "Update project" : "Create project"}
@@ -629,7 +789,7 @@ function ProjectListCard({
             <p className="mt-1 text-sm text-[var(--text-secondary)]">{project.slug}</p>
           </div>
           <p className="text-xs uppercase tracking-[0.16em] text-[var(--text-muted)]">
-            {showcaseMeta.visual_variant} / {showcaseMeta.video_duration}
+            media: {showcaseMeta.media_mode}
           </p>
           <p className="line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">{project.summary_en}</p>
         </div>

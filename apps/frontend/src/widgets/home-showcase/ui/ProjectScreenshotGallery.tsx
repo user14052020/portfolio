@@ -17,16 +17,12 @@ export type ProjectScreenshot = {
 type ProjectScreenshotGalleryProps = {
   screenshots: ProjectScreenshot[];
   title: string;
-  demoUrlToken?: string | null;
-  demoLabel?: string;
   className?: string;
 };
 
 export function ProjectScreenshotGallery({
   screenshots,
   title,
-  demoUrlToken,
-  demoLabel = "Click to view demo",
   className,
 }: ProjectScreenshotGalleryProps) {
   const [activeIndex, setActiveIndex] = useState(0);
@@ -63,8 +59,6 @@ export function ProjectScreenshotGallery({
         <DesktopScreenshotGrid screenshots={normalizedScreenshots} title={title} onOpen={openViewer} />
       </div>
 
-      {demoUrlToken ? <ProjectDemoOverlay demoUrlToken={demoUrlToken} label={demoLabel} /> : null}
-
       {isViewerOpen ? (
         <ScreenshotViewer
           screenshots={normalizedScreenshots}
@@ -77,22 +71,7 @@ export function ProjectScreenshotGallery({
   );
 }
 
-function ProjectDemoOverlay({ demoUrlToken, label }: { demoUrlToken: string; label: string }) {
-  return (
-    <>
-      <span className="pointer-events-none absolute inset-0 z-10 bg-black/50" />
-      <button
-        type="button"
-        onClick={() => openEncodedDemoUrl(demoUrlToken)}
-        className="absolute left-1/2 top-1/2 z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/15 bg-black/80 px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_50px_rgba(0,0,0,0.42)] ring-1 ring-white/10 transition hover:bg-black sm:px-6"
-      >
-        {label}
-      </button>
-    </>
-  );
-}
-
-function openEncodedDemoUrl(demoUrlToken: string) {
+export function openEncodedDemoUrl(demoUrlToken: string) {
   const demoUrl = decodeDemoUrlToken(demoUrlToken);
 
   if (!demoUrl || typeof document === "undefined") {

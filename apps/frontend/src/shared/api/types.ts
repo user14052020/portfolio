@@ -239,6 +239,7 @@ export interface ProjectMedia {
 }
 
 export interface ProjectShowcaseMeta {
+  media_mode: "screenshots" | "demo" | "video" | string;
   visual_variant: string;
   video_duration: string;
 }
@@ -269,6 +270,47 @@ export interface Project {
   media_items: ProjectMedia[];
   created_at: string;
   updated_at: string;
+}
+
+export interface KworkReview {
+  id: number;
+  external_id: string;
+  source_url: string;
+  source_platform: string;
+  review_type: "positive" | "negative" | string;
+  author_name: string;
+  author_url?: string | null;
+  author_avatar_url?: string | null;
+  project_title?: string | null;
+  project_url?: string | null;
+  rating: number;
+  text: string;
+  reviewed_at?: string | null;
+  time_ago?: string | null;
+  sort_order: number;
+  is_published: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KworkReviewsPage {
+  items: KworkReview[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface KworkReviewsSyncPayload {
+  source_url: string;
+  replace: boolean;
+  limit: number;
+}
+
+export interface KworkReviewsSyncResult {
+  source_url: string;
+  imported: number;
+  total: number;
+  page: KworkReviewsPage;
 }
 
 export interface BlogCategory {
@@ -303,13 +345,6 @@ export interface BlogPost {
   category?: BlogCategory | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface HomepagePreviewContent {
-  visual_variant: string;
-  video_duration: string;
-  video_url?: string | null;
-  cover_image?: string | null;
 }
 
 export interface SiteMetaContent {
@@ -347,7 +382,6 @@ export interface HomepageContent {
   project_stack_label_en: string;
   project_demo_cta_label_ru: string;
   project_demo_cta_label_en: string;
-  hero_preview: HomepagePreviewContent;
   header_cta_label_ru: string;
   header_cta_label_en: string;
   contact_title_ru: string;
@@ -358,6 +392,10 @@ export interface HomepageContent {
   telegram_label_en: string;
   email_label_ru: string;
   email_label_en: string;
+  kwork_reviews_eyebrow_ru: string;
+  kwork_reviews_eyebrow_en: string;
+  kwork_reviews_title_ru: string;
+  kwork_reviews_title_en: string;
   chat_section_title_ru: string;
   chat_section_title_en: string;
   chat_section_description_ru: string;

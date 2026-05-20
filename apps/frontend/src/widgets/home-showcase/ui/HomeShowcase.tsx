@@ -1,26 +1,31 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- Demo preview images are admin-managed media URLs. */
+
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { IconMail, IconSend } from "@tabler/icons-react";
 
-import type { Locale, Project, SiteSettings } from "@/shared/api/types";
+import { getKworkReviews } from "@/shared/api/client";
+import type { KworkReview, KworkReviewsPage, Locale, Project, SiteSettings } from "@/shared/api/types";
 import { normalizeHomepageContent, normalizeProjectShowcaseMeta } from "@/shared/config/homepageContent";
 import { contactSocialLinks, resolveExternalUrl, type ContactSocialKey } from "@/shared/config/socialLinks";
 import { pickLocalized } from "@/shared/i18n/dictionaries";
 import { cn } from "@/shared/lib/cn";
 import { BrandSocialIcon } from "@/shared/ui/BrandSocialIcon";
-import { ProjectScreenshotGallery } from "@/widgets/home-showcase/ui/ProjectScreenshotGallery";
-import { ShowcaseVideoFrame, getProjectFallbackVariant } from "@/widgets/home-showcase/ui/ShowcaseVideoFrame";
+import { ProjectScreenshotGallery, openEncodedDemoUrl } from "@/widgets/home-showcase/ui/ProjectScreenshotGallery";
+import { ShowcaseVideoFrame } from "@/widgets/home-showcase/ui/ShowcaseVideoFrame";
 
 export function HomeShowcase({
   settings,
   projects,
+  initialReviewsPage,
   locale,
   onLocaleChange,
   chatSlot,
 }: {
   settings: SiteSettings;
   projects: Project[];
+  initialReviewsPage: KworkReviewsPage;
   locale: Locale;
   onLocaleChange: (locale: Locale) => void;
   chatSlot?: ReactNode;
@@ -34,11 +39,17 @@ export function HomeShowcase({
   const headerCtaLabel = pickLocalized(content, "header_cta_label", locale);
   const contactTitle = pickLocalized(content, "contact_title", locale);
   const contactDescription = pickLocalized(content, "contact_description", locale);
+  const reviewsEyebrow = pickLocalized(content, "kwork_reviews_eyebrow", locale);
+  const reviewsTitle = pickLocalized(content, "kwork_reviews_title", locale);
   const chatTitle = pickLocalized(content, "chat_section_title", locale);
   const chatDescription = pickLocalized(content, "chat_section_description", locale);
+  const heroSkills = settings.skills.map((skill) => skill.trim()).filter(Boolean);
+  const accentStyle = {
+    "--showcase-accent-color": content.hero_title_rotating_accent_color,
+  } as CSSProperties;
 
   return (
-    <main className="min-h-screen bg-[#f7f7f5] text-[#111318]">
+    <main className="min-h-screen bg-[#f7f7f5] text-[#111318]" style={accentStyle}>
       <div className="mx-auto w-full max-w-[1440px] px-5 py-7 sm:px-8 lg:px-10">
         <header className="flex items-center justify-between gap-5">
           <p className="text-2xl font-bold tracking-normal sm:text-3xl">{brandName}</p>
@@ -46,7 +57,7 @@ export function HomeShowcase({
             <LanguageControl locale={locale} onLocaleChange={onLocaleChange} />
             <a
               href={`mailto:${settings.contact_email}`}
-              className="inline-flex min-h-12 items-center gap-3 rounded-lg border border-[#aeb2ba] bg-transparent px-5 text-sm font-semibold text-[#111318] transition hover:border-[#111318] hover:bg-white"
+              className="inline-flex min-h-12 items-center gap-3 rounded-lg border border-[var(--showcase-accent-color)] bg-transparent px-5 text-sm font-semibold text-[var(--showcase-accent-color)] transition hover:bg-[var(--showcase-accent-color)] hover:text-white"
             >
               <IconSend className="h-5 w-5" aria-hidden />
               <span className="hidden sm:inline">{headerCtaLabel}</span>
@@ -54,8 +65,10 @@ export function HomeShowcase({
           </div>
         </header>
 
-        <section className="grid gap-10 pb-9 pt-16 lg:grid-cols-[0.66fr_1fr] lg:items-center lg:gap-12 lg:pt-20">
-          <div className="max-w-[520px]">
+        <section
+          className="grid gap-10 pb-9 pt-16 lg:grid-cols-1 lg:items-center lg:gap-12 lg:pt-20"
+        >
+          <div className="max-w-[980px]">
             <div className="mb-9 flex flex-wrap items-center gap-3 text-xs font-medium uppercase tracking-normal text-[#7a7f89]">
               {heroEyebrowItems.map((item, index) => (
                 <span key={`${item}-${index}`} className="flex items-center gap-3">
@@ -65,7 +78,9 @@ export function HomeShowcase({
               ))}
             </div>
 
-            <h1 className="max-w-[520px] text-[40px] font-semibold leading-[1.28] tracking-normal text-[#111318] sm:text-5xl lg:text-[46px]">
+            <h1
+              className="max-w-[980px] text-[40px] font-semibold leading-[1.28] tracking-normal text-[#111318] sm:text-5xl lg:text-[46px]"
+            >
               <RotatingHeroTitle
                 title={pickLocalized(settings, "hero_title", locale)}
                 items={locale === "ru" ? content.hero_title_rotating_items_ru : content.hero_title_rotating_items_en}
@@ -74,31 +89,24 @@ export function HomeShowcase({
                 accentColor={content.hero_title_rotating_accent_color}
               />
             </h1>
-            <p className="mt-9 max-w-[430px] text-lg leading-8 text-[#30343b]">
+            <p className="mt-9 max-w-[720px] text-lg leading-8 text-[#30343b]">
               {pickLocalized(settings, "hero_subtitle", locale)}
             </p>
 
-            <div className="mt-12">
-              <p className="mb-4 text-sm text-[#4f535c]">{technologiesLabel}</p>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[#111318]">
-                {settings.skills.map((skill, index) => (
-                  <span key={`${skill}-${index}`} className="flex items-center gap-4">
-                    <span>{skill}</span>
-                    {index < settings.skills.length - 1 ? <span className="text-[#aeb2ba]">/</span> : null}
-                  </span>
-                ))}
+            {heroSkills.length > 0 ? (
+              <div className="mt-12 max-w-[980px]">
+                <p className="mb-4 text-sm text-[#4f535c]">{technologiesLabel}</p>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[#111318] xl:flex-nowrap">
+                  {heroSkills.map((skill, index) => (
+                    <span key={`${skill}-${index}`} className="flex min-w-0 shrink-0 items-center gap-4">
+                      <span className="whitespace-nowrap">{skill}</span>
+                      {index < heroSkills.length - 1 ? <span className="text-[#aeb2ba]">/</span> : null}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : null}
           </div>
-
-          <ShowcaseVideoFrame
-            variant={content.hero_preview.visual_variant}
-            duration={content.hero_preview.video_duration}
-            title={pickLocalized(settings, "hero_title", locale)}
-            mediaUrl={content.hero_preview.video_url}
-            coverImage={content.hero_preview.cover_image}
-            className="lg:mt-2"
-          />
         </section>
 
         {projects.length > 0 ? (
@@ -116,11 +124,18 @@ export function HomeShowcase({
           </section>
         ) : null}
 
+        <KworkReviewsSection
+          initialPage={initialReviewsPage}
+          eyebrow={reviewsEyebrow}
+          title={reviewsTitle}
+          locale={locale}
+        />
+
         <ContactCta
           settings={settings}
-          title={contactTitle}
-          description={contactDescription}
-        />
+        title={contactTitle}
+        description={contactDescription}
+      />
 
         {settings.chat_bot_enabled && chatSlot ? (
           <section className="grid gap-8 py-12 lg:grid-cols-[0.38fr_1fr] lg:items-start">
@@ -135,6 +150,179 @@ export function HomeShowcase({
       </div>
     </main>
   );
+}
+
+const KWORK_PROFILE_URL = "https://kwork.ru/user/portfolio-dev";
+const REVIEWS_BATCH_SIZE = 3;
+
+function KworkReviewsSection({
+  initialPage,
+  eyebrow,
+  title,
+  locale,
+}: {
+  initialPage: KworkReviewsPage;
+  eyebrow: string;
+  title: string;
+  locale: Locale;
+}) {
+  const [reviews, setReviews] = useState<KworkReview[]>(initialPage.items);
+  const [total, setTotal] = useState(initialPage.total);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const hasMoreReviews = reviews.length < total;
+  const reviewsCountLabel = locale === "ru" ? "отзывов" : "reviews";
+  const loadingMoreLabel = locale === "ru" ? "Загружаю..." : "Loading...";
+  const loadMoreLabel = locale === "ru" ? "Показать еще" : "Show more";
+
+  useEffect(() => {
+    setReviews(initialPage.items);
+    setTotal(initialPage.total);
+    setLoadError(null);
+  }, [initialPage.items, initialPage.total]);
+
+  async function handleLoadMore() {
+    if (isLoadingMore || !hasMoreReviews) {
+      return;
+    }
+    setIsLoadingMore(true);
+    try {
+      const nextPage = await getKworkReviews({
+        offset: reviews.length,
+        limit: REVIEWS_BATCH_SIZE,
+      });
+      setReviews((current) => [...current, ...nextPage.items]);
+      setTotal(nextPage.total);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Не удалось загрузить отзывы");
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }
+
+  if (reviews.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="py-12">
+      <div className="mb-7 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-sm uppercase tracking-normal text-[#8c929c]">{eyebrow}</p>
+          <h2 className="mt-4 max-w-[720px] text-3xl font-semibold leading-tight tracking-normal text-[#111318] sm:text-4xl">
+            <KworkLinkedTitle title={title} />
+          </h2>
+        </div>
+        <p className="text-sm text-[#6b7079]">
+          {total} {reviewsCountLabel}
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {reviews.map((review) => (
+          <KworkReviewCard key={review.id} review={review} />
+        ))}
+      </div>
+
+      {loadError ? (
+        <p className="mt-4 text-center text-sm text-rose-600">{loadError}</p>
+      ) : null}
+
+      {hasMoreReviews ? (
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={() => void handleLoadMore()}
+            disabled={isLoadingMore}
+            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[#111318] bg-[#111318] px-5 text-sm font-semibold text-white transition hover:bg-white hover:text-[#111318]"
+          >
+            {isLoadingMore ? loadingMoreLabel : loadMoreLabel}
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function KworkLinkedTitle({ title }: { title: string }) {
+  const marker = "kwork.ru";
+  const index = title.toLowerCase().indexOf(marker);
+
+  if (index < 0) {
+    return <>{title}</>;
+  }
+
+  return (
+    <>
+      {title.slice(0, index)}
+      <a
+        href={KWORK_PROFILE_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="underline decoration-[#111318]/25 underline-offset-4 transition hover:decoration-[#111318]"
+      >
+        {title.slice(index, index + marker.length)}
+      </a>
+      {title.slice(index + marker.length)}
+    </>
+  );
+}
+
+function KworkReviewCard({ review }: { review: KworkReview }) {
+  return (
+    <article className="flex min-h-[250px] flex-col rounded-lg border border-[#dfe2e7] bg-white/70 p-5 shadow-[0_18px_55px_rgba(17,19,24,0.06)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#111318] text-sm font-semibold uppercase text-white">
+            {getAuthorInitials(review.author_name)}
+          </div>
+          <div className="min-w-0">
+            {review.author_url ? (
+              <a
+                href={review.author_url}
+                target="_blank"
+                rel="noreferrer"
+                className="block truncate text-base font-semibold text-[#111318] underline decoration-transparent underline-offset-4 transition hover:decoration-[#111318]/30"
+              >
+                {review.author_name}
+              </a>
+            ) : (
+              <p className="truncate text-base font-semibold text-[#111318]">{review.author_name}</p>
+            )}
+            <p className="mt-1 text-xs uppercase tracking-normal text-[#8c929c]">
+              {review.time_ago || review.reviewed_at?.slice(0, 10) || "Kwork"}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5 text-sm text-[#111318]" aria-label={`${review.rating} of 5`}>
+          {Array.from({ length: 5 }).map((_, index) => (
+            <span key={index} className={index < review.rating ? "opacity-100" : "opacity-20"}>
+              ★
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <p className="mt-5 line-clamp-6 flex-1 text-base leading-7 text-[#30343b]">{review.text}</p>
+
+      {review.project_title ? (
+        <p className="mt-5 border-t border-[#e6e8ed] pt-4 text-sm leading-6 text-[#6b7079]">
+          {review.project_title}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
+function getAuthorInitials(name: string) {
+  const parts = name
+    .trim()
+    .split(/\s|_/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const initials = parts.slice(0, 2).map((part) => part[0]).join("");
+  return initials || "KW";
 }
 
 function RotatingHeroTitle({
@@ -177,12 +365,15 @@ function RotatingHeroTitle({
   }
 
   return (
-    <span className="block">
-      <span>{title}</span>{" "}
-      <span className="inline-grid overflow-hidden align-baseline pb-1" style={{ color: accentColor }}>
+    <span className="block sm:inline">
+      <span className="block sm:inline">{title}</span>
+      <span
+        className="mt-1 block min-h-[2.56em] overflow-hidden pb-1 sm:ml-2 sm:mt-0 sm:inline-grid sm:min-h-0 sm:align-baseline"
+        style={{ color: accentColor }}
+      >
         <span
           key={`${activeItem}-${activeIndex}`}
-          className="animate-[hero-title-word-in_var(--hero-title-word-animation)_cubic-bezier(0.22,1,0.36,1)_both]"
+          className="block animate-[hero-title-word-in_var(--hero-title-word-animation)_cubic-bezier(0.22,1,0.36,1)_both]"
           style={{ "--hero-title-word-animation": `${Math.max(200, animationMs)}ms` } as CSSProperties}
         >
           {activeItem}
@@ -235,54 +426,128 @@ function ProjectShowcaseRow({
   stackLabel: string;
   demoCtaLabel: string;
 }) {
-  const showcaseMeta = normalizeProjectShowcaseMeta(project.showcase_meta, {
-    visual_variant: getProjectFallbackVariant(index),
-    video_duration: ["0:40", "0:35", "0:30"][index] ?? "0:40",
-  });
+  const projectTitle = pickLocalized(project, "title", locale);
+  const projectSummary = pickLocalized(project, "summary", locale).trim();
+  const showcaseMeta = normalizeProjectShowcaseMeta(project.showcase_meta);
   const screenshotItems = buildProjectScreenshots(project, locale);
+  const projectStack = project.stack.map((item) => item.trim()).filter(Boolean);
+  const mediaClassName = "lg:self-center";
+  const projectMedia =
+    showcaseMeta.media_mode === "video" && (project.preview_video_url || project.cover_image) ? (
+      <ShowcaseVideoFrame
+        variant="uploaded-media"
+        duration={showcaseMeta.video_duration}
+        title={projectTitle}
+        mediaUrl={project.preview_video_url}
+        coverImage={project.cover_image}
+        className={mediaClassName}
+      />
+    ) : showcaseMeta.media_mode === "demo" && project.live_url ? (
+      <ProjectDemoPreview
+        coverImage={project.cover_image}
+        title={projectTitle}
+        demoUrlToken={project.live_url}
+        label={demoCtaLabel}
+        className={mediaClassName}
+      />
+    ) : showcaseMeta.media_mode === "screenshots" && screenshotItems.length > 0 ? (
+      <ProjectScreenshotGallery screenshots={screenshotItems} title={projectTitle} className={mediaClassName} />
+    ) : null;
 
   return (
-    <article className="grid gap-7 lg:grid-cols-[370px_1fr] lg:gap-9">
-      <div className="pt-2">
+    <article className="space-y-6 lg:space-y-7">
+      <header className="grid gap-4 lg:grid-cols-[86px_minmax(0,1fr)] lg:items-end">
         <p className="text-4xl font-light tracking-normal text-[#a6abb3]">{String(index + 1).padStart(2, "0")}</p>
-        <h2 className="mt-9 text-3xl font-semibold tracking-normal text-[#111318]">{pickLocalized(project, "title", locale)}</h2>
-        <p className="mt-3 text-xl leading-7 text-[#111318]">/ {pickLocalized(project, "summary", locale)}</p>
-        <p className="mt-8 max-w-[330px] text-base leading-8 text-[#4b5059]">
-          {pickLocalized(project, "description", locale)}
-        </p>
+        <div className="min-w-0">
+          <h2 className="flex items-baseline gap-3 overflow-x-auto pb-1 text-3xl font-semibold tracking-normal text-[#111318] lg:whitespace-nowrap">
+            <span className="shrink-0">{projectTitle}</span>
+            {projectSummary ? (
+              <span className="shrink-0 text-xl font-normal leading-7 text-[#111318]">/ {projectSummary}</span>
+            ) : null}
+          </h2>
+        </div>
+      </header>
 
-        <div className="mt-11">
+      <div
+        className={cn(
+          "grid gap-7 lg:gap-9",
+          projectMedia ? "lg:grid-cols-[370px_1fr] lg:items-center" : "lg:grid-cols-1",
+        )}
+      >
+        <div>
+          <p
+            className={cn(
+              "whitespace-pre-line text-base leading-8 text-[#4b5059]",
+              projectMedia ? "max-w-[330px]" : "max-w-[680px]",
+            )}
+          >
+            {pickLocalized(project, "description", locale)}
+          </p>
+        </div>
+
+        {projectMedia}
+      </div>
+
+      {projectStack.length > 0 ? (
+        <footer>
           <p className="mb-4 text-sm text-[#4f535c]">{stackLabel}</p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[#111318]">
-            {project.stack.map((item, stackIndex) => (
-              <span key={`${project.id}-${item}`} className="flex items-center gap-4">
-                <span>{item}</span>
-                {stackIndex < project.stack.length - 1 ? <span className="text-[#aeb2ba]">/</span> : null}
+          <div className="flex items-center gap-x-4 overflow-x-auto pb-1 text-sm text-[#111318]">
+            {projectStack.map((item, stackIndex) => (
+              <span key={`${project.id}-${item}`} className="flex shrink-0 items-center gap-4">
+                <span className="whitespace-nowrap">{item}</span>
+                {stackIndex < projectStack.length - 1 ? <span className="text-[#aeb2ba]">/</span> : null}
               </span>
             ))}
           </div>
-        </div>
-      </div>
-
-      {screenshotItems.length > 0 ? (
-        <ProjectScreenshotGallery
-          screenshots={screenshotItems}
-          title={pickLocalized(project, "title", locale)}
-          demoUrlToken={project.live_url}
-          demoLabel={demoCtaLabel}
-          className={cn(index === 0 && "bg-white")}
-        />
-      ) : (
-        <ShowcaseVideoFrame
-          variant={showcaseMeta.visual_variant}
-          duration={showcaseMeta.video_duration}
-          title={pickLocalized(project, "title", locale)}
-          mediaUrl={project.preview_video_url}
-          coverImage={project.cover_image}
-          className={cn(index === 0 && "bg-white")}
-        />
-      )}
+        </footer>
+      ) : null}
     </article>
+  );
+}
+
+function ProjectDemoPreview({
+  coverImage,
+  title,
+  demoUrlToken,
+  label,
+  className,
+}: {
+  coverImage?: string | null;
+  title: string;
+  demoUrlToken: string;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative isolate overflow-hidden rounded-lg border border-black/10 bg-[#0d0f14] shadow-[0_24px_70px_rgba(15,23,42,0.16)]",
+        className,
+      )}
+    >
+      <div className="relative grid aspect-[16/9] min-h-[250px] w-full place-items-center overflow-hidden bg-[#0d0f14]">
+        {coverImage ? (
+          <img
+            src={coverImage}
+            alt=""
+            className="absolute inset-0 h-full w-full object-contain object-center"
+            aria-hidden
+          />
+        ) : (
+          <div className="grid h-full place-items-center bg-[linear-gradient(135deg,#111318,#252b36)] px-8 text-center text-sm font-medium text-white/70">
+            {title}
+          </div>
+        )}
+      </div>
+      <span className="pointer-events-none absolute inset-0 z-10 bg-black/56" />
+      <button
+        type="button"
+        onClick={() => openEncodedDemoUrl(demoUrlToken)}
+        className="absolute left-1/2 top-1/2 z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/15 bg-black/80 px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_50px_rgba(0,0,0,0.42)] ring-1 ring-white/10 transition hover:bg-black sm:px-6"
+      >
+        {label}
+      </button>
+    </div>
   );
 }
 
@@ -348,7 +613,7 @@ function ContactLinksGroup({ socials, email }: { socials: SiteSettings["socials"
         title="Email"
         className={cn(
           contactIconClassName,
-          "border-[#aeb2ba] bg-white text-[#111318] hover:border-[#111318] hover:bg-[#111318] hover:text-white",
+          "border-[var(--showcase-accent-color)] bg-white text-[var(--showcase-accent-color)] hover:bg-[var(--showcase-accent-color)] hover:text-white",
         )}
       >
         <IconMail className="h-5 w-5 lg:h-4 lg:w-4" aria-hidden />
@@ -374,17 +639,5 @@ function buildProjectScreenshots(project: Project, locale: Locale) {
       alt: pickLocalized(item, "alt", locale) || pickLocalized(project, "title", locale),
     }));
 
-  if (mediaScreenshots.length > 0) {
-    return mediaScreenshots;
-  }
-
-  return project.cover_image
-    ? [
-        {
-          id: 0,
-          url: project.cover_image,
-          alt: pickLocalized(project, "title", locale),
-        },
-      ]
-    : [];
+  return mediaScreenshots;
 }

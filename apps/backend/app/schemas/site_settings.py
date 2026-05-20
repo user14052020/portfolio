@@ -4,6 +4,7 @@ from app.schemas.common import TimestampedRead
 
 
 class HomepagePreviewContent(BaseModel):
+    enabled: bool = True
     visual_variant: str = "dashboard-dark"
     video_duration: str = "0:45"
     video_url: str | None = None
@@ -88,6 +89,10 @@ class HomepageContent(BaseModel):
     telegram_label_en: str = "Telegram"
     email_label_ru: str = "Email"
     email_label_en: str = "Email"
+    kwork_reviews_eyebrow_ru: str = "Отзывы Kwork"
+    kwork_reviews_eyebrow_en: str = "Kwork reviews"
+    kwork_reviews_title_ru: str = "Отзывы о моей работе на площадке kwork.ru"
+    kwork_reviews_title_en: str = "Reviews of my work on kwork.ru"
     chat_section_title_ru: str = "AI-стилист"
     chat_section_title_en: str = "AI stylist"
     chat_section_description_ru: str = "Чат-бот временно вынесен в конец страницы."

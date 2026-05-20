@@ -1,7 +1,9 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import attributes
 
 from app.api.deps import get_optional_current_user, require_admin
 from app.db.session import get_db_session
@@ -64,7 +66,7 @@ async def create_project(
     media_items = data.pop("media_items", [])
     data["slug"] = data.get("slug") or build_slug(payload.title_en)
     project = await projects_repository.create(session, data)
-    sync_project_media_items(project, media_items)
+    await sync_project_media_items(session, project, media_items)
     await session.commit()
     await search_service.index_project(project)
     return await projects_repository.get_by_slug(session, project.slug)  # type: ignore[return-value]
@@ -91,8 +93,7 @@ async def update_project(
     for key, value in data.items():
         setattr(project, key, value)
     if media_items is not None:
-        sync_project_media_items(project, media_items)
-    session.add(project)
+        await sync_project_media_items(session, project, media_items)
     await session.flush()
     await session.commit()
     await search_service.index_project(project)
@@ -115,9 +116,12 @@ async def delete_project(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def sync_project_media_items(project: Project, media_items: list[dict]) -> None:
-    project.media_items = [
+async def sync_project_media_items(session: AsyncSession, project: Project, media_items: list[dict]) -> None:
+    await session.execute(sa.delete(ProjectMedia).where(ProjectMedia.project_id == project.id))
+    attributes.set_committed_value(project, "media_items", [])
+    next_media_items = [
         ProjectMedia(
+            project_id=project.id,
             asset_type=item["asset_type"],
             url=item["url"],
             alt_ru=item.get("alt_ru"),
@@ -127,3 +131,6 @@ def sync_project_media_items(project: Project, media_items: list[dict]) -> None:
         for index, item in enumerate(media_items)
         if item.get("url")
     ]
+    session.add_all(next_media_items)
+    await session.flush()
+    attributes.set_committed_value(project, "media_items", next_media_items)

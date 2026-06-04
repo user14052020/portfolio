@@ -49,7 +49,7 @@ export function ProjectScreenshotGallery({
         className,
       )}
     >
-      <div className="aspect-[16/9] min-h-[250px] w-full overflow-hidden p-2 sm:p-3">
+      <div className="relative aspect-[16/9] min-h-[250px] w-full overflow-hidden p-2 sm:p-3">
         <MobileFirstScreenshot
           screenshot={normalizedScreenshots[0]}
           count={normalizedScreenshots.length}
@@ -116,9 +116,13 @@ function MobileFirstScreenshot({
       type="button"
       aria-label={`Open ${title} screenshots`}
       onClick={onOpen}
-      className="group relative block h-full w-full overflow-hidden rounded-md bg-black text-left sm:hidden"
+      className="group absolute inset-2 flex items-center justify-center overflow-hidden rounded-md bg-black text-left sm:hidden"
     >
-      <img src={screenshot.url} alt={screenshot.alt} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" />
+      <img
+        src={screenshot.url}
+        alt={screenshot.alt}
+        className="h-full w-full object-contain object-center transition duration-300 group-hover:scale-[1.02]"
+      />
       <GalleryOverlay count={count} />
     </button>
   );

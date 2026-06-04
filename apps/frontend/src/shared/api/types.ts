@@ -244,7 +244,8 @@ export interface ProjectMedia {
 }
 
 export interface ProjectShowcaseMeta {
-  media_mode: "screenshots" | "demo" | "video" | string;
+  project_type: "web" | "one_c" | "mobile_app" | "animation" | string;
+  media_mode: "screenshots" | "demo" | "video" | "mobile_video" | string;
   visual_variant: string;
   video_duration: string;
 }

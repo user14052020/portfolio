@@ -2,18 +2,18 @@
 
 /* eslint-disable @next/next/no-img-element -- Demo preview images are admin-managed media URLs. */
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { IconMail, IconSend } from "@tabler/icons-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { IconChevronLeft, IconChevronRight, IconMail, IconSend } from "@tabler/icons-react";
 
 import { getKworkReviews } from "@/shared/api/client";
 import type { KworkReview, KworkReviewsPage, Locale, Project, SiteSettings } from "@/shared/api/types";
-import { normalizeHomepageContent, normalizeProjectShowcaseMeta } from "@/shared/config/homepageContent";
+import { normalizeHomepageContent, normalizeProjectShowcaseMeta, projectTypeSections } from "@/shared/config/homepageContent";
 import { contactSocialLinks, resolveExternalUrl, type ContactSocialKey } from "@/shared/config/socialLinks";
 import { pickLocalized } from "@/shared/i18n/dictionaries";
 import { cn } from "@/shared/lib/cn";
 import { BrandSocialIcon } from "@/shared/ui/BrandSocialIcon";
 import { ProjectScreenshotGallery, openEncodedDemoUrl } from "@/widgets/home-showcase/ui/ProjectScreenshotGallery";
-import { ShowcaseVideoFrame } from "@/widgets/home-showcase/ui/ShowcaseVideoFrame";
+import { MobileVideoFrame, ShowcaseVideoFrame } from "@/widgets/home-showcase/ui/ShowcaseVideoFrame";
 
 export function HomeShowcase({
   settings,
@@ -44,6 +44,18 @@ export function HomeShowcase({
   const chatTitle = pickLocalized(content, "chat_section_title", locale);
   const chatDescription = pickLocalized(content, "chat_section_description", locale);
   const heroSkills = settings.skills.map((skill) => skill.trim()).filter(Boolean);
+  const projectGroups = useMemo(
+    () =>
+      projectTypeSections
+        .map((section) => ({
+          ...section,
+          projects: projects.filter(
+            (project) => normalizeProjectShowcaseMeta(project.showcase_meta).project_type === section.value,
+          ),
+        }))
+        .filter((group) => group.projects.length > 0),
+    [projects],
+  );
   const accentStyle = {
     "--showcase-accent-color": content.hero_title_rotating_accent_color,
   } as CSSProperties;
@@ -109,13 +121,12 @@ export function HomeShowcase({
           </div>
         </section>
 
-        {projects.length > 0 ? (
-          <section className="space-y-7 py-6 lg:space-y-8">
-            {projects.map((project, index) => (
-              <ProjectShowcaseRow
-                key={project.id}
-                project={project}
-                index={index}
+        {projectGroups.length > 0 ? (
+          <section className="space-y-12 py-6 lg:space-y-14">
+            {projectGroups.map((group) => (
+              <ProjectTypeSlider
+                key={group.value}
+                group={group}
                 locale={locale}
                 stackLabel={projectStackLabel}
                 demoCtaLabel={projectDemoCtaLabel}
@@ -154,6 +165,12 @@ export function HomeShowcase({
 
 const KWORK_PROFILE_URL = "https://kwork.ru/user/portfolio-dev";
 const REVIEWS_BATCH_SIZE = 3;
+const PROJECT_SLIDER_SECONDS = 60;
+const PROJECT_DESCRIPTION_COLLAPSED_LINES = 4;
+
+type ProjectTypeGroup = (typeof projectTypeSections)[number] & {
+  projects: Project[];
+};
 
 function KworkReviewsSection({
   initialPage,
@@ -413,27 +430,206 @@ function LanguageControl({
   );
 }
 
+function ProjectTypeSlider({
+  group,
+  locale,
+  stackLabel,
+  demoCtaLabel,
+}: {
+  group: ProjectTypeGroup;
+  locale: Locale;
+  stackLabel: string;
+  demoCtaLabel: string;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [remainingSeconds, setRemainingSeconds] = useState(PROJECT_SLIDER_SECONDS);
+  const [isMediaPlaying, setIsMediaPlaying] = useState(false);
+  const projectIdsKey = useMemo(() => group.projects.map((project) => project.id).join(","), [group.projects]);
+  const activeProject = group.projects[Math.min(activeIndex, group.projects.length - 1)];
+  const groupTitle = pickLocalized(group, "title", locale);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [projectIdsKey]);
+
+  useEffect(() => {
+    setRemainingSeconds(PROJECT_SLIDER_SECONDS);
+    setIsMediaPlaying(false);
+  }, [activeIndex, projectIdsKey]);
+
+  useEffect(() => {
+    if (group.projects.length < 2 || isMediaPlaying) {
+      return;
+    }
+
+    const countdownTimer = window.setInterval(() => {
+      setRemainingSeconds((current) => {
+        if (current <= 1) {
+          setActiveIndex((index) => (index + 1) % group.projects.length);
+          return PROJECT_SLIDER_SECONDS;
+        }
+
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(countdownTimer);
+  }, [group.projects.length, isMediaPlaying, projectIdsKey]);
+
+  if (!activeProject) {
+    return null;
+  }
+
+  function showPreviousProject() {
+    setActiveIndex((current) => (current - 1 + group.projects.length) % group.projects.length);
+  }
+
+  function showNextProject() {
+    setActiveIndex((current) => (current + 1) % group.projects.length);
+  }
+
+  return (
+    <section className="border-t border-[#dfe2e7] pt-7">
+      <div className="hidden">
+        <div>
+          <p className="text-sm uppercase tracking-normal text-[#8c929c]">Portfolio</p>
+          <h2 className="mt-3 text-3xl font-semibold leading-tight tracking-normal text-[#111318] sm:text-4xl">
+            {groupTitle}
+          </h2>
+        </div>
+        <p className="text-sm text-[#6b7079]">
+          {group.projects.length} {locale === "ru" ? "проектов" : "projects"}
+        </p>
+      </div>
+
+      <ProjectShowcaseRow
+        project={activeProject}
+        index={activeIndex}
+        locale={locale}
+        stackLabel={stackLabel}
+        demoCtaLabel={demoCtaLabel}
+        onMediaPlaybackChange={setIsMediaPlaying}
+      />
+
+      {group.projects.length > 1 ? (
+        <ProjectSliderControls
+          activeIndex={activeIndex}
+          total={group.projects.length}
+          remainingSeconds={remainingSeconds}
+          onPrevious={showPreviousProject}
+          onNext={showNextProject}
+          onSelect={setActiveIndex}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function ProjectSliderControls({
+  activeIndex,
+  total,
+  remainingSeconds,
+  onPrevious,
+  onNext,
+  onSelect,
+}: {
+  activeIndex: number;
+  total: number;
+  remainingSeconds: number;
+  onPrevious: () => void;
+  onNext: () => void;
+  onSelect: (index: number) => void;
+}) {
+  const countdownProgress = 1 - remainingSeconds / PROJECT_SLIDER_SECONDS;
+
+  return (
+    <div className="mt-5 flex justify-end">
+      <div className="inline-flex items-center gap-2 rounded-lg border border-[#d8dce3] bg-white/78 p-2 shadow-[0_16px_46px_rgba(17,19,24,0.08)] backdrop-blur">
+        <div className="hidden items-center gap-1 sm:flex">
+          {Array.from({ length: total }).map((_, index) => (
+            <button
+              key={index}
+              type="button"
+              aria-label={`Show project ${index + 1}`}
+              onClick={() => onSelect(index)}
+              className={cn(
+                "h-2.5 rounded-full transition",
+                index === activeIndex ? "w-6 bg-[#111318]" : "w-2.5 bg-[#c9ced7] hover:bg-[#8f96a3]",
+              )}
+            />
+          ))}
+        </div>
+
+        <div
+          className="mx-1 grid h-12 w-12 shrink-0 place-items-center rounded-full transition-[background] duration-300"
+          style={{
+            background: `conic-gradient(#111318 ${Math.max(0, Math.min(countdownProgress, 1)) * 360}deg, #dfe2e7 0deg)`,
+          }}
+          aria-label={`${remainingSeconds} seconds to next project`}
+        >
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-white text-xs font-semibold tabular-nums text-[#111318]">
+            {remainingSeconds}
+          </span>
+        </div>
+
+        <span className="hidden min-w-[54px] text-xs font-semibold tabular-nums text-[#111318] sm:inline">
+          {String(activeIndex + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
+        </span>
+
+        <button
+          type="button"
+          aria-label="Previous project"
+          onClick={onPrevious}
+          className="grid h-9 w-9 place-items-center rounded-md border border-[#d8dce3] bg-white text-[#111318] transition hover:border-[#111318] hover:bg-[#111318] hover:text-white"
+        >
+          <IconChevronLeft className="h-5 w-5" aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-label="Next project"
+          onClick={onNext}
+          className="grid h-9 w-9 place-items-center rounded-md border border-[#111318] bg-[#111318] text-white transition hover:bg-white hover:text-[#111318]"
+        >
+          <IconChevronRight className="h-5 w-5" aria-hidden />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ProjectShowcaseRow({
   project,
   index,
   locale,
   stackLabel,
   demoCtaLabel,
+  onMediaPlaybackChange,
 }: {
   project: Project;
   index: number;
   locale: Locale;
   stackLabel: string;
   demoCtaLabel: string;
+  onMediaPlaybackChange?: (isPlaying: boolean) => void;
 }) {
   const projectTitle = pickLocalized(project, "title", locale);
   const projectSummary = pickLocalized(project, "summary", locale).trim();
+  const projectDescription = pickLocalized(project, "description", locale).trim();
   const showcaseMeta = normalizeProjectShowcaseMeta(project.showcase_meta);
   const screenshotItems = buildProjectScreenshots(project, locale);
   const projectStack = project.stack.map((item) => item.trim()).filter(Boolean);
   const mediaClassName = "lg:self-center";
   const projectMedia =
-    showcaseMeta.media_mode === "video" && (project.preview_video_url || project.cover_image) ? (
+    showcaseMeta.media_mode === "mobile_video" && (project.preview_video_url || project.cover_image) ? (
+      <MobileVideoFrame
+        duration={showcaseMeta.video_duration}
+        title={projectTitle}
+        mediaUrl={project.preview_video_url}
+        coverImage={project.cover_image}
+        className={mediaClassName}
+        onPlaybackStateChange={onMediaPlaybackChange}
+      />
+    ) : showcaseMeta.media_mode === "video" && (project.preview_video_url || project.cover_image) ? (
       <ShowcaseVideoFrame
         variant="uploaded-media"
         duration={showcaseMeta.video_duration}
@@ -441,6 +637,7 @@ function ProjectShowcaseRow({
         mediaUrl={project.preview_video_url}
         coverImage={project.cover_image}
         className={mediaClassName}
+        onPlaybackStateChange={onMediaPlaybackChange}
       />
     ) : showcaseMeta.media_mode === "demo" && project.live_url ? (
       <ProjectDemoPreview
@@ -458,10 +655,10 @@ function ProjectShowcaseRow({
     <article className="space-y-6 lg:space-y-7">
       <header>
         <div className="min-w-0">
-          <h2 className="flex items-baseline gap-3 overflow-x-auto pb-1 text-3xl font-semibold tracking-normal text-[#111318] lg:whitespace-nowrap">
-            <span className="shrink-0">{projectTitle}</span>
+          <h2 className="flex items-center gap-3 overflow-x-auto pb-1 text-3xl font-semibold leading-tight tracking-normal text-[#111318] lg:whitespace-nowrap">
+            <span className="shrink-0 leading-tight">{projectTitle}</span>
             {projectSummary ? (
-              <span className="shrink-0 text-xl font-normal leading-7 text-[#111318]">/ {projectSummary}</span>
+              <span className="shrink-0 text-xl font-normal leading-tight text-[#111318]">/ {projectSummary}</span>
             ) : null}
           </h2>
         </div>
@@ -473,16 +670,12 @@ function ProjectShowcaseRow({
           projectMedia ? "lg:grid-cols-[370px_1fr] lg:items-center" : "lg:grid-cols-1",
         )}
       >
-        <div>
-          <p
-            className={cn(
-              "whitespace-pre-line text-base leading-8 text-[#4b5059]",
-              projectMedia ? "max-w-[330px]" : "max-w-[680px]",
-            )}
-          >
-            {pickLocalized(project, "description", locale)}
-          </p>
-        </div>
+        <ProjectDescription
+          projectId={project.id}
+          text={projectDescription}
+          locale={locale}
+          className={projectMedia ? "max-w-[330px]" : "max-w-[680px]"}
+        />
 
         {projectMedia}
       </div>
@@ -501,6 +694,86 @@ function ProjectShowcaseRow({
         </footer>
       ) : null}
     </article>
+  );
+}
+
+function ProjectDescription({
+  projectId,
+  text,
+  locale,
+  className,
+}: {
+  projectId: number;
+  text: string;
+  locale: Locale;
+  className?: string;
+}) {
+  const contentRef = useRef<HTMLParagraphElement | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
+  const showMoreLabel = locale === "ru" ? "Показать" : "Show";
+  const collapseLabel = locale === "ru" ? "Скрыть" : "Hide";
+
+  useEffect(() => {
+    setIsExpanded(false);
+  }, [projectId, text]);
+
+  useEffect(() => {
+    const contentElement = contentRef.current;
+
+    if (!contentElement) {
+      setCanExpand(false);
+      return;
+    }
+
+    const measuredElement = contentElement;
+
+    function syncOverflowState() {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(measuredElement).lineHeight);
+      const safeLineHeight = Number.isFinite(lineHeight) ? lineHeight : 32;
+      const collapsedHeight = PROJECT_DESCRIPTION_COLLAPSED_LINES * safeLineHeight;
+
+      setCanExpand(measuredElement.scrollHeight > collapsedHeight + 1);
+    }
+
+    syncOverflowState();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => syncOverflowState());
+    resizeObserver?.observe(measuredElement);
+    window.addEventListener("resize", syncOverflowState);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", syncOverflowState);
+    };
+  }, [text]);
+
+  return (
+    <div className={cn(className)}>
+      <div className={cn("relative", isExpanded ? "min-h-32" : "h-[9rem] overflow-hidden")}>
+        <p ref={contentRef} className="whitespace-pre-line text-base leading-8 text-[#4b5059]">
+          {text}
+        </p>
+        {!isExpanded && canExpand ? (
+          <span
+            className="pointer-events-none absolute inset-x-0 bottom-0 top-32 bg-gradient-to-b from-[#f7f7f5]/35 to-[#f7f7f5]"
+            aria-hidden
+          />
+        ) : null}
+      </div>
+      <div className="mt-3 min-h-7">
+        {canExpand ? (
+          <button
+            type="button"
+            onClick={() => setIsExpanded((current) => !current)}
+            className="text-sm font-semibold text-[#111318] underline decoration-[#111318]/30 underline-offset-4 transition hover:decoration-[#111318]"
+          >
+            {isExpanded ? collapseLabel : showMoreLabel}
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

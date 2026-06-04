@@ -1,11 +1,31 @@
 import type { HomepageContent, ProjectShowcaseMeta, SiteMetaContent } from "@/shared/api/types";
 
-export type ProjectShowcaseMediaMode = "screenshots" | "demo" | "video";
+export type ProjectShowcaseMediaMode = "screenshots" | "demo" | "video" | "mobile_video";
+export type ProjectType = "web" | "one_c" | "mobile_app" | "animation";
 
 export const projectShowcaseMediaModeOptions: Array<{ value: ProjectShowcaseMediaMode; label: string }> = [
   { value: "screenshots", label: "Screenshots gallery" },
   { value: "demo", label: "Demo button" },
   { value: "video", label: "Video player" },
+  { value: "mobile_video", label: "Mobile video" },
+];
+
+export const projectTypeOptions: Array<{ value: ProjectType; label: string }> = [
+  { value: "web", label: "Веб" },
+  { value: "one_c", label: "1С" },
+  { value: "mobile_app", label: "Моб приложение" },
+  { value: "animation", label: "3D" },
+];
+
+export const projectTypeSections: Array<{
+  value: ProjectType;
+  title_ru: string;
+  title_en: string;
+}> = [
+  { value: "web", title_ru: "Веб-проекты", title_en: "Web projects" },
+  { value: "one_c", title_ru: "1С-проекты", title_en: "1C projects" },
+  { value: "mobile_app", title_ru: "Мобильные приложения", title_en: "Mobile apps" },
+  { value: "animation", title_ru: "Анимационные проекты", title_en: "Animation projects" },
 ];
 
 export const defaultSiteMetaContent: SiteMetaContent = {
@@ -79,6 +99,7 @@ export const defaultHomepageContent: HomepageContent = {
 };
 
 export const defaultProjectShowcaseMeta: ProjectShowcaseMeta = {
+  project_type: "web",
   media_mode: "screenshots",
   visual_variant: "dashboard-light",
   video_duration: "0:40",
@@ -154,9 +175,14 @@ export function normalizeProjectShowcaseMeta(
 
   return {
     ...merged,
+    project_type: isProjectType(merged.project_type) ? merged.project_type : "web",
     media_mode:
-      merged.media_mode === "video" || merged.media_mode === "demo"
+      merged.media_mode === "video" || merged.media_mode === "mobile_video" || merged.media_mode === "demo"
         ? merged.media_mode
         : "screenshots",
   };
+}
+
+export function isProjectType(value: unknown): value is ProjectType {
+  return value === "web" || value === "one_c" || value === "mobile_app" || value === "animation";
 }

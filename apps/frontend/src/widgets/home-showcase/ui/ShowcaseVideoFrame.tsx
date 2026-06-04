@@ -1,14 +1,16 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- Phone video posters are admin-managed media URLs. */
+
 import type { MouseEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   IconCalendar,
   IconChartLine,
   IconChevronDown,
-  IconDotsVertical,
   IconLayoutDashboard,
   IconMaximize,
+  IconMinimize,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
   IconSettings,
@@ -27,6 +29,29 @@ type ShowcaseVideoFrameProps = {
   mediaUrl?: string | null;
   coverImage?: string | null;
   className?: string;
+  onPlaybackStateChange?: (isPlaying: boolean) => void;
+};
+
+type VideoFitMode = "cover" | "contain";
+
+const centerPlayButtonClassName =
+  "absolute left-1/2 top-1/2 z-20 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/45 text-white shadow-[0_18px_50px_rgba(0,0,0,0.24)] ring-1 ring-white/20 backdrop-blur-sm transition duration-200 hover:scale-105 hover:bg-black/60";
+const videoControlButtonClassName =
+  "grid h-8 w-8 place-items-center rounded-md bg-black/35 text-white ring-1 ring-white/10 backdrop-blur-sm transition hover:bg-black/55";
+
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenElement = HTMLDivElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenVideoElement = HTMLVideoElement & {
+  webkitDisplayingFullscreen?: boolean;
+  webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
 };
 
 export function ShowcaseVideoFrame({
@@ -36,6 +61,7 @@ export function ShowcaseVideoFrame({
   mediaUrl,
   coverImage,
   className,
+  onPlaybackStateChange,
 }: ShowcaseVideoFrameProps) {
   const normalizedVariant = variant || "dashboard-light";
   const shouldUseUploadedMedia = normalizedVariant === "uploaded-media" && (mediaUrl || coverImage);
@@ -49,9 +75,15 @@ export function ShowcaseVideoFrame({
         className,
       )}
     >
-      <div className="aspect-[16/9] min-h-[250px] w-full overflow-hidden">
+      <div className="aspect-[16/9] w-full overflow-hidden sm:min-h-[250px]">
         {visualVariant === "uploaded-media" ? (
-          <UploadedMedia mediaUrl={mediaUrl} coverImage={coverImage} title={title} duration={duration} />
+          <UploadedMedia
+            mediaUrl={mediaUrl}
+            coverImage={coverImage}
+            title={title}
+            duration={duration}
+            onPlaybackStateChange={onPlaybackStateChange}
+          />
         ) : visualVariant === "chair-3d" ? (
           <ChairConfiguratorScene />
         ) : visualVariant === "finance-motion" ? (
@@ -65,7 +97,7 @@ export function ShowcaseVideoFrame({
         <button
           type="button"
           aria-label={`Play ${title}`}
-          className="absolute left-1/2 top-1/2 z-20 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-[#111318] shadow-[0_18px_50px_rgba(0,0,0,0.24)] transition duration-200 group-hover:scale-105"
+          className={centerPlayButtonClassName}
         >
           <IconPlayerPlayFilled className="ml-1 h-8 w-8" aria-hidden />
         </button>
@@ -76,19 +108,69 @@ export function ShowcaseVideoFrame({
   );
 }
 
+export function MobileVideoFrame({
+  duration,
+  title,
+  mediaUrl,
+  coverImage,
+  className,
+  onPlaybackStateChange,
+}: Omit<ShowcaseVideoFrameProps, "variant">) {
+  const hasPlayableVideo = Boolean(mediaUrl);
+
+  return (
+    <div className={cn("flex justify-center", className)}>
+      <div className="relative w-full max-w-[290px] rounded-[2.35rem] border border-white/20 bg-[#111318] p-2.5 shadow-[0_28px_80px_rgba(15,23,42,0.28)] ring-1 ring-black/15 sm:max-w-[310px]">
+        <div className="pointer-events-none absolute left-1/2 top-3 z-20 h-1.5 w-20 -translate-x-1/2 rounded-full bg-white/20" />
+        <div className="relative overflow-hidden rounded-[1.8rem] bg-[#080a0f]">
+          <div className="aspect-[332/720] w-full">
+            {hasPlayableVideo ? (
+              <UploadedVideoPlayer
+                mediaUrl={mediaUrl as string}
+                coverImage={coverImage}
+                title={title}
+                fallbackDuration={duration}
+                fitMode="contain"
+                posterFitMode="cover"
+                onPlaybackStateChange={onPlaybackStateChange}
+              />
+            ) : coverImage ? (
+              <img src={coverImage} alt="" className="h-full w-full object-cover" aria-hidden />
+            ) : (
+              <div className="grid h-full place-items-center px-8 text-center text-sm font-medium text-white/70">
+                {title}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UploadedMedia({
   mediaUrl,
   coverImage,
   title,
   duration,
+  onPlaybackStateChange,
 }: {
   mediaUrl?: string | null;
   coverImage?: string | null;
   title: string;
   duration: string;
+  onPlaybackStateChange?: (isPlaying: boolean) => void;
 }) {
   if (mediaUrl) {
-    return <UploadedVideoPlayer mediaUrl={mediaUrl} coverImage={coverImage} title={title} fallbackDuration={duration} />;
+    return (
+      <UploadedVideoPlayer
+        mediaUrl={mediaUrl}
+        coverImage={coverImage}
+        title={title}
+        fallbackDuration={duration}
+        onPlaybackStateChange={onPlaybackStateChange}
+      />
+    );
   }
 
   if (coverImage) {
@@ -107,16 +189,25 @@ function UploadedVideoPlayer({
   coverImage,
   title,
   fallbackDuration,
+  videoClassName,
+  fitMode = "cover",
+  posterFitMode = "cover",
+  onPlaybackStateChange,
 }: {
   mediaUrl: string;
   coverImage?: string | null;
   title: string;
   fallbackDuration: string;
+  videoClassName?: string;
+  fitMode?: VideoFitMode;
+  posterFitMode?: VideoFitMode;
+  onPlaybackStateChange?: (isPlaying: boolean) => void;
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
 
@@ -135,7 +226,9 @@ function UploadedVideoPlayer({
     }
 
     function syncPlaying() {
-      setIsPlaying(!videoElement.paused && !videoElement.ended);
+      const nextIsPlaying = !videoElement.paused && !videoElement.ended;
+      setIsPlaying(nextIsPlaying);
+      onPlaybackStateChange?.(nextIsPlaying);
     }
 
     videoElement.addEventListener("timeupdate", syncTime);
@@ -150,6 +243,40 @@ function UploadedVideoPlayer({
       videoElement.removeEventListener("play", syncPlaying);
       videoElement.removeEventListener("pause", syncPlaying);
       videoElement.removeEventListener("ended", syncPlaying);
+    };
+  }, [onPlaybackStateChange]);
+
+  useEffect(() => {
+    return () => {
+      onPlaybackStateChange?.(false);
+    };
+  }, [onPlaybackStateChange]);
+
+  useEffect(() => {
+    const currentVideo = videoRef.current as FullscreenVideoElement | null;
+
+    function syncFullscreenState() {
+      const fullscreenDocument = document as FullscreenDocument;
+      setIsFullscreen(
+        Boolean(
+          document.fullscreenElement ||
+            fullscreenDocument.webkitFullscreenElement ||
+            currentVideo?.webkitDisplayingFullscreen,
+        ),
+      );
+    }
+
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    document.addEventListener("webkitfullscreenchange", syncFullscreenState);
+    currentVideo?.addEventListener("webkitbeginfullscreen", syncFullscreenState);
+    currentVideo?.addEventListener("webkitendfullscreen", syncFullscreenState);
+    syncFullscreenState();
+
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
+      currentVideo?.removeEventListener("webkitbeginfullscreen", syncFullscreenState);
+      currentVideo?.removeEventListener("webkitendfullscreen", syncFullscreenState);
     };
   }, []);
 
@@ -190,13 +317,51 @@ function UploadedVideoPlayer({
     setCurrentTime(video.currentTime);
   }
 
-  async function requestFullscreen() {
-    const target = frameRef.current;
-    if (!target || !target.requestFullscreen) {
+  async function toggleFullscreen() {
+    const target = frameRef.current as FullscreenElement | null;
+    const video = videoRef.current as FullscreenVideoElement | null;
+    const fullscreenDocument = document as FullscreenDocument;
+    const hasStandardFullscreen = Boolean(document.fullscreenElement);
+    const hasWebkitFullscreen = Boolean(fullscreenDocument.webkitFullscreenElement);
+    const hasNativeVideoFullscreen = Boolean(video?.webkitDisplayingFullscreen);
+
+    if (hasStandardFullscreen || hasWebkitFullscreen || hasNativeVideoFullscreen) {
+      if (hasStandardFullscreen && document.exitFullscreen) {
+        await document.exitFullscreen();
+        return;
+      }
+
+      if (hasWebkitFullscreen && fullscreenDocument.webkitExitFullscreen) {
+        await fullscreenDocument.webkitExitFullscreen();
+        return;
+      }
+
+      if (hasNativeVideoFullscreen && video?.webkitExitFullscreen) {
+        video.webkitExitFullscreen();
+      }
+
       return;
     }
 
-    await target.requestFullscreen();
+    if (target?.requestFullscreen) {
+      try {
+        await target.requestFullscreen();
+        return;
+      } catch {
+        // iOS Safari exposes fullscreen only on the video element.
+      }
+    }
+
+    if (target?.webkitRequestFullscreen) {
+      try {
+        await target.webkitRequestFullscreen();
+        return;
+      } catch {
+        // Fall back to native media fullscreen below.
+      }
+    }
+
+    video?.webkitEnterFullscreen?.();
   }
 
   const progress = durationSeconds > 0 ? Math.min((currentTime / durationSeconds) * 100, 100) : 0;
@@ -205,31 +370,52 @@ function UploadedVideoPlayer({
   }`;
 
   return (
-    <div ref={frameRef} className="group/video relative h-full w-full bg-[#080a0f]">
+    <div ref={frameRef} className="group/video relative flex h-full w-full items-center justify-center overflow-hidden bg-[#080a0f]">
       <video
         ref={videoRef}
-        className="h-full w-full object-cover"
+        className={cn(
+          "h-full w-full object-center",
+          fitMode === "contain" ? "object-contain" : "object-cover",
+          videoClassName,
+        )}
         src={mediaUrl}
         poster={coverImage ?? undefined}
         preload="metadata"
         playsInline
       />
 
+      {!isPlaying && currentTime <= 0.05 && coverImage ? (
+        <img
+          src={coverImage}
+          alt=""
+          className={cn(
+            "pointer-events-none absolute inset-0 z-10 h-full w-full object-center",
+            posterFitMode === "contain" ? "object-contain" : "object-cover",
+          )}
+          aria-hidden
+        />
+      ) : null}
+
       {!isPlaying ? (
         <button
           type="button"
           aria-label={`Play ${title}`}
           onClick={() => void togglePlayback()}
-          className="absolute left-1/2 top-1/2 z-20 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-[#111318] shadow-[0_18px_50px_rgba(0,0,0,0.24)] transition duration-200 hover:scale-105"
+          className={centerPlayButtonClassName}
         >
           <IconPlayerPlayFilled className="ml-1 h-8 w-8" aria-hidden />
         </button>
       ) : null}
 
-      <div className="absolute inset-x-4 bottom-3 z-30 text-white">
+      <div className="absolute inset-x-3 bottom-3 z-30 rounded-lg bg-black/35 px-2.5 py-2 text-white shadow-[0_14px_42px_rgba(0,0,0,0.26)] ring-1 ring-white/10 backdrop-blur-sm sm:inset-x-4">
         <div className="mb-2 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <button type="button" aria-label={isPlaying ? "Pause video" : "Play video"} onClick={() => void togglePlayback()}>
+            <button
+              type="button"
+              aria-label={isPlaying ? "Pause video" : "Play video"}
+              onClick={() => void togglePlayback()}
+              className={videoControlButtonClassName}
+            >
               {isPlaying ? (
                 <IconPlayerPauseFilled className="h-4 w-4" aria-hidden />
               ) : (
@@ -239,13 +425,26 @@ function UploadedVideoPlayer({
             <span className="text-sm font-medium">{timelineLabel}</span>
           </div>
           <div className="flex items-center gap-5">
-            <button type="button" aria-label={isMuted ? "Unmute video" : "Mute video"} onClick={toggleMuted}>
+            <button
+              type="button"
+              aria-label={isMuted ? "Unmute video" : "Mute video"}
+              onClick={toggleMuted}
+              className={videoControlButtonClassName}
+            >
               {isMuted ? <IconVolumeOff className="h-5 w-5" aria-hidden /> : <IconVolume className="h-5 w-5" aria-hidden />}
             </button>
-            <button type="button" aria-label="Open fullscreen" onClick={() => void requestFullscreen()}>
-              <IconMaximize className="h-5 w-5" aria-hidden />
+            <button
+              type="button"
+              aria-label={isFullscreen ? "Exit fullscreen" : "Open fullscreen"}
+              onClick={() => void toggleFullscreen()}
+              className={videoControlButtonClassName}
+            >
+              {isFullscreen ? (
+                <IconMinimize className="h-5 w-5" aria-hidden />
+              ) : (
+                <IconMaximize className="h-5 w-5" aria-hidden />
+              )}
             </button>
-            <IconDotsVertical className="h-5 w-5" aria-hidden />
           </div>
         </div>
         <button
@@ -273,16 +472,21 @@ function formatVideoTime(value: number) {
 
 function VideoControls({ duration }: { duration: string }) {
   return (
-    <div className="absolute inset-x-4 bottom-3 z-30 text-white">
+    <div className="absolute inset-x-3 bottom-3 z-30 rounded-lg bg-black/35 px-2.5 py-2 text-white shadow-[0_14px_42px_rgba(0,0,0,0.26)] ring-1 ring-white/10 backdrop-blur-sm sm:inset-x-4">
       <div className="mb-2 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <IconPlayerPlayFilled className="h-4 w-4" aria-hidden />
+          <span className={videoControlButtonClassName}>
+            <IconPlayerPlayFilled className="h-4 w-4" aria-hidden />
+          </span>
           <span className="text-sm font-medium">0:00 / {duration}</span>
         </div>
         <div className="flex items-center gap-5">
-          <IconVolume className="h-5 w-5" aria-hidden />
-          <IconMaximize className="h-5 w-5" aria-hidden />
-          <IconDotsVertical className="h-5 w-5" aria-hidden />
+          <span className={videoControlButtonClassName}>
+            <IconVolume className="h-5 w-5" aria-hidden />
+          </span>
+          <span className={videoControlButtonClassName}>
+            <IconMaximize className="h-5 w-5" aria-hidden />
+          </span>
         </div>
       </div>
       <div className="h-1 overflow-hidden rounded-full bg-white/20">

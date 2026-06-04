@@ -12,6 +12,7 @@ DEFAULT_SHOWCASE_PROJECTS: list[dict[str, Any]] = [
         "description_en": "Dashboard with real-time analytics, data filtering and report export.",
         "stack": ["Next.js", "TypeScript", "Tailwind CSS", "Recharts"],
         "showcase_meta": {
+            "project_type": "web",
             "visual_variant": "dashboard-light",
             "video_duration": "0:40",
         },
@@ -38,6 +39,7 @@ DEFAULT_SHOWCASE_PROJECTS: list[dict[str, Any]] = [
         "description_en": "Interactive 3D model with live material, color and environment controls.",
         "stack": ["Three.js", "React Three Fiber", "GLSL", "Leva"],
         "showcase_meta": {
+            "project_type": "animation",
             "visual_variant": "chair-3d",
             "video_duration": "0:35",
         },
@@ -64,6 +66,7 @@ DEFAULT_SHOWCASE_PROJECTS: list[dict[str, Any]] = [
         "description_en": "Animated product interface and promo video focused on interaction and detail.",
         "stack": ["GSAP", "Framer Motion", "After Effects", "Lottie"],
         "showcase_meta": {
+            "project_type": "animation",
             "visual_variant": "finance-motion",
             "video_duration": "0:30",
         },

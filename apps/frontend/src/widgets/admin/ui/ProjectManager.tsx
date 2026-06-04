@@ -9,10 +9,14 @@ import { useAdminAuth } from "@/features/admin-auth/model/useAdminAuth";
 import { createProject, deleteProject, getProjects, updateProject, uploadAsset } from "@/shared/api/client";
 import type { Project } from "@/shared/api/types";
 import {
+  isProjectType,
   normalizeProjectShowcaseMeta,
+  projectTypeOptions,
   projectShowcaseMediaModeOptions,
+  type ProjectType,
   type ProjectShowcaseMediaMode,
 } from "@/shared/config/homepageContent";
+import { cn } from "@/shared/lib/cn";
 import { PillBadge } from "@/shared/ui/PillBadge";
 import { SectionHeader } from "@/shared/ui/SectionHeader";
 import { SoftButton } from "@/shared/ui/SoftButton";
@@ -27,6 +31,7 @@ type ProjectForm = {
   description_ru: string;
   description_en: string;
   stack: string;
+  project_type: ProjectType;
   showcase_media_mode: ProjectShowcaseMediaMode;
   showcase_video_duration: string;
   preview_video_url: string;
@@ -72,6 +77,7 @@ const emptyForm: ProjectForm = {
   description_ru: "",
   description_en: "",
   stack: "",
+  project_type: "web",
   showcase_media_mode: "screenshots",
   showcase_video_duration: "0:40",
   preview_video_url: "",
@@ -106,7 +112,19 @@ function resolveProjectVisualVariant(mediaMode: ProjectShowcaseMediaMode) {
 }
 
 function normalizeSelectedProjectMediaMode(value: string | null): ProjectShowcaseMediaMode {
-  return value === "demo" || value === "video" ? value : "screenshots";
+  return value === "demo" || value === "video" || value === "mobile_video" ? value : "screenshots";
+}
+
+function normalizeSelectedProjectType(value: string | null): ProjectType {
+  return isProjectType(value) ? value : "web";
+}
+
+function isProjectVideoMode(mediaMode: ProjectShowcaseMediaMode) {
+  return mediaMode === "video" || mediaMode === "mobile_video";
+}
+
+function sortProjectsByAdminOrder(projects: Project[]) {
+  return [...projects].sort((first, second) => first.sort_order - second.sort_order || first.id - second.id);
 }
 
 function buildProjectPayload(form: ProjectForm): ProjectPayload {
@@ -134,14 +152,14 @@ function buildProjectPayload(form: ProjectForm): ProjectPayload {
     description_en: form.description_en,
     stack: parseCommaList(form.stack),
     showcase_meta: {
+      project_type: normalizeSelectedProjectType(form.project_type),
       media_mode: form.showcase_media_mode,
       visual_variant: resolveProjectVisualVariant(form.showcase_media_mode),
       video_duration: form.showcase_video_duration,
     },
-    preview_video_url:
-      form.showcase_media_mode === "video" ? nullableString(form.preview_video_url) : null,
+    preview_video_url: isProjectVideoMode(form.showcase_media_mode) ? nullableString(form.preview_video_url) : null,
     cover_image:
-      form.showcase_media_mode === "demo" || form.showcase_media_mode === "video"
+      form.showcase_media_mode === "demo" || isProjectVideoMode(form.showcase_media_mode)
         ? nullableString(form.cover_image)
         : null,
     repository_url: nullableString(form.repository_url),
@@ -170,8 +188,9 @@ function buildProjectForm(project: Project): ProjectForm {
     description_ru: project.description_ru,
     description_en: project.description_en,
     stack: project.stack.join(", "),
+    project_type: normalizeSelectedProjectType(showcaseMeta.project_type),
     showcase_media_mode:
-      showcaseMeta.media_mode === "video" || showcaseMeta.media_mode === "demo"
+      showcaseMeta.media_mode === "video" || showcaseMeta.media_mode === "mobile_video" || showcaseMeta.media_mode === "demo"
         ? showcaseMeta.media_mode
         : "screenshots",
     showcase_video_duration: showcaseMeta.video_duration,
@@ -208,6 +227,7 @@ export function ProjectManager() {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [inlineUpdatingIds, setInlineUpdatingIds] = useState<number[]>([]);
   const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
   const [screenshotUploadFile, setScreenshotUploadFile] = useState<File | null>(null);
   const [isUploadingProjectVideo, setIsUploadingProjectVideo] = useState(false);
@@ -315,7 +335,8 @@ export function ProjectManager() {
       const asset = await uploadAsset(file, tokens.access_token, "project", editingId ?? undefined);
       setForm((current) => ({
         ...current,
-        showcase_media_mode: isVideoUpload ? "video" : current.showcase_media_mode,
+        showcase_media_mode:
+          isVideoUpload && current.showcase_media_mode === "screenshots" ? "video" : current.showcase_media_mode,
         [field]: asset.public_url,
       }));
       setError(null);
@@ -371,6 +392,41 @@ export function ProjectManager() {
     }
   }
 
+  async function handleProjectQuickUpdate(project: Project, patch: Pick<Partial<Project>, "is_published" | "sort_order">) {
+    if (!tokens?.access_token) {
+      return;
+    }
+
+    setInlineUpdatingIds((current) => (current.includes(project.id) ? current : [...current, project.id]));
+    setProjects((current) =>
+      current.map((item) =>
+        item.id === project.id
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item,
+      ),
+    );
+    if (editingId === project.id) {
+      setForm((current) => ({
+        ...current,
+        ...patch,
+      }));
+    }
+
+    try {
+      const updatedProject = await updateProject(project.id, patch, tokens.access_token);
+      setProjects((current) => current.map((item) => (item.id === project.id ? updatedProject : item)));
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Failed to update project");
+      await loadProjects();
+    } finally {
+      setInlineUpdatingIds((current) => current.filter((id) => id !== project.id));
+    }
+  }
+
   if (!tokens?.access_token) {
     return (
       <SurfaceCard variant="soft">
@@ -383,24 +439,18 @@ export function ProjectManager() {
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-      <SurfaceCard variant="elevated" header={<ProjectManagerHeader count={projects.length} />}>
-        <div className="space-y-3">
-          {projects.map((project) => (
-            <ProjectListCard
-              key={project.id}
-              project={project}
-              isEditing={editingId === project.id}
-              isDeleting={deletingId === project.id}
-              onEdit={() => handleEdit(project)}
-              onDelete={() => void handleDelete(project.id)}
-            />
-          ))}
-          {projects.length === 0 ? (
-            <div className="rounded-[24px] border border-[var(--border-soft)] bg-[var(--surface-secondary)] p-5 text-sm text-[var(--text-secondary)]">
-              No projects yet.
-            </div>
-          ) : null}
+    <div className="flex flex-col gap-6">
+      <SurfaceCard className="order-2" variant="elevated" header={<ProjectManagerHeader count={projects.length} />}>
+        <div className="space-y-5">
+          <ProjectTypeTables
+            projects={projects}
+            editingId={editingId}
+            deletingId={deletingId}
+            inlineUpdatingIds={inlineUpdatingIds}
+            onEdit={handleEdit}
+            onDelete={(projectId) => void handleDelete(projectId)}
+            onQuickUpdate={(project, patch) => void handleProjectQuickUpdate(project, patch)}
+          />
           {error ? (
             <div className="rounded-[20px] border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
               {error}
@@ -410,6 +460,7 @@ export function ProjectManager() {
       </SurfaceCard>
 
       <SurfaceCard
+        className="order-1"
         variant="default"
         header={
           <SectionHeader
@@ -444,6 +495,18 @@ export function ProjectManager() {
                 label="Sort order"
                 value={form.sort_order}
                 onChange={(value) => setForm({ ...form, sort_order: typeof value === "number" ? value : 0 })}
+              />
+              <Select
+                label="Project type"
+                data={projectTypeOptions}
+                required
+                value={form.project_type}
+                onChange={(value) =>
+                  setForm({
+                    ...form,
+                    project_type: normalizeSelectedProjectType(value),
+                  })
+                }
               />
               <TextInput
                 label="Title RU"
@@ -627,21 +690,25 @@ export function ProjectManager() {
               </div>
             ) : null}
 
-            {form.showcase_media_mode === "video" ? (
+            {isProjectVideoMode(form.showcase_media_mode) ? (
               <div className="space-y-4 border-t border-[var(--border-soft)] pt-4">
                 <SectionHeader
-                  eyebrow="Video"
-                  title="Project video preview"
-                  description="Upload a demo video and poster image used by the public homepage video player."
+                  eyebrow={form.showcase_media_mode === "mobile_video" ? "Mobile video" : "Video"}
+                  title={form.showcase_media_mode === "mobile_video" ? "Phone screen recording" : "Project video preview"}
+                  description={
+                    form.showcase_media_mode === "mobile_video"
+                      ? "Upload a vertical phone screen recording and an optional poster image."
+                      : "Upload a demo video and poster image used by the public homepage video player."
+                  }
                 />
                 <div className="grid gap-4 md:grid-cols-2">
                   <TextInput
-                    label="Video URL"
+                    label={form.showcase_media_mode === "mobile_video" ? "Mobile video URL" : "Video URL"}
                     value={form.preview_video_url}
                     onChange={(event) => setForm({ ...form, preview_video_url: event.currentTarget.value })}
                   />
                   <FileInput
-                    label="Upload video"
+                    label={form.showcase_media_mode === "mobile_video" ? "Upload mobile video" : "Upload video"}
                     description="MP4, WebM or MOV."
                     accept="video/*"
                     clearable
@@ -654,12 +721,12 @@ export function ProjectManager() {
                     }}
                   />
                   <TextInput
-                    label="Video preview image URL"
+                    label={form.showcase_media_mode === "mobile_video" ? "Mobile video poster URL" : "Video preview image URL"}
                     value={form.cover_image}
                     onChange={(event) => setForm({ ...form, cover_image: event.currentTarget.value })}
                   />
                   <FileInput
-                    label="Upload video preview"
+                    label={form.showcase_media_mode === "mobile_video" ? "Upload mobile video poster" : "Upload video preview"}
                     description="PNG, JPG, WebP or AVIF."
                     accept="image/*"
                     clearable
@@ -750,51 +817,188 @@ function ProjectManagerHeader({ count }: { count: number }) {
   );
 }
 
-function ProjectListCard({
+function ProjectTypeTables({
+  projects,
+  editingId,
+  deletingId,
+  inlineUpdatingIds,
+  onEdit,
+  onDelete,
+  onQuickUpdate,
+}: {
+  projects: Project[];
+  editingId: number | null;
+  deletingId: number | null;
+  inlineUpdatingIds: number[];
+  onEdit: (project: Project) => void;
+  onDelete: (projectId: number) => void;
+  onQuickUpdate: (project: Project, patch: Pick<Partial<Project>, "is_published" | "sort_order">) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      {projectTypeOptions.map((typeOption) => {
+        const typeProjects = sortProjectsByAdminOrder(
+          projects.filter(
+            (project) => normalizeProjectShowcaseMeta(project.showcase_meta).project_type === typeOption.value,
+          ),
+        );
+
+        return (
+          <ProjectTypeTable
+            key={typeOption.value}
+            title={typeOption.label}
+            projects={typeProjects}
+            editingId={editingId}
+            deletingId={deletingId}
+            inlineUpdatingIds={inlineUpdatingIds}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onQuickUpdate={onQuickUpdate}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function ProjectTypeTable({
+  title,
+  projects,
+  editingId,
+  deletingId,
+  inlineUpdatingIds,
+  onEdit,
+  onDelete,
+  onQuickUpdate,
+}: {
+  title: string;
+  projects: Project[];
+  editingId: number | null;
+  deletingId: number | null;
+  inlineUpdatingIds: number[];
+  onEdit: (project: Project) => void;
+  onDelete: (projectId: number) => void;
+  onQuickUpdate: (project: Project, patch: Pick<Partial<Project>, "is_published" | "sort_order">) => void;
+}) {
+  return (
+    <section className="overflow-hidden rounded-[24px] border border-[var(--border-soft)] bg-white/72">
+      <div className="flex items-center justify-between gap-4 border-b border-[var(--border-soft)] bg-[var(--surface-secondary)] px-4 py-3">
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--text-primary)]">{title}</h3>
+          <PillBadge tone="neutral" size="sm">
+            {projects.length}
+          </PillBadge>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-[860px] w-full border-collapse text-left text-sm">
+          <thead className="bg-white/55 text-xs uppercase tracking-[0.16em] text-[var(--text-muted)]">
+            <tr>
+              <th className="px-4 py-3 font-semibold">Project</th>
+              <th className="px-4 py-3 font-semibold">Media</th>
+              <th className="w-[132px] px-4 py-3 font-semibold">Active</th>
+              <th className="w-[132px] px-4 py-3 font-semibold">Order</th>
+              <th className="w-[176px] px-4 py-3 text-right font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border-soft)]">
+            {projects.length > 0 ? (
+              projects.map((project) => (
+                <ProjectTableRow
+                  key={project.id}
+                  project={project}
+                  isEditing={editingId === project.id}
+                  isDeleting={deletingId === project.id}
+                  isUpdating={inlineUpdatingIds.includes(project.id)}
+                  onEdit={() => onEdit(project)}
+                  onDelete={() => onDelete(project.id)}
+                  onQuickUpdate={(patch) => onQuickUpdate(project, patch)}
+                />
+              ))
+            ) : (
+              <tr>
+                <td className="px-4 py-5 text-sm text-[var(--text-secondary)]" colSpan={5}>
+                  No projects in this type yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ProjectTableRow({
   project,
   isEditing,
   isDeleting,
+  isUpdating,
   onEdit,
   onDelete,
+  onQuickUpdate,
 }: {
   project: Project;
   isEditing: boolean;
   isDeleting: boolean;
+  isUpdating: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onQuickUpdate: (patch: Pick<Partial<Project>, "is_published" | "sort_order">) => void;
 }) {
   const showcaseMeta = normalizeProjectShowcaseMeta(project.showcase_meta);
 
   return (
-    <article className="rounded-[26px] border border-[var(--border-soft)] bg-[var(--surface-secondary)] p-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <PillBadge tone={project.is_published ? "success" : "warning"} size="sm">
-              {project.is_published ? "published" : "draft"}
-            </PillBadge>
-            {project.is_featured ? (
-              <PillBadge tone="accent" size="sm">
-                featured
-              </PillBadge>
-            ) : null}
+    <tr className={cn("align-top transition", isEditing ? "bg-[#fff8ef]" : "hover:bg-white/70")}>
+      <td className="px-4 py-4">
+        <div className="max-w-[360px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold text-[var(--text-primary)]">{project.title_en}</p>
             {isEditing ? (
               <PillBadge tone="dark" size="sm">
                 editing
               </PillBadge>
             ) : null}
+            {isUpdating ? (
+              <PillBadge tone="subtle" size="sm">
+                saving
+              </PillBadge>
+            ) : null}
           </div>
-          <div>
-            <p className="font-semibold text-[var(--text-primary)]">{project.title_en}</p>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">{project.slug}</p>
-          </div>
-          <p className="text-xs uppercase tracking-[0.16em] text-[var(--text-muted)]">
-            media: {showcaseMeta.media_mode}
-          </p>
-          <p className="line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">{project.summary_en}</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">{project.slug}</p>
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">{project.summary_en}</p>
         </div>
-
-        <div className="flex shrink-0 flex-wrap gap-2">
+      </td>
+      <td className="px-4 py-4">
+        <PillBadge tone="neutral" size="sm">
+          {showcaseMeta.media_mode}
+        </PillBadge>
+      </td>
+      <td className="px-4 py-4">
+        <Switch
+          checked={project.is_published}
+          disabled={isDeleting}
+          onChange={(event) => onQuickUpdate({ is_published: event.currentTarget.checked })}
+        />
+      </td>
+      <td className="px-4 py-4">
+        <NumberInput
+          hideControls
+          min={0}
+          value={project.sort_order}
+          className="w-24"
+          disabled={isDeleting}
+          onChange={(value) => {
+            const nextValue = typeof value === "number" ? value : Number(value);
+            if (Number.isFinite(nextValue) && nextValue !== project.sort_order) {
+              onQuickUpdate({ sort_order: Math.round(nextValue) });
+            }
+          }}
+        />
+      </td>
+      <td className="px-4 py-4">
+        <div className="flex justify-end gap-2">
           <SoftButton tone="neutral" shape="compact" onClick={onEdit}>
             Edit
           </SoftButton>
@@ -802,7 +1006,7 @@ function ProjectListCard({
             {isDeleting ? "Deleting..." : "Delete"}
           </SoftButton>
         </div>
-      </div>
-    </article>
+      </td>
+    </tr>
   );
 }

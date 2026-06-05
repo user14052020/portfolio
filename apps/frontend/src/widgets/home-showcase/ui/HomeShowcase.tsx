@@ -3,11 +3,16 @@
 /* eslint-disable @next/next/no-img-element -- Demo preview images are admin-managed media URLs. */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { IconChevronLeft, IconChevronRight, IconMail, IconSend } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp, IconMail, IconSend } from "@tabler/icons-react";
 
 import { getKworkReviews } from "@/shared/api/client";
 import type { KworkReview, KworkReviewsPage, Locale, Project, SiteSettings } from "@/shared/api/types";
-import { normalizeHomepageContent, normalizeProjectShowcaseMeta, projectTypeSections } from "@/shared/config/homepageContent";
+import {
+  normalizeHomepageContent,
+  normalizeProjectShowcaseMeta,
+  projectTypeSections,
+  type ProjectType,
+} from "@/shared/config/homepageContent";
 import { contactSocialLinks, resolveExternalUrl, type ContactSocialKey } from "@/shared/config/socialLinks";
 import { pickLocalized } from "@/shared/i18n/dictionaries";
 import { cn } from "@/shared/lib/cn";
@@ -61,7 +66,7 @@ export function HomeShowcase({
   } as CSSProperties;
 
   return (
-    <main className="min-h-screen bg-[#f7f7f5] text-[#111318]" style={accentStyle}>
+    <main className="min-h-screen bg-white text-[#111318]" style={accentStyle}>
       <div className="mx-auto w-full max-w-[1440px] px-5 py-7 sm:px-8 lg:px-10">
         <header className="flex items-center justify-between gap-5">
           <p className="text-2xl font-bold tracking-normal sm:text-3xl">{brandName}</p>
@@ -122,7 +127,7 @@ export function HomeShowcase({
         </section>
 
         {projectGroups.length > 0 ? (
-          <section className="space-y-12 py-6 lg:space-y-14">
+          <section className="py-6">
             {projectGroups.map((group) => (
               <ProjectTypeSlider
                 key={group.value}
@@ -166,7 +171,72 @@ export function HomeShowcase({
 const KWORK_PROFILE_URL = "https://kwork.ru/user/portfolio-dev";
 const REVIEWS_BATCH_SIZE = 3;
 const PROJECT_SLIDER_SECONDS = 60;
-const PROJECT_DESCRIPTION_COLLAPSED_LINES = 4;
+const PROJECT_DESCRIPTION_COLLAPSED_LINES = 6;
+
+type ProjectSectionThemeStyle = CSSProperties & Record<`--project-${string}`, string>;
+
+const projectSectionThemeStyles: Record<ProjectType, ProjectSectionThemeStyle> = {
+  web: {
+    "--project-bg": "#eef5ff",
+    "--project-border": "#c7d8f1",
+    "--project-title": "#0e1a2b",
+    "--project-text": "#405169",
+    "--project-muted": "#5d6f88",
+    "--project-divider": "#94a9c6",
+    "--project-control-bg": "rgba(255,255,255,0.82)",
+    "--project-control-border": "#b8cbe5",
+    "--project-control-fill": "#0e1a2b",
+    "--project-control-muted": "#c4d2e8",
+    "--project-control-contrast": "#ffffff",
+    "--project-control-inner-bg": "#ffffff",
+    "--project-fade-from": "rgba(238,245,255,0.15)",
+  },
+  one_c: {
+    "--project-bg": "#202318",
+    "--project-border": "#51472a",
+    "--project-title": "#fff5d6",
+    "--project-text": "#e7dec2",
+    "--project-muted": "#c8ba88",
+    "--project-divider": "#d6ae43",
+    "--project-control-bg": "rgba(255,255,255,0.1)",
+    "--project-control-border": "#786735",
+    "--project-control-fill": "#f1c64b",
+    "--project-control-muted": "#5d5436",
+    "--project-control-contrast": "#17150f",
+    "--project-control-inner-bg": "#292b1f",
+    "--project-fade-from": "rgba(32,35,24,0.15)",
+  },
+  mobile_app: {
+    "--project-bg": "#edf8f5",
+    "--project-border": "#bddbd3",
+    "--project-title": "#102621",
+    "--project-text": "#405e56",
+    "--project-muted": "#55766d",
+    "--project-divider": "#88b5aa",
+    "--project-control-bg": "rgba(255,255,255,0.8)",
+    "--project-control-border": "#a8cdc3",
+    "--project-control-fill": "#102621",
+    "--project-control-muted": "#bdd9d1",
+    "--project-control-contrast": "#ffffff",
+    "--project-control-inner-bg": "#ffffff",
+    "--project-fade-from": "rgba(237,248,245,0.15)",
+  },
+  animation: {
+    "--project-bg": "#181421",
+    "--project-border": "#42354f",
+    "--project-title": "#faf4ff",
+    "--project-text": "#d8cde5",
+    "--project-muted": "#bbaacf",
+    "--project-divider": "#8f72b6",
+    "--project-control-bg": "rgba(255,255,255,0.1)",
+    "--project-control-border": "#5b4770",
+    "--project-control-fill": "#d6b8ff",
+    "--project-control-muted": "#4c405c",
+    "--project-control-contrast": "#17111f",
+    "--project-control-inner-bg": "#241c30",
+    "--project-fade-from": "rgba(24,20,33,0.15)",
+  },
+};
 
 type ProjectTypeGroup = (typeof projectTypeSections)[number] & {
   projects: Project[];
@@ -447,6 +517,7 @@ function ProjectTypeSlider({
   const projectIdsKey = useMemo(() => group.projects.map((project) => project.id).join(","), [group.projects]);
   const activeProject = group.projects[Math.min(activeIndex, group.projects.length - 1)];
   const groupTitle = pickLocalized(group, "title", locale);
+  const themeStyle = projectSectionThemeStyles[group.value];
 
   useEffect(() => {
     setActiveIndex(0);
@@ -489,7 +560,10 @@ function ProjectTypeSlider({
   }
 
   return (
-    <section className="border-t border-[#dfe2e7] pt-7">
+    <section
+      className="-mx-5 border-y border-[color:var(--project-border)] bg-[var(--project-bg)] px-5 py-8 text-[color:var(--project-title)] sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10"
+      style={themeStyle}
+    >
       <div className="hidden">
         <div>
           <p className="text-sm uppercase tracking-normal text-[#8c929c]">Portfolio</p>
@@ -544,7 +618,7 @@ function ProjectSliderControls({
 
   return (
     <div className="mt-5 flex justify-end">
-      <div className="inline-flex items-center gap-2 rounded-lg border border-[#d8dce3] bg-white/78 p-2 shadow-[0_16px_46px_rgba(17,19,24,0.08)] backdrop-blur">
+      <div className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--project-control-border)] bg-[var(--project-control-bg)] p-2 shadow-[0_16px_46px_rgba(17,19,24,0.08)] backdrop-blur">
         <div className="hidden items-center gap-1 sm:flex">
           {Array.from({ length: total }).map((_, index) => (
             <button
@@ -554,7 +628,9 @@ function ProjectSliderControls({
               onClick={() => onSelect(index)}
               className={cn(
                 "h-2.5 rounded-full transition",
-                index === activeIndex ? "w-6 bg-[#111318]" : "w-2.5 bg-[#c9ced7] hover:bg-[#8f96a3]",
+                index === activeIndex
+                  ? "w-6 bg-[var(--project-control-fill)]"
+                  : "w-2.5 bg-[var(--project-control-muted)] hover:bg-[var(--project-divider)]",
               )}
             />
           ))}
@@ -563,16 +639,16 @@ function ProjectSliderControls({
         <div
           className="mx-1 grid h-12 w-12 shrink-0 place-items-center rounded-full transition-[background] duration-300"
           style={{
-            background: `conic-gradient(#111318 ${Math.max(0, Math.min(countdownProgress, 1)) * 360}deg, #dfe2e7 0deg)`,
+            background: `conic-gradient(var(--project-control-fill) ${Math.max(0, Math.min(countdownProgress, 1)) * 360}deg, var(--project-control-muted) 0deg)`,
           }}
           aria-label={`${remainingSeconds} seconds to next project`}
         >
-          <span className="grid h-9 w-9 place-items-center rounded-full bg-white text-xs font-semibold tabular-nums text-[#111318]">
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-[var(--project-control-inner-bg)] text-xs font-semibold tabular-nums text-[color:var(--project-control-fill)]">
             {remainingSeconds}
           </span>
         </div>
 
-        <span className="hidden min-w-[54px] text-xs font-semibold tabular-nums text-[#111318] sm:inline">
+        <span className="hidden min-w-[54px] text-xs font-semibold tabular-nums text-[color:var(--project-title)] sm:inline">
           {String(activeIndex + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
         </span>
 
@@ -580,7 +656,7 @@ function ProjectSliderControls({
           type="button"
           aria-label="Previous project"
           onClick={onPrevious}
-          className="grid h-9 w-9 place-items-center rounded-md border border-[#d8dce3] bg-white text-[#111318] transition hover:border-[#111318] hover:bg-[#111318] hover:text-white"
+          className="grid h-9 w-9 place-items-center rounded-md border border-[color:var(--project-control-border)] bg-[var(--project-control-inner-bg)] text-[color:var(--project-control-fill)] transition hover:border-[color:var(--project-control-fill)] hover:bg-[var(--project-control-fill)] hover:text-[color:var(--project-control-contrast)]"
         >
           <IconChevronLeft className="h-5 w-5" aria-hidden />
         </button>
@@ -588,7 +664,7 @@ function ProjectSliderControls({
           type="button"
           aria-label="Next project"
           onClick={onNext}
-          className="grid h-9 w-9 place-items-center rounded-md border border-[#111318] bg-[#111318] text-white transition hover:bg-white hover:text-[#111318]"
+          className="grid h-9 w-9 place-items-center rounded-md border border-[color:var(--project-control-fill)] bg-[var(--project-control-fill)] text-[color:var(--project-control-contrast)] transition hover:bg-[var(--project-control-inner-bg)] hover:text-[color:var(--project-control-fill)]"
         >
           <IconChevronRight className="h-5 w-5" aria-hidden />
         </button>
@@ -655,10 +731,10 @@ function ProjectShowcaseRow({
     <article className="space-y-6 lg:space-y-7">
       <header>
         <div className="min-w-0">
-          <h2 className="flex items-center gap-3 overflow-x-auto pb-1 text-3xl font-semibold leading-tight tracking-normal text-[#111318] lg:whitespace-nowrap">
+          <h2 className="flex items-center gap-3 overflow-x-auto pb-1 text-3xl font-semibold leading-tight tracking-normal text-[color:var(--project-title)] lg:whitespace-nowrap">
             <span className="shrink-0 leading-tight">{projectTitle}</span>
             {projectSummary ? (
-              <span className="shrink-0 text-xl font-normal leading-tight text-[#111318]">/ {projectSummary}</span>
+              <span className="shrink-0 text-xl font-normal leading-tight text-[color:var(--project-title)] opacity-[0.82]">/ {projectSummary}</span>
             ) : null}
           </h2>
         </div>
@@ -682,12 +758,12 @@ function ProjectShowcaseRow({
 
       {projectStack.length > 0 ? (
         <footer>
-          <p className="mb-4 text-sm text-[#4f535c]">{stackLabel}</p>
-          <div className="flex items-center gap-x-4 overflow-x-auto pb-1 text-sm text-[#111318]">
+          <p className="mb-4 text-sm text-[color:var(--project-muted)]">{stackLabel}</p>
+          <div className="flex items-center gap-x-4 overflow-x-auto pb-1 text-sm text-[color:var(--project-title)]">
             {projectStack.map((item, stackIndex) => (
               <span key={`${project.id}-${item}`} className="flex shrink-0 items-center gap-4">
                 <span className="whitespace-nowrap">{item}</span>
-                {stackIndex < projectStack.length - 1 ? <span className="text-[#aeb2ba]">/</span> : null}
+                {stackIndex < projectStack.length - 1 ? <span className="text-[color:var(--project-divider)]">/</span> : null}
               </span>
             ))}
           </div>
@@ -711,8 +787,8 @@ function ProjectDescription({
   const contentRef = useRef<HTMLParagraphElement | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
-  const showMoreLabel = locale === "ru" ? "Показать" : "Show";
-  const collapseLabel = locale === "ru" ? "Скрыть" : "Hide";
+  const expandAriaLabel = locale === "ru" ? "Показать описание полностью" : "Show full description";
+  const collapseAriaLabel = locale === "ru" ? "Скрыть описание" : "Hide description";
 
   useEffect(() => {
     setIsExpanded(false);
@@ -751,25 +827,27 @@ function ProjectDescription({
 
   return (
     <div className={cn(className)}>
-      <div className={cn("relative", isExpanded ? "min-h-32" : "h-[9rem] overflow-hidden")}>
-        <p ref={contentRef} className="whitespace-pre-line text-base leading-8 text-[#4b5059]">
+      <div className={cn("relative", isExpanded ? "min-h-48" : "h-[13.5rem] overflow-hidden")}>
+        <p ref={contentRef} className="whitespace-pre-line text-base leading-8 text-[color:var(--project-text)]">
           {text}
         </p>
         {!isExpanded && canExpand ? (
           <span
-            className="pointer-events-none absolute inset-x-0 bottom-0 top-32 bg-gradient-to-b from-[#f7f7f5]/35 to-[#f7f7f5]"
+            className="pointer-events-none absolute inset-x-0 bottom-0 top-[12.75rem]"
+            style={{ background: "linear-gradient(to bottom, var(--project-fade-from), var(--project-bg))" }}
             aria-hidden
           />
         ) : null}
       </div>
-      <div className="mt-3 min-h-7">
+      <div className="mt-2 min-h-8">
         {canExpand ? (
           <button
             type="button"
+            aria-label={isExpanded ? collapseAriaLabel : expandAriaLabel}
             onClick={() => setIsExpanded((current) => !current)}
-            className="text-sm font-semibold text-[#111318] underline decoration-[#111318]/30 underline-offset-4 transition hover:decoration-[#111318]"
+            className="grid h-8 w-full place-items-center rounded-md border border-[color:var(--project-control-border)] bg-[var(--project-control-bg)] text-[color:var(--project-control-fill)] shadow-[0_10px_26px_rgba(17,19,24,0.06)] transition hover:border-[color:var(--project-control-fill)] hover:bg-[var(--project-control-fill)] hover:text-[color:var(--project-control-contrast)]"
           >
-            {isExpanded ? collapseLabel : showMoreLabel}
+            {isExpanded ? <IconChevronUp className="h-5 w-5" aria-hidden /> : <IconChevronDown className="h-5 w-5" aria-hidden />}
           </button>
         ) : null}
       </div>

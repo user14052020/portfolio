@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --bg-app: #f3f1ed;
-  --bg-canvas: #fbfaf7;
+  --bg-app: #ffffff;
+  --bg-canvas: #ffffff;
   --bg-soft-grid: rgba(24, 24, 27, 0.035);
 
   --surface-primary: #ffffff;
@@ -56,10 +56,7 @@ html {
 
 body {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 12% 6%, rgba(208, 164, 109, 0.22), transparent 32rem),
-    radial-gradient(circle at 86% 10%, rgba(239, 237, 255, 0.9), transparent 34rem),
-    linear-gradient(180deg, var(--bg-canvas) 0%, var(--bg-app) 52%, #ebe7de 100%);
+  background: #ffffff;
   color: var(--text-primary);
   font-family: var(--font-aa-stetica), sans-serif;
   text-rendering: optimizeLegibility;

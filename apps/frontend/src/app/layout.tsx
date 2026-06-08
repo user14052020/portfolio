@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { ColorSchemeScript } from "@mantine/core";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import localFont from "next/font/local";
 
 import type { Locale } from "@/shared/api/types";
@@ -90,8 +90,7 @@ function resolveInitialLocale(): Locale {
     return localeFromCookie;
   }
 
-  const acceptLanguage = headers().get("accept-language")?.toLowerCase() ?? "";
-  return acceptLanguage.includes("ru") ? "ru" : "en";
+  return "ru";
 }
 
 function resolveUrl(value?: string | null): URL | undefined {
@@ -157,6 +156,21 @@ export async function generateMetadata(): Promise<Metadata> {
       title: openGraphTitle,
       description: openGraphDescription,
       images: openGraphImage ? [openGraphImage] : undefined,
+    },
+    icons: {
+      icon: [
+        {
+          url: "/favicon.svg",
+          type: "image/svg+xml",
+        },
+      ],
+      shortcut: ["/favicon.svg"],
+      apple: [
+        {
+          url: "/apple-touch-icon.svg",
+          type: "image/svg+xml",
+        },
+      ],
     },
     robots: {
       index: siteMeta.robots_index,

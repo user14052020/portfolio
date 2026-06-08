@@ -1,8 +1,9 @@
-import { request } from "@/shared/api/base";
+import { buildUrl, request } from "@/shared/api/base";
 import type { RequestOptions } from "@/shared/api/base";
 import type {
   AdminChatSessionDetails,
   AdminChatSessionsPage,
+  BackupRestoreResult,
   BlogPost,
   ChatModeContext,
   ChatHistoryPage,
@@ -24,6 +25,20 @@ import type {
   User,
   UserPasswordChangePayload
 } from "@/shared/api/types";
+
+function getFilenameFromContentDisposition(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const encodedMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    return decodeURIComponent(encodedMatch[1].replace(/["']/g, ""));
+  }
+
+  const plainMatch = value.match(/filename="?([^";]+)"?/i);
+  return plainMatch?.[1] ?? null;
+}
 
 export async function getSiteSettings(fetchOptions?: Pick<RequestOptions, "cache" | "next">) {
   return request<SiteSettings>("/site-settings/", fetchOptions);
@@ -290,6 +305,39 @@ export async function uploadAsset(
     body: formData
   });
   return response.asset;
+}
+
+export async function downloadSiteBackup(token: string) {
+  const headers = new Headers();
+  headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(buildUrl("/backups/download"), {
+    headers,
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Backup download failed with status ${response.status}`);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename:
+      getFilenameFromContentDisposition(response.headers.get("Content-Disposition")) ??
+      `portfolio-backup-${new Date().toISOString().slice(0, 10)}.zip`
+  };
+}
+
+export async function restoreSiteBackup(file: File, token: string) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return request<BackupRestoreResult>("/backups/restore", {
+    method: "POST",
+    token,
+    body: formData
+  });
 }
 
 export async function sendStylistMessage(payload: {

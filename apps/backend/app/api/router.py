@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     admin_chats,
     auth,
+    backups,
     blog_posts,
     contact_requests,
     generation_jobs,
@@ -21,6 +22,7 @@ from app.api.routes import (
 api_router = APIRouter()
 api_router.include_router(admin_chats.router)
 api_router.include_router(auth.router)
+api_router.include_router(backups.router)
 api_router.include_router(users.router)
 api_router.include_router(kwork_reviews.router)
 api_router.include_router(projects.router)

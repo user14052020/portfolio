@@ -172,6 +172,8 @@ const KWORK_PROFILE_URL = "https://kwork.ru/user/portfolio-dev";
 const REVIEWS_BATCH_SIZE = 3;
 const PROJECT_SLIDER_SECONDS = 60;
 const PROJECT_DESCRIPTION_COLLAPSED_LINES = 6;
+const PROJECT_DESCRIPTION_MOBILE_COLLAPSED_LINES = 2;
+const PROJECT_DESCRIPTION_DESKTOP_QUERY = "(min-width: 640px)";
 
 type ProjectSectionThemeStyle = CSSProperties & Record<`--project-${string}`, string>;
 
@@ -561,9 +563,10 @@ function ProjectTypeSlider({
 
   return (
     <section
-      className="-mx-5 border-y border-[color:var(--project-border)] bg-[var(--project-bg)] px-5 py-8 text-[color:var(--project-title)] sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10"
+      className="relative left-1/2 w-screen -translate-x-1/2 border-y border-[color:var(--project-border)] bg-[var(--project-bg)] text-[color:var(--project-title)]"
       style={themeStyle}
     >
+      <div className="mx-auto w-full max-w-[1440px] px-5 py-8 sm:px-8 lg:px-10">
       <div className="hidden">
         <div>
           <p className="text-sm uppercase tracking-normal text-[#8c929c]">Portfolio</p>
@@ -595,6 +598,7 @@ function ProjectTypeSlider({
           onSelect={setActiveIndex}
         />
       ) : null}
+      </div>
     </section>
   );
 }
@@ -758,7 +762,6 @@ function ProjectShowcaseRow({
 
       {projectStack.length > 0 ? (
         <footer>
-          <p className="mb-4 text-sm text-[color:var(--project-muted)]">{stackLabel}</p>
           <div className="flex items-center gap-x-4 overflow-x-auto pb-1 text-sm text-[color:var(--project-title)]">
             {projectStack.map((item, stackIndex) => (
               <span key={`${project.id}-${item}`} className="flex shrink-0 items-center gap-4">
@@ -803,11 +806,16 @@ function ProjectDescription({
     }
 
     const measuredElement = contentElement;
+    const mediaQuery =
+      typeof window.matchMedia === "function" ? window.matchMedia(PROJECT_DESCRIPTION_DESKTOP_QUERY) : null;
 
     function syncOverflowState() {
       const lineHeight = Number.parseFloat(window.getComputedStyle(measuredElement).lineHeight);
       const safeLineHeight = Number.isFinite(lineHeight) ? lineHeight : 32;
-      const collapsedHeight = PROJECT_DESCRIPTION_COLLAPSED_LINES * safeLineHeight;
+      const collapsedLines = mediaQuery?.matches
+        ? PROJECT_DESCRIPTION_COLLAPSED_LINES
+        : PROJECT_DESCRIPTION_MOBILE_COLLAPSED_LINES;
+      const collapsedHeight = collapsedLines * safeLineHeight;
 
       setCanExpand(measuredElement.scrollHeight > collapsedHeight + 1);
     }
@@ -818,22 +826,24 @@ function ProjectDescription({
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => syncOverflowState());
     resizeObserver?.observe(measuredElement);
     window.addEventListener("resize", syncOverflowState);
+    mediaQuery?.addEventListener("change", syncOverflowState);
 
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", syncOverflowState);
+      mediaQuery?.removeEventListener("change", syncOverflowState);
     };
   }, [text]);
 
   return (
     <div className={cn(className)}>
-      <div className={cn("relative", isExpanded ? "min-h-48" : "h-[13.5rem] overflow-hidden")}>
+      <div className={cn("relative", isExpanded ? "min-h-16 sm:min-h-48" : "h-[5.5rem] overflow-hidden sm:h-[13.5rem]")}>
         <p ref={contentRef} className="whitespace-pre-line text-base leading-8 text-[color:var(--project-text)]">
           {text}
         </p>
         {!isExpanded && canExpand ? (
           <span
-            className="pointer-events-none absolute inset-x-0 bottom-0 top-[12.75rem]"
+            className="pointer-events-none absolute inset-x-0 bottom-0 top-[4.75rem] sm:top-[12.75rem]"
             style={{ background: "linear-gradient(to bottom, var(--project-fade-from), var(--project-bg))" }}
             aria-hidden
           />
@@ -845,7 +855,7 @@ function ProjectDescription({
             type="button"
             aria-label={isExpanded ? collapseAriaLabel : expandAriaLabel}
             onClick={() => setIsExpanded((current) => !current)}
-            className="grid h-8 w-full place-items-center rounded-md border border-[color:var(--project-control-border)] bg-[var(--project-control-bg)] text-[color:var(--project-control-fill)] shadow-[0_10px_26px_rgba(17,19,24,0.06)] transition hover:border-[color:var(--project-control-fill)] hover:bg-[var(--project-control-fill)] hover:text-[color:var(--project-control-contrast)]"
+            className="grid h-8 w-full place-items-center rounded-md text-[color:var(--project-control-fill)] transition hover:text-[color:var(--project-title)]"
           >
             {isExpanded ? <IconChevronUp className="h-5 w-5" aria-hidden /> : <IconChevronDown className="h-5 w-5" aria-hidden />}
           </button>

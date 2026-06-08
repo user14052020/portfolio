@@ -21,7 +21,8 @@ const links = [
   { href: "/admin/chats", key: "chats", accent: "Audit" },
   { href: "/admin/jobs", key: "jobs", accent: "Queue" },
   { href: "/admin/runtime", key: "runtime", accent: "Ops" },
-  { href: "/admin/user", key: "user", accent: "Account" }
+  { href: "/admin/user", key: "user", accent: "Account" },
+  { href: "/admin/backup", key: "backup", accent: "Archive" }
 ] as const;
 
 export function AdminLayoutShell({ children }: { children: React.ReactNode }) {

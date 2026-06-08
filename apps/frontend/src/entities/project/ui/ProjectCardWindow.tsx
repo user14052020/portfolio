@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+/* eslint-disable @next/next/no-img-element -- Project cover images are CMS-managed URLs. */
+
 import type { Locale, Project } from "@/shared/api/types";
 import { pickLocalized } from "@/shared/i18n/dictionaries";
 import { cn } from "@/shared/lib/cn";
@@ -42,10 +44,14 @@ export function ProjectCardWindow({
               playsInline
             />
           ) : project.cover_image ? (
-            <div
-              className={cn("w-full bg-cover bg-center", featured ? "min-h-[360px]" : "min-h-[280px]")}
-              style={{ backgroundImage: `url(${project.cover_image})` }}
-            />
+            <div className={cn("grid w-full place-items-center", featured ? "h-[360px]" : "h-[280px]")}>
+              <img
+                src={project.cover_image}
+                alt=""
+                className="max-h-full max-w-full object-contain object-center"
+                aria-hidden
+              />
+            </div>
           ) : (
             <div
               className={cn(

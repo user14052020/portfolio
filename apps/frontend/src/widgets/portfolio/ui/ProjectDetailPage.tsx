@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- Project gallery images are CMS-managed URLs. */
+
 import Link from "next/link";
 
 import type { Project } from "@/shared/api/types";
@@ -70,9 +72,16 @@ export function ProjectDetailPage({ project }: { project: Project }) {
           {galleryItems.map((item) => (
               <div key={item.id} className="overflow-hidden rounded-[22px] border border-slate-200/70 bg-slate-950">
                 {item.asset_type === "video" ? (
-                  <video src={item.url ?? undefined} className="h-[320px] w-full object-cover" autoPlay loop muted playsInline />
+                  <video src={item.url} className="h-[320px] w-full object-cover" autoPlay loop muted playsInline />
                 ) : (
-                  <div className="h-[320px] w-full bg-cover bg-center" style={{ backgroundImage: `url(${item.url})` }} />
+                  <div className="grid h-[320px] w-full place-items-center">
+                    <img
+                      src={item.url}
+                      alt=""
+                      className="max-h-full max-w-full object-contain object-center"
+                      aria-hidden
+                    />
+                  </div>
                 )}
               </div>
             ))}

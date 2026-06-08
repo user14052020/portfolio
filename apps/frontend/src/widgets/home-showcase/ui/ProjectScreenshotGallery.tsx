@@ -50,13 +50,23 @@ export function ProjectScreenshotGallery({
       )}
     >
       <div className="relative aspect-[16/9] min-h-[250px] w-full overflow-hidden p-2 sm:p-3">
-        <MobileFirstScreenshot
-          screenshot={normalizedScreenshots[0]}
-          count={normalizedScreenshots.length}
-          title={title}
-          onOpen={() => openViewer(0)}
-        />
-        <DesktopScreenshotGrid screenshots={normalizedScreenshots} title={title} onOpen={openViewer} />
+        {normalizedScreenshots.length === 1 ? (
+          <SingleScreenshotPreview
+            screenshot={normalizedScreenshots[0]}
+            title={title}
+            onOpen={() => openViewer(0)}
+          />
+        ) : (
+          <>
+            <MobileFirstScreenshot
+              screenshot={normalizedScreenshots[0]}
+              count={normalizedScreenshots.length}
+              title={title}
+              onOpen={() => openViewer(0)}
+            />
+            <DesktopScreenshotGrid screenshots={normalizedScreenshots} title={title} onOpen={openViewer} />
+          </>
+        )}
       </div>
 
       {isViewerOpen ? (
@@ -100,6 +110,31 @@ function decodeDemoUrlToken(demoUrlToken: string) {
   }
 }
 
+function SingleScreenshotPreview({
+  screenshot,
+  title,
+  onOpen,
+}: {
+  screenshot: ProjectScreenshot;
+  title: string;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`Open ${title} screenshot`}
+      onClick={onOpen}
+      className="absolute inset-2 flex items-center justify-center overflow-hidden rounded-md bg-black text-left sm:inset-3"
+    >
+      <img
+        src={screenshot.url}
+        alt={screenshot.alt}
+        className="h-full w-full object-contain object-center"
+      />
+    </button>
+  );
+}
+
 function MobileFirstScreenshot({
   screenshot,
   count,
@@ -121,7 +156,7 @@ function MobileFirstScreenshot({
       <img
         src={screenshot.url}
         alt={screenshot.alt}
-        className="h-full w-full object-contain object-center transition duration-300 group-hover:scale-[1.02]"
+        className="max-h-full max-w-full object-contain object-center"
       />
       <GalleryOverlay count={count} />
     </button>
@@ -152,14 +187,20 @@ function DesktopScreenshotGrid({
             aria-label={`Open ${title} screenshot ${index + 1}`}
             onClick={() => onOpen(index)}
             className={cn(
-              "group relative min-h-0 overflow-hidden rounded-md bg-black text-left",
+              "group relative h-full w-full min-h-0 overflow-hidden rounded-md bg-black text-left",
+              screenshots.length === 1 && "grid place-items-center",
               resolveTileClassName(screenshots.length, index),
             )}
           >
             <img
               src={screenshot.url}
               alt={screenshot.alt}
-              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.035]"
+              className={cn(
+                "transition duration-300",
+                screenshots.length === 1
+                  ? "block h-full w-full object-contain object-center"
+                  : "h-full w-full object-cover group-hover:scale-[1.035]",
+              )}
             />
             <span className="absolute inset-0 bg-black/0 transition group-hover:bg-black/16" />
             {isLastVisible ? (
@@ -317,7 +358,7 @@ function ScreenshotViewer({
             <img
               src={activeScreenshot.url}
               alt={activeScreenshot.alt}
-              className="block h-auto w-full max-w-full object-contain lg:h-full lg:w-full"
+              className="block h-auto max-h-full w-auto max-w-full object-contain object-center"
             />
           </div>
 
@@ -443,10 +484,10 @@ function ViewerArrow({ direction, onClick }: { direction: "previous" | "next"; o
 
 function resolveGridClassName(count: number) {
   if (count === 1) {
-    return "grid-cols-1";
+    return "grid-cols-1 grid-rows-1";
   }
   if (count === 2) {
-    return "grid-cols-2";
+    return "grid-cols-2 grid-rows-1";
   }
   if (count === 3) {
     return "grid-cols-3 grid-rows-2";

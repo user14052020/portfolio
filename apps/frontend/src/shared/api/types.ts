@@ -217,6 +217,12 @@ export interface UserPasswordChangePayload {
   new_password: string;
 }
 
+export interface BackupRestoreResult {
+  restored: Record<string, number>;
+  media_files_restored: number;
+  warnings: string[];
+}
+
 export interface UploadedAsset {
   id: number;
   original_filename: string;

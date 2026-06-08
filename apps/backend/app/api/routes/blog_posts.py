@@ -9,6 +9,7 @@ from app.models import BlogPost, User
 from app.models.enums import BlogPostType, RoleCode
 from app.repositories.blog_posts import blog_posts_repository
 from app.schemas.blog import BlogPostCreate, BlogPostRead, BlogPostUpdate
+from app.services.media_cleanup import media_cleanup_service
 from app.services.search import search_service
 from app.utils.slug import build_slug
 
@@ -54,6 +55,7 @@ async def create_blog_post(
     data["slug"] = data.get("slug") or build_slug(payload.title_en)
     post = await blog_posts_repository.create(session, data)
     await session.commit()
+    await prune_unreferenced_media(session)
     await search_service.index_blog_post(post)
     return await blog_posts_repository.get_by_slug(session, post.slug)  # type: ignore[return-value]
 
@@ -73,6 +75,7 @@ async def update_blog_post(
         data["slug"] = build_slug(data["title_en"])
     post = await blog_posts_repository.update(session, post, data)
     await session.commit()
+    await prune_unreferenced_media(session)
     await search_service.index_blog_post(post)
     return await blog_posts_repository.get_by_slug(session, post.slug)  # type: ignore[return-value]
 
@@ -89,5 +92,12 @@ async def delete_blog_post(
     slug = post.slug
     await blog_posts_repository.delete(session, post)
     await session.commit()
+    await prune_unreferenced_media(session)
     await search_service.delete_document("blog_posts", slug)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def prune_unreferenced_media(session: AsyncSession) -> None:
+    result = await media_cleanup_service.prune_unreferenced_uploads(session)
+    if result.deleted_uploaded_asset_rows_count:
+        await session.commit()

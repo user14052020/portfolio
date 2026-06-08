@@ -11,6 +11,7 @@ from app.models import Project, ProjectMedia, User
 from app.models.enums import RoleCode
 from app.repositories.projects import projects_repository
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
+from app.services.media_cleanup import media_cleanup_service
 from app.services.search import search_service
 from app.utils.slug import build_slug
 
@@ -68,6 +69,7 @@ async def create_project(
     project = await projects_repository.create(session, data)
     await sync_project_media_items(session, project, media_items)
     await session.commit()
+    await prune_unreferenced_media(session)
     await search_service.index_project(project)
     return await projects_repository.get_by_slug(session, project.slug)  # type: ignore[return-value]
 
@@ -96,6 +98,7 @@ async def update_project(
         await sync_project_media_items(session, project, media_items)
     await session.flush()
     await session.commit()
+    await prune_unreferenced_media(session)
     await search_service.index_project(project)
     return await projects_repository.get_by_slug(session, project.slug)  # type: ignore[return-value]
 
@@ -112,6 +115,7 @@ async def delete_project(
     slug = project.slug
     await projects_repository.delete(session, project)
     await session.commit()
+    await prune_unreferenced_media(session)
     await search_service.delete_document("projects", slug)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -134,3 +138,9 @@ async def sync_project_media_items(session: AsyncSession, project: Project, medi
     session.add_all(next_media_items)
     await session.flush()
     attributes.set_committed_value(project, "media_items", next_media_items)
+
+
+async def prune_unreferenced_media(session: AsyncSession) -> None:
+    result = await media_cleanup_service.prune_unreferenced_uploads(session)
+    if result.deleted_uploaded_asset_rows_count:
+        await session.commit()

@@ -135,7 +135,14 @@ export function MobileVideoFrame({
                 onPlaybackStateChange={onPlaybackStateChange}
               />
             ) : coverImage ? (
-              <img src={coverImage} alt="" className="h-full w-full object-cover" aria-hidden />
+              <img
+                src={coverImage}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-cover"
+                aria-hidden
+              />
             ) : (
               <div className="grid h-full place-items-center px-8 text-center text-sm font-medium text-white/70">
                 {title}
@@ -174,7 +181,16 @@ function UploadedMedia({
   }
 
   if (coverImage) {
-    return <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${coverImage})` }} />;
+    return (
+      <img
+        src={coverImage}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className="h-full w-full object-cover object-center"
+        aria-hidden
+      />
+    );
   }
 
   return (
@@ -212,6 +228,23 @@ function UploadedVideoPlayer({
   const [durationSeconds, setDurationSeconds] = useState(0);
 
   useEffect(() => {
+    const videoElement = videoRef.current;
+
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDurationSeconds(0);
+    onPlaybackStateChange?.(false);
+
+    if (!videoElement) {
+      return;
+    }
+
+    videoElement.pause();
+    videoElement.currentTime = 0;
+    videoElement.load();
+  }, [mediaUrl, onPlaybackStateChange]);
+
+  useEffect(() => {
     const currentVideo = videoRef.current;
     if (!currentVideo) {
       return;
@@ -236,6 +269,10 @@ function UploadedVideoPlayer({
     videoElement.addEventListener("play", syncPlaying);
     videoElement.addEventListener("pause", syncPlaying);
     videoElement.addEventListener("ended", syncPlaying);
+    videoElement.addEventListener("abort", syncPlaying);
+    videoElement.addEventListener("emptied", syncPlaying);
+    videoElement.addEventListener("error", syncPlaying);
+    videoElement.addEventListener("stalled", syncPlaying);
 
     return () => {
       videoElement.removeEventListener("timeupdate", syncTime);
@@ -243,6 +280,10 @@ function UploadedVideoPlayer({
       videoElement.removeEventListener("play", syncPlaying);
       videoElement.removeEventListener("pause", syncPlaying);
       videoElement.removeEventListener("ended", syncPlaying);
+      videoElement.removeEventListener("abort", syncPlaying);
+      videoElement.removeEventListener("emptied", syncPlaying);
+      videoElement.removeEventListener("error", syncPlaying);
+      videoElement.removeEventListener("stalled", syncPlaying);
     };
   }, [onPlaybackStateChange]);
 
@@ -287,7 +328,12 @@ function UploadedVideoPlayer({
     }
 
     if (video.paused) {
-      await video.play();
+      try {
+        await video.play();
+      } catch {
+        setIsPlaying(false);
+        onPlaybackStateChange?.(false);
+      }
       return;
     }
 
@@ -380,17 +426,19 @@ function UploadedVideoPlayer({
         )}
         src={mediaUrl}
         poster={coverImage ?? undefined}
-        preload="metadata"
+        preload="none"
         playsInline
       />
 
       {!isPlaying && currentTime <= 0.05 && coverImage ? (
-        <img
-          src={coverImage}
-          alt=""
-          className={cn(
-            "pointer-events-none absolute inset-0 z-10 h-full w-full object-center",
-            posterFitMode === "contain" ? "object-contain" : "object-cover",
+          <img
+            src={coverImage}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className={cn(
+              "pointer-events-none absolute inset-0 z-10 h-full w-full object-center",
+              posterFitMode === "contain" ? "object-contain" : "object-cover",
           )}
           aria-hidden
         />

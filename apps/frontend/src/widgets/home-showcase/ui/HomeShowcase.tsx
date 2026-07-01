@@ -2,8 +2,15 @@
 
 /* eslint-disable @next/next/no-img-element -- Demo preview images are admin-managed media URLs. */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp, IconMail, IconSend } from "@tabler/icons-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconMail,
+  IconPlayerPauseFilled,
+  IconPlayerPlayFilled,
+  IconSend,
+} from "@tabler/icons-react";
 
 import { getKworkReviews } from "@/shared/api/client";
 import type { KworkReview, KworkReviewsPage, Locale, Project, SiteSettings } from "@/shared/api/types";
@@ -171,9 +178,48 @@ export function HomeShowcase({
 const KWORK_PROFILE_URL = "https://kwork.ru/user/portfolio-dev";
 const REVIEWS_BATCH_SIZE = 3;
 const PROJECT_SLIDER_SECONDS = 60;
+const PROJECT_SLIDER_MS = PROJECT_SLIDER_SECONDS * 1000;
 const PROJECT_DESCRIPTION_COLLAPSED_LINES = 6;
 const PROJECT_DESCRIPTION_MOBILE_COLLAPSED_LINES = 2;
 const PROJECT_DESCRIPTION_DESKTOP_QUERY = "(min-width: 640px)";
+
+function getProjectSliderNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function useNearViewport<T extends HTMLElement>(rootMargin = "700px 0px") {
+  const ref = useRef<T | null>(null);
+  const [isNearViewport, setIsNearViewport] = useState(false);
+
+  useEffect(() => {
+    const element = ref.current;
+
+    if (!element) {
+      return;
+    }
+
+    if (typeof IntersectionObserver === "undefined") {
+      setIsNearViewport(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setIsNearViewport(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin },
+    );
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, [rootMargin]);
+
+  return { ref, isNearViewport };
+}
 
 type ProjectSectionThemeStyle = CSSProperties & Record<`--project-${string}`, string>;
 
@@ -516,58 +562,118 @@ function ProjectTypeSlider({
   const [activeIndex, setActiveIndex] = useState(0);
   const [remainingSeconds, setRemainingSeconds] = useState(PROJECT_SLIDER_SECONDS);
   const [isMediaPlaying, setIsMediaPlaying] = useState(false);
+  const [isSliderPaused, setIsSliderPaused] = useState(false);
+  const sliderDeadlineRef = useRef(0);
+  const pausedRemainingMsRef = useRef(PROJECT_SLIDER_MS);
+  const lastDisplayedSecondRef = useRef(PROJECT_SLIDER_SECONDS);
+  const { ref: sectionRef, isNearViewport } = useNearViewport<HTMLElement>();
   const projectIdsKey = useMemo(() => group.projects.map((project) => project.id).join(","), [group.projects]);
   const activeProject = group.projects[Math.min(activeIndex, group.projects.length - 1)];
   const groupTitle = pickLocalized(group, "title", locale);
   const themeStyle = projectSectionThemeStyles[group.value];
+  const isTimerPaused = isMediaPlaying || isSliderPaused;
+
+  const restartSliderClock = useCallback(() => {
+    const now = getProjectSliderNow();
+
+    sliderDeadlineRef.current = now + PROJECT_SLIDER_MS;
+    pausedRemainingMsRef.current = PROJECT_SLIDER_MS;
+    lastDisplayedSecondRef.current = PROJECT_SLIDER_SECONDS;
+    setRemainingSeconds(PROJECT_SLIDER_SECONDS);
+  }, []);
 
   useEffect(() => {
     setActiveIndex(0);
   }, [projectIdsKey]);
 
   useEffect(() => {
-    setRemainingSeconds(PROJECT_SLIDER_SECONDS);
+    restartSliderClock();
     setIsMediaPlaying(false);
-  }, [activeIndex, projectIdsKey]);
+  }, [activeIndex, projectIdsKey, restartSliderClock]);
 
   useEffect(() => {
-    if (group.projects.length < 2 || isMediaPlaying) {
+    if (isNearViewport) {
+      restartSliderClock();
+    }
+  }, [isNearViewport, restartSliderClock]);
+
+  useEffect(() => {
+    if (group.projects.length < 2 || !isNearViewport) {
       return;
     }
 
-    const countdownTimer = window.setInterval(() => {
-      setRemainingSeconds((current) => {
-        if (current <= 1) {
-          setActiveIndex((index) => (index + 1) % group.projects.length);
-          return PROJECT_SLIDER_SECONDS;
-        }
+    const now = getProjectSliderNow();
 
-        return current - 1;
-      });
-    }, 1000);
+    if (isTimerPaused) {
+      pausedRemainingMsRef.current = Math.max(sliderDeadlineRef.current - now, 0);
+      return;
+    }
 
-    return () => window.clearInterval(countdownTimer);
-  }, [group.projects.length, isMediaPlaying, projectIdsKey]);
+    const remainingMs = pausedRemainingMsRef.current > 0 ? pausedRemainingMsRef.current : PROJECT_SLIDER_MS;
+    sliderDeadlineRef.current = now + remainingMs;
+  }, [group.projects.length, isNearViewport, isTimerPaused]);
+
+  useEffect(() => {
+    if (group.projects.length < 2 || isTimerPaused || !isNearViewport) {
+      return;
+    }
+
+    let frameId = 0;
+
+    function tick() {
+      const now = getProjectSliderNow();
+      const remainingMs = sliderDeadlineRef.current - now;
+
+      if (remainingMs <= 0) {
+        restartSliderClock();
+        setActiveIndex((index) => (index + 1) % group.projects.length);
+        return;
+      }
+
+      pausedRemainingMsRef.current = remainingMs;
+
+      const nextDisplayedSecond = Math.max(1, Math.ceil(remainingMs / 1000));
+      if (lastDisplayedSecondRef.current !== nextDisplayedSecond) {
+        lastDisplayedSecondRef.current = nextDisplayedSecond;
+        setRemainingSeconds(nextDisplayedSecond);
+      }
+
+      frameId = window.requestAnimationFrame(tick);
+    }
+
+    frameId = window.requestAnimationFrame(tick);
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeIndex, group.projects.length, isNearViewport, isTimerPaused, projectIdsKey, restartSliderClock]);
 
   if (!activeProject) {
     return null;
   }
 
   function showPreviousProject() {
+    setIsMediaPlaying(false);
+    restartSliderClock();
     setActiveIndex((current) => (current - 1 + group.projects.length) % group.projects.length);
   }
 
   function showNextProject() {
+    setIsMediaPlaying(false);
+    restartSliderClock();
     setActiveIndex((current) => (current + 1) % group.projects.length);
+  }
+
+  function toggleSliderPaused() {
+    setIsSliderPaused((current) => !current);
   }
 
   return (
     <section
+      ref={sectionRef}
       className="relative left-1/2 w-screen -translate-x-1/2 border-y border-[color:var(--project-border)] bg-[var(--project-bg)] text-[color:var(--project-title)]"
       style={themeStyle}
     >
       <div className="mx-auto w-full max-w-[1440px] px-5 py-8 sm:px-8 lg:px-10">
-      <div className="hidden">
+      <div className="hidden" aria-hidden>
         <div>
           <p className="text-sm uppercase tracking-normal text-[#8c929c]">Portfolio</p>
           <h2 className="mt-3 text-3xl font-semibold leading-tight tracking-normal text-[#111318] sm:text-4xl">
@@ -580,22 +686,29 @@ function ProjectTypeSlider({
       </div>
 
       <ProjectShowcaseRow
+        key={activeProject.id}
         project={activeProject}
-        index={activeIndex}
         locale={locale}
         stackLabel={stackLabel}
         demoCtaLabel={demoCtaLabel}
+        shouldLoadMedia={isNearViewport}
+        sliderNavigation={
+          group.projects.length > 1
+            ? {
+                locale,
+                onPrevious: showPreviousProject,
+                onNext: showNextProject,
+              }
+            : undefined
+        }
         onMediaPlaybackChange={setIsMediaPlaying}
       />
 
       {group.projects.length > 1 ? (
-        <ProjectSliderControls
-          activeIndex={activeIndex}
-          total={group.projects.length}
+        <ProjectSliderProgress
           remainingSeconds={remainingSeconds}
-          onPrevious={showPreviousProject}
-          onNext={showNextProject}
-          onSelect={setActiveIndex}
+          isPaused={isSliderPaused}
+          onTogglePaused={toggleSliderPaused}
         />
       ) : null}
       </div>
@@ -603,93 +716,95 @@ function ProjectTypeSlider({
   );
 }
 
-function ProjectSliderControls({
-  activeIndex,
-  total,
+function ProjectSliderProgress({
   remainingSeconds,
-  onPrevious,
-  onNext,
-  onSelect,
+  isPaused,
+  onTogglePaused,
 }: {
-  activeIndex: number;
-  total: number;
   remainingSeconds: number;
-  onPrevious: () => void;
-  onNext: () => void;
-  onSelect: (index: number) => void;
+  isPaused: boolean;
+  onTogglePaused: () => void;
 }) {
-  const countdownProgress = 1 - remainingSeconds / PROJECT_SLIDER_SECONDS;
+  const progress = Math.max(0, Math.min(1, 1 - remainingSeconds / PROJECT_SLIDER_SECONDS));
 
   return (
-    <div className="mt-5 flex justify-end">
-      <div className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--project-control-border)] bg-[var(--project-control-bg)] p-2 shadow-[0_16px_46px_rgba(17,19,24,0.08)] backdrop-blur">
-        <div className="hidden items-center gap-1 sm:flex">
-          {Array.from({ length: total }).map((_, index) => (
-            <button
-              key={index}
-              type="button"
-              aria-label={`Show project ${index + 1}`}
-              onClick={() => onSelect(index)}
-              className={cn(
-                "h-2.5 rounded-full transition",
-                index === activeIndex
-                  ? "w-6 bg-[var(--project-control-fill)]"
-                  : "w-2.5 bg-[var(--project-control-muted)] hover:bg-[var(--project-divider)]",
-              )}
-            />
-          ))}
-        </div>
-
+    <div className="mt-6 flex items-center gap-3">
+      <button
+        type="button"
+        aria-label={isPaused ? "Resume project slider" : "Pause project slider"}
+        onClick={onTogglePaused}
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[color:var(--project-control-border)] bg-[var(--project-control-inner-bg)] text-[color:var(--project-control-fill)] transition hover:border-[color:var(--project-control-fill)] hover:bg-[var(--project-control-fill)] hover:text-[color:var(--project-control-contrast)]"
+      >
+        {isPaused ? (
+          <IconPlayerPlayFilled className="h-4 w-4" aria-hidden />
+        ) : (
+          <IconPlayerPauseFilled className="h-4 w-4" aria-hidden />
+        )}
+      </button>
+      <div
+        className="h-px min-w-0 flex-1 overflow-hidden bg-[var(--project-control-muted)]"
+        aria-label={`${remainingSeconds} seconds to next project`}
+      >
         <div
-          className="mx-1 grid h-12 w-12 shrink-0 place-items-center rounded-full transition-[background] duration-300"
-          style={{
-            background: `conic-gradient(var(--project-control-fill) ${Math.max(0, Math.min(countdownProgress, 1)) * 360}deg, var(--project-control-muted) 0deg)`,
-          }}
-          aria-label={`${remainingSeconds} seconds to next project`}
-        >
-          <span className="grid h-9 w-9 place-items-center rounded-full bg-[var(--project-control-inner-bg)] text-xs font-semibold tabular-nums text-[color:var(--project-control-fill)]">
-            {remainingSeconds}
-          </span>
-        </div>
-
-        <span className="hidden min-w-[54px] text-xs font-semibold tabular-nums text-[color:var(--project-title)] sm:inline">
-          {String(activeIndex + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
-        </span>
-
-        <button
-          type="button"
-          aria-label="Previous project"
-          onClick={onPrevious}
-          className="grid h-9 w-9 place-items-center rounded-md border border-[color:var(--project-control-border)] bg-[var(--project-control-inner-bg)] text-[color:var(--project-control-fill)] transition hover:border-[color:var(--project-control-fill)] hover:bg-[var(--project-control-fill)] hover:text-[color:var(--project-control-contrast)]"
-        >
-          <IconChevronLeft className="h-5 w-5" aria-hidden />
-        </button>
-        <button
-          type="button"
-          aria-label="Next project"
-          onClick={onNext}
-          className="grid h-9 w-9 place-items-center rounded-md border border-[color:var(--project-control-fill)] bg-[var(--project-control-fill)] text-[color:var(--project-control-contrast)] transition hover:bg-[var(--project-control-inner-bg)] hover:text-[color:var(--project-control-fill)]"
-        >
-          <IconChevronRight className="h-5 w-5" aria-hidden />
-        </button>
+          className="h-full bg-[var(--project-control-fill)] transition-[width] duration-1000 ease-linear"
+          style={{ width: `${progress * 100}%` }}
+        />
       </div>
+    </div>
+  );
+}
+
+function ProjectHeaderNavigation({
+  navigation,
+}: {
+  navigation: {
+    locale: Locale;
+    onPrevious: () => void;
+    onNext: () => void;
+  };
+}) {
+  const previousLabel = navigation.locale === "ru" ? "Предыдущий проект" : "Previous project";
+  const nextLabel = navigation.locale === "ru" ? "Следующий проект" : "Next project";
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 md:justify-end">
+      <button
+        type="button"
+        onClick={navigation.onPrevious}
+        className="border-b border-dashed border-[color:var(--project-divider)] pb-1 text-sm font-normal leading-none text-[color:var(--project-control-fill)] transition hover:border-[color:var(--project-control-fill)] hover:text-[color:var(--project-title)]"
+      >
+        {previousLabel}
+      </button>
+      <button
+        type="button"
+        onClick={navigation.onNext}
+        className="border-b border-dashed border-[color:var(--project-divider)] pb-1 text-sm font-normal leading-none text-[color:var(--project-control-fill)] transition hover:border-[color:var(--project-control-fill)] hover:text-[color:var(--project-title)]"
+      >
+        {nextLabel}
+      </button>
     </div>
   );
 }
 
 function ProjectShowcaseRow({
   project,
-  index,
   locale,
   stackLabel,
   demoCtaLabel,
+  shouldLoadMedia,
+  sliderNavigation,
   onMediaPlaybackChange,
 }: {
   project: Project;
-  index: number;
   locale: Locale;
   stackLabel: string;
   demoCtaLabel: string;
+  shouldLoadMedia: boolean;
+  sliderNavigation?: {
+    locale: Locale;
+    onPrevious: () => void;
+    onNext: () => void;
+  };
   onMediaPlaybackChange?: (isPlaying: boolean) => void;
 }) {
   const projectTitle = pickLocalized(project, "title", locale);
@@ -699,8 +814,18 @@ function ProjectShowcaseRow({
   const screenshotItems = buildProjectScreenshots(project, locale);
   const projectStack = project.stack.map((item) => item.trim()).filter(Boolean);
   const mediaClassName = "lg:self-center";
-  const projectMedia =
-    showcaseMeta.media_mode === "mobile_video" && (project.preview_video_url || project.cover_image) ? (
+  const hasMobileVideoMedia = showcaseMeta.media_mode === "mobile_video" && Boolean(project.preview_video_url || project.cover_image);
+  const hasVideoMedia = showcaseMeta.media_mode === "video" && Boolean(project.preview_video_url || project.cover_image);
+  const hasDemoMedia = showcaseMeta.media_mode === "demo" && Boolean(project.live_url);
+  const hasScreenshotsMedia = showcaseMeta.media_mode === "screenshots" && screenshotItems.length > 0;
+  const hasProjectMedia = hasMobileVideoMedia || hasVideoMedia || hasDemoMedia || hasScreenshotsMedia;
+  const projectMedia = !hasProjectMedia ? null : !shouldLoadMedia ? (
+    <ProjectMediaPlaceholder
+      title={projectTitle}
+      variant={hasMobileVideoMedia ? "mobile_video" : "standard"}
+      className={mediaClassName}
+    />
+  ) : hasMobileVideoMedia ? (
       <MobileVideoFrame
         duration={showcaseMeta.video_duration}
         title={projectTitle}
@@ -709,7 +834,7 @@ function ProjectShowcaseRow({
         className={mediaClassName}
         onPlaybackStateChange={onMediaPlaybackChange}
       />
-    ) : showcaseMeta.media_mode === "video" && (project.preview_video_url || project.cover_image) ? (
+    ) : hasVideoMedia ? (
       <ShowcaseVideoFrame
         variant="uploaded-media"
         duration={showcaseMeta.video_duration}
@@ -719,22 +844,22 @@ function ProjectShowcaseRow({
         className={mediaClassName}
         onPlaybackStateChange={onMediaPlaybackChange}
       />
-    ) : showcaseMeta.media_mode === "demo" && project.live_url ? (
+    ) : hasDemoMedia ? (
       <ProjectDemoPreview
         coverImage={project.cover_image}
         title={projectTitle}
-        demoUrlToken={project.live_url}
+        demoUrlToken={project.live_url ?? ""}
         label={demoCtaLabel}
         className={mediaClassName}
       />
-    ) : showcaseMeta.media_mode === "screenshots" && screenshotItems.length > 0 ? (
+    ) : hasScreenshotsMedia ? (
       <ProjectScreenshotGallery screenshots={screenshotItems} title={projectTitle} className={mediaClassName} />
     ) : null;
 
   return (
     <article className="space-y-6 lg:space-y-7">
-      <header>
-        <div className="min-w-0">
+      <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 md:pr-8">
           <h2 className="flex items-center gap-3 overflow-x-auto pb-1 text-3xl font-semibold leading-tight tracking-normal text-[color:var(--project-title)] lg:whitespace-nowrap">
             <span className="shrink-0 leading-tight">{projectTitle}</span>
             {projectSummary ? (
@@ -742,6 +867,7 @@ function ProjectShowcaseRow({
             ) : null}
           </h2>
         </div>
+        {sliderNavigation ? <ProjectHeaderNavigation navigation={sliderNavigation} /> : null}
       </header>
 
       <div
@@ -865,6 +991,41 @@ function ProjectDescription({
   );
 }
 
+function ProjectMediaPlaceholder({
+  title,
+  variant,
+  className,
+}: {
+  title: string;
+  variant: "standard" | "mobile_video";
+  className?: string;
+}) {
+  if (variant === "mobile_video") {
+    return (
+      <div className={cn("flex justify-center", className)} aria-label={title}>
+        <div className="relative w-full max-w-[290px] rounded-[2.35rem] border border-white/20 bg-[#111318] p-2.5 shadow-[0_28px_80px_rgba(15,23,42,0.28)] ring-1 ring-black/15 sm:max-w-[310px]">
+          <div className="pointer-events-none absolute left-1/2 top-3 z-20 h-1.5 w-20 -translate-x-1/2 rounded-full bg-white/20" />
+          <div className="relative overflow-hidden rounded-[1.8rem] bg-[#080a0f]">
+            <div className="aspect-[332/720] w-full bg-[linear-gradient(135deg,#080a0f,#171b24)]" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "relative isolate overflow-hidden rounded-lg border border-black/10 bg-[#0d0f14] shadow-[0_24px_70px_rgba(15,23,42,0.16)]",
+        className,
+      )}
+      aria-label={title}
+    >
+      <div className="aspect-[16/9] min-h-[250px] w-full bg-[linear-gradient(135deg,#0d0f14,#1d2430)]" />
+    </div>
+  );
+}
+
 function ProjectDemoPreview({
   coverImage,
   title,
@@ -890,6 +1051,8 @@ function ProjectDemoPreview({
           <img
             src={coverImage}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="absolute inset-0 h-full w-full object-contain object-center"
             aria-hidden
           />

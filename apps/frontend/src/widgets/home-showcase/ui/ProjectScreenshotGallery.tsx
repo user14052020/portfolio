@@ -129,6 +129,8 @@ function SingleScreenshotPreview({
       <img
         src={screenshot.url}
         alt={screenshot.alt}
+        loading="lazy"
+        decoding="async"
         className="h-full w-full object-contain object-center"
       />
     </button>
@@ -156,6 +158,8 @@ function MobileFirstScreenshot({
       <img
         src={screenshot.url}
         alt={screenshot.alt}
+        loading="lazy"
+        decoding="async"
         className="max-h-full max-w-full object-contain object-center"
       />
       <GalleryOverlay count={count} />
@@ -195,6 +199,8 @@ function DesktopScreenshotGrid({
             <img
               src={screenshot.url}
               alt={screenshot.alt}
+              loading="lazy"
+              decoding="async"
               className={cn(
                 "transition duration-300",
                 screenshots.length === 1
@@ -358,6 +364,7 @@ function ScreenshotViewer({
             <img
               src={activeScreenshot.url}
               alt={activeScreenshot.alt}
+              decoding="async"
               className="block h-auto max-h-full w-auto max-w-full object-contain object-center"
             />
           </div>
@@ -385,7 +392,13 @@ function ScreenshotViewer({
                     : "border-black/60 opacity-64 hover:opacity-100",
                 )}
               >
-                <img src={screenshot.url} alt="" className="h-full w-full object-cover" />
+                <img
+                  src={screenshot.url}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                />
               </button>
             ))}
           </div>

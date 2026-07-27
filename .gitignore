@@ -74,3 +74,6 @@ apps/frontend/node_modules/
 
 # Local infra helpers
 .docker/
+
+# Static exports
+pages-static/
